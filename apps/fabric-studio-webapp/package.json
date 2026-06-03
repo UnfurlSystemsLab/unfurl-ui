@@ -1,0 +1,17 @@
+{
+  "name": "@unfurl/fabric-studio-webapp",
+  "version": "0.1.0-SNAPSHOT",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@unfurl/fabric-validation-client": "0.1.0-SNAPSHOT",
+    "@unfurl/fabric-scene-model": "0.1.0-SNAPSHOT",
+    "@unfurl/graph-layout": "0.1.0-SNAPSHOT",
+    "@unfurl/three-renderer": "0.1.0-SNAPSHOT"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@unfurl/event-bus",
+  "version": "0.1.0-SNAPSHOT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@unfurl/ui-contracts": "0.1.0-SNAPSHOT"
+  }
+}

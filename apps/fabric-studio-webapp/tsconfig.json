@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../../packages/fabric-scene-model" },
+    { "path": "../../packages/fabric-validation-client" },
+    { "path": "../../packages/graph-layout" },
+    { "path": "../../packages/three-renderer" }
+  ]
+}

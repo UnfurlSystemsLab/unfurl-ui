@@ -1,0 +1,17 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/ui-contracts" },
+    { "path": "packages/event-bus" },
+    { "path": "packages/component-manifest" },
+    { "path": "packages/visual-manifest" },
+    { "path": "packages/fabric-scene-model" },
+    { "path": "packages/fabric-validation-client" },
+    { "path": "packages/theme-engine" },
+    { "path": "packages/three-renderer" },
+    { "path": "packages/graph-layout" },
+    { "path": "packages/design-system" },
+    { "path": "apps/host-shell" },
+    { "path": "apps/fabric-studio-webapp" }
+  ]
+}

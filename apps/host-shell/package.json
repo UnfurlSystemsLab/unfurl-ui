@@ -1,0 +1,16 @@
+{
+  "name": "@unfurl/host-shell",
+  "version": "0.1.0-SNAPSHOT",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@unfurl/component-manifest": "0.1.0-SNAPSHOT",
+    "@unfurl/theme-engine": "0.1.0-SNAPSHOT",
+    "@unfurl/ui-contracts": "0.1.0-SNAPSHOT"
+  }
+}

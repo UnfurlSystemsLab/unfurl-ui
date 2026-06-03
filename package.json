@@ -1,0 +1,22 @@
+{
+  "name": "unfurl-ui",
+  "version": "0.1.0-SNAPSHOT",
+  "private": true,
+  "description": "Coordinated frontend workspace for the Unfurl host shell, Fabric Studio, shared UI contracts, and themes.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -b",
+    "test": "npm run typecheck && node scripts/run-tests.mjs",
+    "clean": "node scripts/clean.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.5.4"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
