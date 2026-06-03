@@ -13,7 +13,8 @@
       "@unfurl/theme-engine": ["packages/theme-engine/src/index.ts"],
       "@unfurl/three-renderer": ["packages/three-renderer/src/index.ts"],
       "@unfurl/graph-layout": ["packages/graph-layout/src/index.ts"],
-      "@unfurl/design-system": ["packages/design-system/src/index.ts"]
+      "@unfurl/design-system": ["packages/design-system/src/index.ts"],
+      "@unfurl/fabric-studio-webapp": ["apps/fabric-studio-webapp/src/index.ts"]
     },
     "strict": true,
     "declaration": true,

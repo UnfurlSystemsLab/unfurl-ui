@@ -12,6 +12,12 @@
     "@unfurl/fabric-validation-client": "0.1.0-SNAPSHOT",
     "@unfurl/fabric-scene-model": "0.1.0-SNAPSHOT",
     "@unfurl/graph-layout": "0.1.0-SNAPSHOT",
-    "@unfurl/three-renderer": "0.1.0-SNAPSHOT"
+    "@unfurl/three-renderer": "0.1.0-SNAPSHOT",
+    "react": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.5",
+    "react-dom": "18.3.1",
+    "@types/react-dom": "18.3.0"
   }
 }

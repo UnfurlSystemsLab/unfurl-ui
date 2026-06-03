@@ -116,6 +116,9 @@ export type ResolveDeploymentRequest = {
   readonly sessionId?: string;
   readonly candidateId?: string;
   readonly baseCatalogHash?: string;
+  readonly catalogPath?: string;
+  readonly needsPath?: string;
+  readonly autoSelectBest?: boolean;
   readonly deploymentPolicy?: DeploymentPolicyDraft;
 };
 

@@ -10,7 +10,10 @@
   "scripts": {
     "typecheck": "tsc -b",
     "test": "npm run typecheck && node scripts/run-tests.mjs",
-    "clean": "node scripts/clean.mjs"
+    "clean": "node scripts/clean.mjs",
+    "dev:studio": "npm run dev -w @unfurl/host-shell",
+    "dev:studio:fixture": "npm run dev:fixture -w @unfurl/host-shell",
+    "build:studio": "npm run build -w @unfurl/host-shell"
   },
   "devDependencies": {
     "@types/node": "22.10.2",

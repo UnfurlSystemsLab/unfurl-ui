@@ -176,6 +176,46 @@ describe("HTTP Studio Fabric client", () => {
     ]);
   });
 
+  it("resolves deployment through the deployment endpoint", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: fakeFetch(calls, {
+        status: "RESOLVED",
+        candidateId: "cand-abc123",
+        selections: [],
+        warnings: []
+      })
+    });
+
+    const response = await client.resolveDeployment?.({
+      baseCatalogHash: "sha256:catalog",
+      deploymentPolicy: {
+        preferredShapes: ["IN_PROCESS_LIBRARY"],
+        disallowedShapes: [],
+        requireIsolationForCapabilityPatterns: [],
+        runtime: {}
+      }
+    });
+
+    assert.equal(response?.status, "RESOLVED");
+    assert.deepEqual(calls, [
+      {
+        input: "http://fabric.local/studio/deployment/resolve",
+        method: "POST",
+        body: JSON.stringify({
+          baseCatalogHash: "sha256:catalog",
+          deploymentPolicy: {
+            preferredShapes: ["IN_PROCESS_LIBRARY"],
+            disallowedShapes: [],
+            requireIsolationForCapabilityPatterns: [],
+            runtime: {}
+          }
+        })
+      }
+    ]);
+  });
+
   it("loads visual assets by encoded Fabric asset id", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

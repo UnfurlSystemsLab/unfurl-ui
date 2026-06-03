@@ -6,11 +6,27 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "dev": "vite --host 127.0.0.1",
+    "dev:fixture": "vite --host 127.0.0.1 --mode fixture",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node ../../scripts/run-tests.mjs"
   },
   "dependencies": {
     "@unfurl/component-manifest": "0.1.0-SNAPSHOT",
+    "@unfurl/fabric-studio-webapp": "0.1.0-SNAPSHOT",
+    "@unfurl/fabric-validation-client": "0.1.0-SNAPSHOT",
     "@unfurl/theme-engine": "0.1.0-SNAPSHOT",
-    "@unfurl/ui-contracts": "0.1.0-SNAPSHOT"
+    "@unfurl/ui-contracts": "0.1.0-SNAPSHOT",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "6.26.2"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.5",
+    "@types/react-dom": "18.3.0",
+    "@vitejs/plugin-react": "4.3.1",
+    "vite": "5.4.8"
   }
 }

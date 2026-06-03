@@ -2,11 +2,14 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    "jsx": "react-jsx"
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.json"],
   "references": [
     { "path": "../../packages/component-manifest" },
+    { "path": "../fabric-studio-webapp" },
+    { "path": "../../packages/fabric-validation-client" },
     { "path": "../../packages/theme-engine" },
     { "path": "../../packages/ui-contracts" }
   ]

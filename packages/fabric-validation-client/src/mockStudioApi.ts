@@ -9,6 +9,7 @@ import type {
   IntentResponse,
   ListCatalogVisualsResponse,
   LoadCompositionViewResponse,
+  ResolveDeploymentResponse,
   StudioVisualAsset
 } from "./index.js";
 
@@ -18,6 +19,7 @@ export type MockStudioApiFixtures = {
   readonly session?: StudioDraftSession;
   readonly intentResponse?: IntentResponse;
   readonly compileResponse?: CompileDraftCandidateResponse;
+  readonly resolveDeploymentResponse?: ResolveDeploymentResponse;
   readonly asset?: StudioVisualAsset;
 };
 
@@ -115,6 +117,21 @@ export const studioApiExampleCompileResponse: CompileDraftCandidateResponse = {
   warnings: []
 };
 
+export const studioApiExampleResolveDeploymentResponse: ResolveDeploymentResponse = {
+  status: "RESOLVED",
+  candidateId: "cand-abc123",
+  selections: [
+    {
+      componentId: "storage-s3",
+      artifactCoordinates: "com.unfurl:storage-s3:1.2.0",
+      capability: "storage.put",
+      deploymentShape: "IN_PROCESS_LIBRARY",
+      requiredPorts: []
+    }
+  ],
+  warnings: []
+};
+
 export const studioApiExampleAsset: StudioVisualAsset = {
   assetId: "storage-s3-model",
   path: "META-INF/visual/storage-s3.glb",
@@ -154,6 +171,9 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     }
     if (method === "POST" && path === `/studio/sessions/${encodeURIComponent(session.sessionId)}/compile`) {
       return ok(fixtures.compileResponse ?? studioApiExampleCompileResponse);
+    }
+    if (method === "POST" && path === "/studio/deployment/resolve") {
+      return ok(fixtures.resolveDeploymentResponse ?? studioApiExampleResolveDeploymentResponse);
     }
     if (method === "GET" && path.startsWith("/studio/assets/")) {
       return ok(fixtures.asset ?? studioApiExampleAsset);

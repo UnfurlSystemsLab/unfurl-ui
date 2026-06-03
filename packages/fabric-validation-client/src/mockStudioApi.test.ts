@@ -30,12 +30,17 @@ describe("mock Studio API contract", () => {
       sessionId: session.sessionId,
       expectedRevision: session.sceneRevision
     });
+    const deployment = await client.resolveDeployment?.({
+      sessionId: session.sessionId,
+      ...(session.currentCandidateId === undefined ? {} : { candidateId: session.currentCandidateId })
+    });
     const asset = await client.getVisualAsset("storage-s3-model");
 
     assert.equal(composition.view.contractId, "contract-123");
     assert.equal(draft.session.sessionId, studioApiExampleSession.sessionId);
     assert.equal(intent.status, "VALID");
     assert.equal(compile.status, "COMPILED");
+    assert.equal(deployment?.status, "RESOLVED");
     assert.equal(asset.sha256, "sha256:storage-s3-model");
   });
 });
