@@ -15,6 +15,7 @@ export * from "./draftOverlays.js";
 export * from "./draftExport.js";
 export * from "./draftWorkspace.js";
 export * from "./decisionAuditView.js";
+export * from "./deploymentPlanner.js";
 export * from "./graphView.js";
 export * from "./intentHistory.js";
 export * from "./readOnlyWorkspace.js";

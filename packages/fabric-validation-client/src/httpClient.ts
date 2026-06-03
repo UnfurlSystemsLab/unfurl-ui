@@ -7,6 +7,8 @@ import type {
   ListCatalogVisualsResponse,
   LoadCompositionViewRequest,
   LoadCompositionViewResponse,
+  ResolveDeploymentRequest,
+  ResolveDeploymentResponse,
   StudioDraftSession,
   StudioFabricClient,
   StudioIntent,
@@ -66,6 +68,8 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         `/studio/sessions/${encodeURIComponent(body.sessionId)}/compile`,
         body
       ),
+    resolveDeployment: async (body: ResolveDeploymentRequest) =>
+      request<ResolveDeploymentResponse>(fetchImpl, baseUrl, "POST", "/studio/deployment/resolve", body),
     getVisualAsset: async (assetId: string) =>
       request<StudioVisualAsset>(fetchImpl, baseUrl, "GET", `/studio/assets/${encodeURIComponent(assetId)}`)
   };

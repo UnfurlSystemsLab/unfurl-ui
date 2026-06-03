@@ -1,6 +1,8 @@
 import type {
+  CompileDraftCandidateRequest,
   CompileDraftCandidateResponse,
   CreateDraftCompositionRequest,
+  DeploymentPolicyDraft,
   IntentResponse,
   StudioFabricClient,
   StudioIntent
@@ -50,6 +52,11 @@ export type DraftWorkspaceState =
       readonly request?: CreateDraftCompositionRequest;
       readonly message: string;
     };
+
+export type CompileDraftWorkspaceOptions = {
+  readonly sign?: boolean;
+  readonly deploymentPolicy?: DeploymentPolicyDraft;
+};
 
 export function loadingDraftWorkspace(request: CreateDraftCompositionRequest): DraftWorkspaceState {
   return { status: "LOADING", request };
@@ -123,20 +130,21 @@ export async function applyDraftIntent(
 export async function compileDraftWorkspace(
   client: Pick<StudioFabricClient, "compileCandidate" | "getDraftSession">,
   state: DraftWorkspaceState,
-  options?: { readonly sign?: boolean }
+  options?: CompileDraftWorkspaceOptions
 ): Promise<DraftWorkspaceState> {
   if (state.status !== "READY") {
     return state;
   }
 
   try {
-    const request = options?.sign === undefined ? {
+    const baseRequest: CompileDraftCandidateRequest = {
       sessionId: state.session.sessionId,
       expectedRevision: currentRevision(state.history)
-    } : {
-      sessionId: state.session.sessionId,
-      expectedRevision: currentRevision(state.history),
-      sign: options?.sign
+    };
+    const request: CompileDraftCandidateRequest = {
+      ...baseRequest,
+      ...(options?.sign === undefined ? {} : { sign: options.sign }),
+      ...(options?.deploymentPolicy === undefined ? {} : { deploymentPolicy: options.deploymentPolicy })
     };
     const response = await client.compileCandidate(request);
 

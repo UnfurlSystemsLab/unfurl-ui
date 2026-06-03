@@ -57,8 +57,35 @@ unfurl-ui/
 - Fabric Studio is a mounted webapp, not a replacement for the host shell.
 - Visual manifests render DCP-declared facts; they do not define compatibility.
 - Studio emits operator intents. Fabric validates them. Contracts come from Fabric compiler output.
+- Studio deployment choices produce a `DeploymentPolicy` draft. Fabric still resolves the signed `BindingPlan`.
 - Packages must not import app code.
 - Shared packages should avoid provider SDKs, backend implementation details, or runtime-only assumptions.
+
+## Deployment Planner
+
+Unfurl Studio includes a deployment planner surface for choosing how selected components should physically run before compile/export.
+
+Supported choices:
+
+| Shape | UI Meaning |
+|---|---|
+| `IN_PROCESS_LIBRARY` | Prefer local embedded components. |
+| `MODULAR_MONOLITH_MODULE` | Prefer one process with module boundaries. |
+| `STANDALONE_JAVA_APP` | Prefer separate JVM processes. |
+| `SPRING_BOOT_SERVICE` | Prefer Spring Boot services. |
+| `REMOTE_MICROSERVICE` | Prefer remote service bindings. |
+| `CONTAINERIZED_SERVICE` | Prefer platform-managed containers. |
+| `MANAGED_EXTERNAL_ADAPTER` | Prefer customer-managed external systems through adapters. |
+
+The Studio component lets operators:
+
+- order `preferredShapes`
+- mark `disallowedShapes`
+- require isolation for capability patterns such as `ai.*`
+- declare runtime facilities such as Java version, Spring Boot, Kubernetes, service mesh, and maximum service count
+- pass the resulting policy draft to Fabric during `createDraftComposition`, `resolveDeployment`, or `compileCandidate`
+
+The UI does not serialize its scene graph into a contract. Deployment selections are operator intent and policy input; Fabric resolves the final `BindingPlan`, embeds it in the compiled contract, and signs it with the rest of the contract.
 
 ## Build
 

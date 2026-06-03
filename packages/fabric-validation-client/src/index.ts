@@ -74,6 +74,7 @@ export type CreateDraftCompositionRequest = {
   readonly needsId?: string;
   readonly trustPolicyId?: string;
   readonly initialCandidateId?: string;
+  readonly deploymentPolicy?: DeploymentPolicyDraft;
 };
 
 export type CreateDraftCompositionResponse = {
@@ -84,7 +85,61 @@ export type CompileDraftCandidateRequest = {
   readonly sessionId: string;
   readonly expectedRevision: number;
   readonly sign?: boolean;
+  readonly deploymentPolicy?: DeploymentPolicyDraft;
 };
+
+export type DeploymentShape =
+  | "IN_PROCESS_LIBRARY"
+  | "MODULAR_MONOLITH_MODULE"
+  | "STANDALONE_JAVA_APP"
+  | "SPRING_BOOT_SERVICE"
+  | "REMOTE_MICROSERVICE"
+  | "CONTAINERIZED_SERVICE"
+  | "MANAGED_EXTERNAL_ADAPTER";
+
+export type DeploymentRuntimePolicyDraft = {
+  readonly javaVersion?: string;
+  readonly springBoot?: boolean;
+  readonly kubernetes?: boolean;
+  readonly serviceMesh?: boolean;
+  readonly maxServices?: number;
+};
+
+export type DeploymentPolicyDraft = {
+  readonly preferredShapes: readonly DeploymentShape[];
+  readonly disallowedShapes: readonly DeploymentShape[];
+  readonly requireIsolationForCapabilityPatterns: readonly string[];
+  readonly runtime: DeploymentRuntimePolicyDraft;
+};
+
+export type ResolveDeploymentRequest = {
+  readonly sessionId?: string;
+  readonly candidateId?: string;
+  readonly baseCatalogHash?: string;
+  readonly deploymentPolicy?: DeploymentPolicyDraft;
+};
+
+export type DeploymentShapeSelection = {
+  readonly componentId: string;
+  readonly artifactCoordinates: string;
+  readonly capability: string;
+  readonly deploymentShape: DeploymentShape;
+  readonly requiredPorts: readonly string[];
+};
+
+export type ResolveDeploymentResponse =
+  | {
+      readonly status: "RESOLVED";
+      readonly candidateId: string;
+      readonly selections: readonly DeploymentShapeSelection[];
+      readonly warnings: readonly string[];
+    }
+  | {
+      readonly status: "INVALID";
+      readonly reason: string;
+      readonly details: string;
+      readonly rejectedShapes: readonly string[];
+    };
 
 export type CompileDraftCandidateResponse =
   | {
@@ -149,6 +204,7 @@ export interface StudioFabricClient {
   readonly getDraftSession: (sessionId: string) => Promise<StudioDraftSession>;
   readonly applyIntent: (intent: StudioIntent) => Promise<IntentResponse>;
   readonly compileCandidate: (request: CompileDraftCandidateRequest) => Promise<CompileDraftCandidateResponse>;
+  readonly resolveDeployment?: (request: ResolveDeploymentRequest) => Promise<ResolveDeploymentResponse>;
   readonly getVisualAsset: (assetId: string) => Promise<StudioVisualAsset>;
 }
 
