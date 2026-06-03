@@ -75,6 +75,21 @@ export function createDefaultDeploymentPlannerState(): DeploymentPlannerState {
   };
 }
 
+export function createAllShapesDeploymentPlannerState(): DeploymentPlannerState {
+  return {
+    preferredShapes: DEPLOYMENT_SHAPE_OPTIONS.map(option => option.shape),
+    disallowedShapes: [],
+    requireIsolationForCapabilityPatterns: [],
+    runtime: {
+      javaVersion: "21",
+      springBoot: true,
+      kubernetes: true,
+      serviceMesh: true,
+      maxServices: 20
+    }
+  };
+}
+
 export function preferDeploymentShape(
   state: DeploymentPlannerState,
   shape: DeploymentShape

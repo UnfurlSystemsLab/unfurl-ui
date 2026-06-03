@@ -21,19 +21,23 @@ export type DeploymentPlannerPanelProps = {
   readonly client: Pick<StudioFabricClient, "resolveDeployment">;
   readonly initialCatalogPath?: string;
   readonly initialNeedsPath?: string;
+  readonly initialPlannerState?: DeploymentPlannerState | undefined;
 };
 
 export function DeploymentPlannerPanel({
   client,
   initialCatalogPath = "",
-  initialNeedsPath = ""
+  initialNeedsPath = "",
+  initialPlannerState
 }: DeploymentPlannerPanelProps) {
   const [catalogPath, setCatalogPath] = useState(initialCatalogPath);
   const [needsPath, setNeedsPath] = useState(initialNeedsPath);
   const [candidateId, setCandidateId] = useState("");
   const [autoSelectBest, setAutoSelectBest] = useState(false);
   const [isolationPattern, setIsolationPattern] = useState("");
-  const [planner, setPlanner] = useState<DeploymentPlannerState>(createDefaultDeploymentPlannerState());
+  const [planner, setPlanner] = useState<DeploymentPlannerState>(
+    initialPlannerState ?? createDefaultDeploymentPlannerState()
+  );
   const [response, setResponse] = useState<ResolveDeploymentResponse | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);

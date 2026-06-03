@@ -4,6 +4,7 @@ import type { IntentResponse, StudioFabricClient } from "@unfurl/fabric-validati
 import type { StudioDraftSession } from "@unfurl/fabric-scene-model";
 import {
   compileDraftWorkspaceWithDeployment,
+  createAllShapesDeploymentPlannerState,
   createDefaultDeploymentPlannerState,
   createDraftWorkspace,
   DEPLOYMENT_SHAPE_OPTIONS,
@@ -34,6 +35,20 @@ describe("deployment planner", () => {
     assert.deepEqual(policy.disallowedShapes, []);
     assert.deepEqual(policy.requireIsolationForCapabilityPatterns, []);
     assert.deepEqual(policy.runtime, {});
+  });
+
+  it("can preload a manual test policy that exercises every deployment shape", () => {
+    const policy = deploymentPolicyFromPlannerState(createAllShapesDeploymentPlannerState());
+
+    assert.deepEqual(policy.preferredShapes, DEPLOYMENT_SHAPE_OPTIONS.map(option => option.shape));
+    assert.deepEqual(policy.disallowedShapes, []);
+    assert.deepEqual(policy.runtime, {
+      javaVersion: "21",
+      springBoot: true,
+      kubernetes: true,
+      serviceMesh: true,
+      maxServices: 20
+    });
   });
 
   it("moves preferred shapes to the front and enables required runtime knobs", () => {

@@ -1,6 +1,10 @@
 import { Navigate, Route, Routes } from "react-router-dom";
-import { DeploymentPlannerPanel } from "@unfurl/fabric-studio-webapp";
+import {
+  DeploymentPlannerPanel,
+  createAllShapesDeploymentPlannerState
+} from "@unfurl/fabric-studio-webapp";
 import { useStudioClient } from "./StudioClientContext.js";
+import { useSearchParams } from "react-router-dom";
 
 export function AppRoutes() {
   return (
@@ -13,5 +17,16 @@ export function AppRoutes() {
 
 function DeploymentPlannerRoute() {
   const client = useStudioClient();
-  return <DeploymentPlannerPanel client={client} />;
+  const [searchParams] = useSearchParams();
+  const initialPlannerState = searchParams.get("policy") === "all-shapes"
+    ? createAllShapesDeploymentPlannerState()
+    : undefined;
+  return (
+    <DeploymentPlannerPanel
+      client={client}
+      initialCatalogPath={searchParams.get("catalogPath") ?? ""}
+      initialNeedsPath={searchParams.get("needsPath") ?? ""}
+      initialPlannerState={initialPlannerState}
+    />
+  );
 }
