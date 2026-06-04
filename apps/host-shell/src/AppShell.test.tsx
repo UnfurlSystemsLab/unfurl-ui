@@ -24,7 +24,11 @@ describe("AppShell", () => {
     ["/components/fabric-studio/catalog", "Catalog Palette"],
     ["/components/fabric-studio/workspace", "Draft Workspace"],
     ["/components/fabric-studio/read-only", "Read-Only Studio"],
-    ["/components/fabric-studio/signing", "Signing Handoff"]
+    ["/components/fabric-studio/signing", "Signing Handoff"],
+    ["/components/fabric-studio/graph", "Graph View"],
+    ["/components/fabric-studio/audit", "Decision Audit"],
+    ["/components/fabric-studio/intents", "Intent History"],
+    ["/components/fabric-studio/diff", "Visual Diff"]
   ] as const) {
     it(`renders ${path}`, () => {
       const html = renderToString(
@@ -40,6 +44,10 @@ describe("AppShell", () => {
       assert.match(html, /Draft Workspace/);
       assert.match(html, /Read-Only Studio/);
       assert.match(html, /Signing Handoff/);
+      assert.match(html, /Graph View/);
+      assert.match(html, /Decision Audit/);
+      assert.match(html, /Intent History/);
+      assert.match(html, /Visual Diff/);
     });
   }
 });

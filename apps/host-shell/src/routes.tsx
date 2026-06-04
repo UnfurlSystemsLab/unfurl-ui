@@ -1,10 +1,14 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import {
   CatalogPalettePanel,
+  DecisionAuditPanel,
   DraftWorkspacePanel,
   DeploymentPlannerPanel,
+  GraphPanel,
+  IntentHistoryPanel,
   ReadOnlyStudioPanel,
   SigningHandoffPanel,
+  VisualDiffPanel,
   createAllShapesDeploymentPlannerState
 } from "@unfurl/fabric-studio-webapp";
 import { useStudioClient } from "./StudioClientContext.js";
@@ -18,6 +22,10 @@ export function AppRoutes() {
       <Route path="/components/fabric-studio/workspace" element={<WorkspaceRoute />} />
       <Route path="/components/fabric-studio/read-only" element={<ReadOnlyRoute />} />
       <Route path="/components/fabric-studio/signing" element={<SigningRoute />} />
+      <Route path="/components/fabric-studio/graph" element={<GraphRoute />} />
+      <Route path="/components/fabric-studio/audit" element={<AuditRoute />} />
+      <Route path="/components/fabric-studio/intents" element={<IntentHistoryRoute />} />
+      <Route path="/components/fabric-studio/diff" element={<VisualDiffRoute />} />
       <Route path="/components/fabric-studio/deployment-planner" element={<DeploymentPlannerRoute />} />
     </Routes>
   );
@@ -62,6 +70,42 @@ function SigningRoute() {
       initialExpectedRevision={Number.isFinite(revision) ? revision : 7}
     />
   );
+}
+
+function GraphRoute() {
+  const client = useStudioClient();
+  const [searchParams] = useSearchParams();
+  return (
+    <GraphPanel
+      client={client}
+      initialContractPath={searchParams.get("contractPath") ?? ""}
+      initialSubstrateProfilePath={searchParams.get("substrateProfilePath") ?? ""}
+      initialRenderer={searchParams.get("renderer") === "3d" ? "3d" : "2d"}
+    />
+  );
+}
+
+function AuditRoute() {
+  const client = useStudioClient();
+  const [searchParams] = useSearchParams();
+  const revision = Number(searchParams.get("revision") ?? "7");
+  return (
+    <DecisionAuditPanel
+      client={client}
+      initialSessionId={searchParams.get("sessionId") ?? "studio-session-123"}
+      initialExpectedRevision={Number.isFinite(revision) ? revision : 7}
+    />
+  );
+}
+
+function IntentHistoryRoute() {
+  const [searchParams] = useSearchParams();
+  const revision = Number(searchParams.get("revision") ?? "7");
+  return <IntentHistoryPanel initialRevision={Number.isFinite(revision) ? revision : 7} />;
+}
+
+function VisualDiffRoute() {
+  return <VisualDiffPanel />;
 }
 
 function DeploymentPlannerRoute() {

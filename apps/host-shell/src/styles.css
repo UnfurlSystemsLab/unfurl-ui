@@ -26,6 +26,19 @@ button:disabled {
   cursor: progress;
 }
 
+button.secondary,
+button.secondary-active {
+  border-color: #9aa6b8;
+  background: white;
+  color: #1f2937;
+}
+
+button.secondary-active {
+  border-color: #2563eb;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
 input {
   display: block;
   width: 100%;
@@ -178,4 +191,50 @@ th, td {
 .table-stack {
   display: grid;
   gap: 16px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.graph-svg {
+  width: 100%;
+  min-height: 360px;
+  border: 1px solid #e1e5ec;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.graph-edge {
+  stroke: #6b7280;
+  stroke-width: 2;
+}
+
+.graph-node {
+  stroke: #111827;
+  stroke-width: 1;
+}
+
+.graph-node-component {
+  fill: #dbeafe;
+}
+
+.graph-node-port {
+  fill: #dcfce7;
+}
+
+.graph-node-substrate {
+  fill: #fef3c7;
+}
+
+.graph-node-warning {
+  fill: #fee2e2;
+}
+
+.graph-svg text {
+  font-size: 11px;
+  fill: #111827;
 }

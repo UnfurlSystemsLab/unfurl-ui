@@ -27,6 +27,18 @@ export function AppShell({ mode = studioMode() }: AppShellProps) {
           <NavLink to="/components/fabric-studio/signing">
             Signing Handoff
           </NavLink>
+          <NavLink to="/components/fabric-studio/graph">
+            Graph View
+          </NavLink>
+          <NavLink to="/components/fabric-studio/audit">
+            Decision Audit
+          </NavLink>
+          <NavLink to="/components/fabric-studio/intents">
+            Intent History
+          </NavLink>
+          <NavLink to="/components/fabric-studio/diff">
+            Visual Diff
+          </NavLink>
         </nav>
         <div className="mode-pill">{mode} mode</div>
       </aside>
