@@ -106,3 +106,31 @@ Clean generated build artifacts:
 ```bash
 npm run clean
 ```
+
+## Launch Studio
+
+Start the Studio workbench with fixture data for manual UI testing:
+
+```powershell
+npm run launch:studio
+```
+
+The launcher opens:
+
+```text
+http://127.0.0.1:5173/components/fabric-studio/workspace
+```
+
+Run the production bundle preview instead:
+
+```powershell
+.\scripts\launch-studio.ps1 -Mode preview
+```
+
+Useful options:
+
+```powershell
+.\scripts\launch-studio.ps1 -Mode fixture -Port 5174
+.\scripts\launch-studio.ps1 -Mode preview -NoOpen
+.\scripts\launch-studio.ps1 -Mode preview -NoBuild
+```
