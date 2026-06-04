@@ -1,8 +1,11 @@
 import type {
   DeploymentPolicyDraft,
-  ResolveDeploymentRequest,
   ResolveDeploymentResponse,
   StudioFabricClient
+} from "@unfurl/fabric-validation-client";
+import {
+  createHttpStudioFabricClient,
+  createMockStudioApiFetch
 } from "@unfurl/fabric-validation-client";
 
 const smallClientPolicy: DeploymentPolicyDraft = {
@@ -38,13 +41,13 @@ const smallClientResponse: Extract<ResolveDeploymentResponse, { readonly status:
   warnings: []
 };
 
-export function createFixtureStudioFabricClient(): Pick<StudioFabricClient, "resolveDeployment"> {
-  return {
-    resolveDeployment: async (request: ResolveDeploymentRequest) => ({
-      ...smallClientResponse,
-      candidateId: request.candidateId ?? smallClientResponse.candidateId
+export function createFixtureStudioFabricClient(): StudioFabricClient {
+  return createHttpStudioFabricClient({
+    baseUrl: "http://fixture.unfurl.local",
+    fetch: createMockStudioApiFetch({
+      resolveDeploymentResponse: smallClientResponse
     })
-  };
+  });
 }
 
 export function fixtureDeploymentPolicy(): DeploymentPolicyDraft {

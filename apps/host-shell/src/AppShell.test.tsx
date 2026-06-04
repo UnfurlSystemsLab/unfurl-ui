@@ -19,4 +19,27 @@ describe("AppShell", () => {
     assert.match(html, /Deployment Planner/);
     assert.match(html, /fixture.*mode/s);
   });
+
+  for (const [path, text] of [
+    ["/components/fabric-studio/catalog", "Catalog Palette"],
+    ["/components/fabric-studio/workspace", "Draft Workspace"],
+    ["/components/fabric-studio/read-only", "Read-Only Studio"],
+    ["/components/fabric-studio/signing", "Signing Handoff"]
+  ] as const) {
+    it(`renders ${path}`, () => {
+      const html = renderToString(
+        <MemoryRouter initialEntries={[path]}>
+          <StudioClientProvider mode="fixture">
+            <AppShell mode="fixture" />
+          </StudioClientProvider>
+        </MemoryRouter>
+      );
+
+      assert.match(html, new RegExp(text));
+      assert.match(html, /Catalog Palette/);
+      assert.match(html, /Draft Workspace/);
+      assert.match(html, /Read-Only Studio/);
+      assert.match(html, /Signing Handoff/);
+    });
+  }
 });

@@ -144,3 +144,38 @@ th, td {
   color: #b91c1c;
   font-weight: 700;
 }
+
+.compact-controls {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+}
+
+.summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.summary-row span,
+.summary-list span,
+.summary-list a {
+  display: inline-block;
+  border: 1px solid #d9dee7;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #f8fafc;
+}
+
+.summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.table-stack {
+  display: grid;
+  gap: 16px;
+}
