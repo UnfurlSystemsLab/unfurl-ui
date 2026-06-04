@@ -12,32 +12,32 @@ export function AppShell({ mode = studioMode() }: AppShellProps) {
       <aside className="side-nav">
         <div className="brand">Unfurl Studio</div>
         <nav>
-          <NavLink to="/components/fabric-studio/catalog">
-            Catalog Palette
-          </NavLink>
           <NavLink to="/components/fabric-studio/workspace">
-            Studio Workbench
+            Assembly
+          </NavLink>
+          <NavLink to="/components/fabric-studio/catalog">
+            Catalog
           </NavLink>
           <NavLink to="/components/fabric-studio/read-only">
-            Read-Only Studio
+            Exploded
           </NavLink>
           <NavLink to="/components/fabric-studio/deployment-planner">
-            Deployment Planner
+            Deployment
           </NavLink>
           <NavLink to="/components/fabric-studio/signing">
-            Signing Handoff
+            Signing
           </NavLink>
           <NavLink to="/components/fabric-studio/graph">
-            Graph View
+            Ports
           </NavLink>
           <NavLink to="/components/fabric-studio/audit">
-            Decision Audit
+            Audit
           </NavLink>
           <NavLink to="/components/fabric-studio/intents">
-            Intent History
+            Intents
           </NavLink>
           <NavLink to="/components/fabric-studio/diff">
-            Visual Diff
+            Diff
           </NavLink>
         </nav>
         <div className="mode-pill">{mode} mode</div>

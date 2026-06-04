@@ -9,10 +9,13 @@ describe("DraftWorkspacePanel", () => {
     const html = renderToString(<DraftWorkspacePanel client={client()} />);
 
     assert.match(html, /Unfurl Studio Workbench/);
+    assert.match(html, /Assembly/);
     assert.match(html, /Catalog/);
-    assert.match(html, /Document Workflow/);
-    assert.match(html, /Substrate/);
+    assert.match(html, /API Gateway/);
+    assert.match(html, /Validation Service/);
+    assert.match(html, /Substrate Runtime Layer/);
     assert.match(html, /Inspector/);
+    assert.match(html, /Component Details/);
     assert.match(html, /Validate Connection/);
   });
 });

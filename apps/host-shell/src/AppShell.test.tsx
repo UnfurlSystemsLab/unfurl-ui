@@ -40,14 +40,15 @@ describe("AppShell", () => {
       );
 
       assert.match(html, new RegExp(text));
-      assert.match(html, /Catalog Palette/);
-      assert.match(html, /Studio Workbench/);
-      assert.match(html, /Read-Only Studio/);
-      assert.match(html, /Signing Handoff/);
-      assert.match(html, /Graph View/);
-      assert.match(html, /Decision Audit/);
-      assert.match(html, /Intent History/);
-      assert.match(html, /Visual Diff/);
+      assert.match(html, /Assembly/);
+      assert.match(html, /Catalog/);
+      assert.match(html, /Exploded/);
+      assert.match(html, /Deployment/);
+      assert.match(html, /Signing/);
+      assert.match(html, /Ports/);
+      assert.match(html, /Audit/);
+      assert.match(html, /Intents/);
+      assert.match(html, /Diff/);
     });
   }
 });
