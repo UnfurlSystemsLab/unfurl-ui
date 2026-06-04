@@ -519,17 +519,17 @@ th, td {
   min-height: 600px;
   overflow: hidden;
   background:
-    radial-gradient(circle at 48% 46%, rgba(226, 232, 240, 0.4), transparent 34%),
-    linear-gradient(135deg, #f9fbff 0%, #eef4fb 100%);
+    radial-gradient(circle at 48% 44%, rgba(186, 230, 253, 0.46), transparent 38%),
+    linear-gradient(135deg, #f8fbff 0%, #edf5fc 100%);
   perspective: 1200px;
 }
 
 .three-assembly-scene {
   position: absolute;
   inset: 0;
-  z-index: 4;
-  opacity: 0.86;
-  pointer-events: none;
+  z-index: 2;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .three-assembly-scene canvas {
@@ -575,6 +575,7 @@ th, td {
     inset 0 0 32px rgba(14, 116, 144, 0.16),
     0 38px 58px rgba(15, 23, 42, 0.14);
   transform: rotateX(7deg) rotateZ(-4deg);
+  display: none;
 }
 
 .cabinet-bolt {
@@ -594,10 +595,11 @@ th, td {
 .pipe-overlay {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 1;
   width: 100%;
   height: 100%;
   pointer-events: none;
+  opacity: 0;
 }
 
 .pipe {
@@ -627,25 +629,25 @@ th, td {
   display: grid;
   justify-items: center;
   align-content: center;
-  gap: 6px;
-  width: 126px;
-  min-height: 104px;
-  border: 1px solid rgba(100, 116, 139, 0.55);
-  border-radius: 10px;
-  padding: 12px;
+  gap: 3px;
+  width: 104px;
+  min-height: 58px;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  border-radius: 7px;
+  padding: 6px 8px;
   color: #111827;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(241, 245, 249, 0.92)),
-    repeating-linear-gradient(90deg, rgba(148, 163, 184, 0.15) 0 1px, transparent 1px 16px);
-  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.68);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.1);
   text-align: center;
-  font-size: 12px;
+  font-size: 11px;
+  backdrop-filter: blur(6px);
 }
 
 .component-module.selected,
 .exploded-module {
   border-color: #7c3aed;
-  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.22), 0 20px 40px rgba(76, 29, 149, 0.24);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.26), 0 12px 26px rgba(76, 29, 149, 0.16);
 }
 
 .view-exploded .assembly-cabinet {
@@ -700,25 +702,33 @@ th, td {
   box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.22), 0 20px 42px rgba(21, 128, 61, 0.22);
 }
 
-.gateway-module { left: 404px; top: 110px; width: 160px; min-height: 78px; }
-.order-module { left: 132px; top: 238px; }
-.inventory-module { left: 298px; top: 246px; }
-.validation-module { left: 472px; top: 230px; width: 144px; min-height: 136px; }
-.payment-module { left: 646px; top: 242px; }
-.audit-module { left: 196px; top: 408px; }
-.notification-module { left: 364px; top: 416px; }
-.workflow-module { left: 530px; top: 406px; }
-.adapter-module { left: 692px; top: 404px; }
-.exploded-module { right: 42px; top: 206px; width: 142px; min-height: 156px; }
+.gateway-module { left: 430px; top: 128px; width: 134px; }
+.order-module { left: 164px; top: 260px; }
+.inventory-module { left: 332px; top: 268px; }
+.validation-module { left: 500px; top: 250px; width: 132px; min-height: 88px; }
+.payment-module { left: 678px; top: 264px; }
+.audit-module { left: 224px; top: 430px; }
+.notification-module { left: 390px; top: 440px; }
+.workflow-module { left: 558px; top: 430px; }
+.adapter-module { left: 724px; top: 424px; }
+.exploded-module { right: 48px; top: 230px; width: 126px; min-height: 102px; }
+
+.view-assembly .exploded-module,
+.view-ports .exploded-module,
+.view-substrate .exploded-module,
+.view-validation .exploded-module {
+  display: none;
+}
 
 .module-icon {
   display: inline-grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  width: 23px;
+  height: 23px;
+  border-radius: 7px;
   color: white;
   font-weight: 900;
+  font-size: 11px;
 }
 
 .module-icon.green { background: #16a34a; }
@@ -730,7 +740,7 @@ th, td {
 
 .module-status {
   color: #16a34a;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .port-dot {
@@ -765,8 +775,8 @@ th, td {
   align-items: center;
   width: fit-content;
   border-radius: 999px;
-  padding: 4px 8px;
-  font-size: 12px;
+  padding: 3px 6px;
+  font-size: 10px;
   border: 1px solid #cbd5e1;
 }
 
