@@ -17,6 +17,35 @@ export type DraftWorkspacePanelProps = {
   readonly initialBaseCatalogHash?: string | undefined;
 };
 
+type SelectedSurfaceId =
+  | "gateway"
+  | "order"
+  | "inventory"
+  | "validation"
+  | "payment"
+  | "audit"
+  | "notification"
+  | "workflow"
+  | "adapter"
+  | "substrate";
+
+type InspectorDetails = {
+  readonly name: string;
+  readonly icon: string;
+  readonly iconClass: string;
+  readonly type: string;
+  readonly version: string;
+  readonly owner: string;
+  readonly status: string;
+  readonly description: string;
+  readonly bindingMode: string;
+  readonly deploymentShape: string;
+  readonly substrateTarget: string;
+  readonly isolationPattern: string;
+  readonly providedPorts: readonly string[];
+  readonly requiredPorts: readonly string[];
+};
+
 export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:catalog" }: DraftWorkspacePanelProps) {
   const [baseCatalogHash, setBaseCatalogHash] = useState(initialBaseCatalogHash);
   const [needsId, setNeedsId] = useState("");
@@ -28,7 +57,7 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
   const [state, setState] = useState<DraftWorkspaceState | undefined>();
   const [catalog, setCatalog] = useState<readonly VisualCatalogEntry[]>([]);
   const [catalogError, setCatalogError] = useState<string | undefined>();
-  const [selectedComponent, setSelectedComponent] = useState<"workflow" | "storage" | "substrate">("storage");
+  const [selectedComponent, setSelectedComponent] = useState<SelectedSurfaceId>("validation");
   const [activeView, setActiveView] = useState("Assembly");
   const [activeInspectorTab, setActiveInspectorTab] = useState("Properties");
 
@@ -72,7 +101,7 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
     try {
       setCatalogEntryId(entryId);
       setState(await applyDraftIntent(client, state, { type: "ADD_COMPONENT", catalogEntryId: entryId }));
-      setSelectedComponent("storage");
+      setSelectedComponent("validation");
     } finally {
       setBusy(false);
     }
@@ -104,11 +133,7 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
   }
 
   const handoff = state ? buildSigningHandoff(state, { signingRequested: sign }) : undefined;
-  const selectedLabel = selectedComponent === "workflow"
-    ? "Workflow Requirement"
-    : selectedComponent === "storage"
-      ? paletteLabel(catalog[0]) || "Validation Service"
-      : "Substrate Base Plate";
+  const selected = inspectorDetails[selectedComponent];
   const ports = useMemo(() => activePorts(catalog[0]), [catalog]);
   const paletteEntries = catalog.length === 0 ? fallbackCatalog() : catalog;
 
@@ -195,24 +220,24 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
               <path className="pipe pipe-pending" d="M312 382 C410 450 510 464 610 542" />
             </svg>
 
-            <button type="button" className="component-module gateway-module" onClick={() => setSelectedComponent("workflow")}>
+            <button type="button" className={moduleClass("component-module gateway-module", selectedComponent, "gateway")} onClick={() => setSelectedComponent("gateway")}>
               <span className="module-icon green">N</span>
               <strong>API Gateway</strong>
               <span className="module-status">Included</span>
             </button>
-            <button type="button" className="component-module order-module" onClick={() => setSelectedComponent("workflow")}>
+            <button type="button" className={moduleClass("component-module order-module", selectedComponent, "order")} onClick={() => setSelectedComponent("order")}>
               <span className="module-icon leaf">S</span>
               <strong>Order Service</strong>
               <span className="port-dot right" />
               <span className="port-dot bottom" />
             </button>
-            <button type="button" className="component-module inventory-module" onClick={() => setSelectedComponent("storage")}>
+            <button type="button" className={moduleClass("component-module inventory-module", selectedComponent, "inventory")} onClick={() => setSelectedComponent("inventory")}>
               <span className="module-icon leaf">S</span>
               <strong>Inventory Service</strong>
               <span className="port-dot left" />
               <span className="port-dot right" />
             </button>
-            <button type="button" className="component-module validation-module selected" onClick={() => setSelectedComponent("storage")}>
+            <button type="button" className={moduleClass("component-module validation-module", selectedComponent, "validation")} onClick={() => setSelectedComponent("validation")}>
               <span className="module-icon purple">V</span>
               <strong>Validation Service</strong>
               <span className="port-handle offer-port">{ports[0] ?? "validate.order"}</span>
@@ -221,32 +246,32 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
               <span className="port-dot right" />
               <span className="port-dot bottom" />
             </button>
-            <button type="button" className="component-module payment-module" onClick={() => setSelectedComponent("storage")}>
+            <button type="button" className={moduleClass("component-module payment-module", selectedComponent, "payment")} onClick={() => setSelectedComponent("payment")}>
               <span className="module-icon leaf">P</span>
               <strong>Payment Service</strong>
               <span className="port-dot left" />
             </button>
-            <button type="button" className="component-module audit-module" onClick={() => setSelectedComponent("workflow")}>
+            <button type="button" className={moduleClass("component-module audit-module", selectedComponent, "audit")} onClick={() => setSelectedComponent("audit")}>
               <span className="module-icon blue">A</span>
               <strong>Audit Service</strong>
               <span className="port-dot right" />
             </button>
-            <button type="button" className="component-module notification-module" onClick={() => setSelectedComponent("workflow")}>
+            <button type="button" className={moduleClass("component-module notification-module", selectedComponent, "notification")} onClick={() => setSelectedComponent("notification")}>
               <span className="module-icon orange">F</span>
               <strong>Notification Service</strong>
               <span className="port-dot right" />
             </button>
-            <button type="button" className="component-module workflow-module" onClick={() => setSelectedComponent("workflow")}>
+            <button type="button" className={moduleClass("component-module workflow-module", selectedComponent, "workflow")} onClick={() => setSelectedComponent("workflow")}>
               <span className="module-icon blue">W</span>
               <strong>Workflow Service</strong>
               <span className="port-dot bottom" />
             </button>
-            <button type="button" className="component-module adapter-module" onClick={() => setSelectedComponent("substrate")}>
+            <button type="button" className={moduleClass("component-module adapter-module", selectedComponent, "adapter")} onClick={() => setSelectedComponent("adapter")}>
               <span className="module-icon red">S</span>
               <strong>Storage Adapter</strong>
               <span className="port-dot bottom" />
             </button>
-            <button type="button" className="exploded-module" onClick={() => setSelectedComponent("storage")}>
+            <button type="button" className={moduleClass("exploded-module", selectedComponent, "validation")} onClick={() => setSelectedComponent("validation")}>
               <span className="module-icon purple">V</span>
               <strong>Validation Service</strong>
               <span>Exploded inspection</span>
@@ -257,7 +282,7 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
           <div className="substrate-strip" aria-label="Substrate runtime layer">
             <div className="substrate-label">Substrate Runtime Layer</div>
             {substrateCapabilities.map(capability => (
-              <button type="button" className="substrate-tile" key={capability.name} onClick={() => setSelectedComponent("substrate")}>
+              <button type="button" className={selectedComponent === "substrate" ? "substrate-tile selected" : "substrate-tile"} key={capability.name} onClick={() => setSelectedComponent("substrate")}>
                 <span className={`substrate-logo ${capability.status}`}>{capability.short}</span>
                 <strong>{capability.name}</strong>
                 <span className="health-dot" />
@@ -268,10 +293,10 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
 
         <aside className="workbench-inspector" aria-label="Inspector">
           <div className="inspector-selected">
-            <span className="module-icon purple">V</span>
+            <span className={`module-icon ${selected.iconClass}`}>{selected.icon}</span>
             <div>
-              <strong>{selectedLabel}</strong>
-              <span className="valid-pill">Valid</span>
+              <strong>{selected.name}</strong>
+              <span className="valid-pill">{selected.status}</span>
             </div>
           </div>
           <div className="inspector-tabs">
@@ -284,20 +309,20 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
           <section className="inspector-card">
             <h2>Component Details</h2>
             <dl>
-              <dt>Type</dt><dd>Application Service</dd>
-              <dt>Version</dt><dd>1.1.0</dd>
-              <dt>Owner</dt><dd>payments-team</dd>
-              <dt>Status</dt><dd><span className="included-dot" /> Included</dd>
+              <dt>Type</dt><dd>{selected.type}</dd>
+              <dt>Version</dt><dd>{selected.version}</dd>
+              <dt>Owner</dt><dd>{selected.owner}</dd>
+              <dt>Status</dt><dd><span className="included-dot" /> {selected.status}</dd>
             </dl>
-            <p>Validates orders, inventory, and payment requests using business rules and customer policies.</p>
+            <p>{selected.description}</p>
           </section>
           <section className="inspector-card">
             <h2>Deployment</h2>
             <dl>
-              <dt>Binding Mode</dt><dd>SERVICE</dd>
-              <dt>Deployment Shape</dt><dd><span className="shape-pill">CONTAINER</span></dd>
-              <dt>Substrate Target</dt><dd>On-Prem Cluster</dd>
-              <dt>Isolation Pattern</dt><dd><span className="strict-pill">STRICT</span></dd>
+              <dt>Binding Mode</dt><dd>{selected.bindingMode}</dd>
+              <dt>Deployment Shape</dt><dd><span className="shape-pill">{selected.deploymentShape}</span></dd>
+              <dt>Substrate Target</dt><dd>{selected.substrateTarget}</dd>
+              <dt>Isolation Pattern</dt><dd><span className="strict-pill">{selected.isolationPattern}</span></dd>
             </dl>
           </section>
           <div className="inspector-stack">
@@ -320,12 +345,12 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
             </label>
           </div>
           <section className="inspector-card">
-            <h2>Provided Ports (3)</h2>
-            <PortList kind="provided" names={["validate.order", "validate.payment", "validate.inventory"]} />
+            <h2>Provided Ports ({selected.providedPorts.length})</h2>
+            <PortList kind="provided" names={selected.providedPorts} />
           </section>
           <section className="inspector-card">
-            <h2>Required Ports (3)</h2>
-            <PortList kind="required" names={["customer.query", "policy.evaluate", "rules.fetch"]} />
+            <h2>Required Ports ({selected.requiredPorts.length})</h2>
+            <PortList kind="required" names={selected.requiredPorts} />
           </section>
           <section className="inspector-card">
             <h2>Validation Status</h2>
@@ -440,6 +465,10 @@ function activePorts(entry: VisualCatalogEntry | undefined): readonly string[] {
   return entry?.visualManifest?.ports.map(port => port.id) ?? [];
 }
 
+function moduleClass(baseClass: string, selected: SelectedSurfaceId, surface: SelectedSurfaceId): string {
+  return selected === surface ? `${baseClass} selected` : baseClass;
+}
+
 function fallbackCatalog(): readonly VisualCatalogEntry[] {
   return [
     {
@@ -456,6 +485,169 @@ function fallbackCatalog(): readonly VisualCatalogEntry[] {
     }
   ];
 }
+
+const inspectorDetails: Record<SelectedSurfaceId, InspectorDetails> = {
+  gateway: {
+    name: "API Gateway",
+    icon: "N",
+    iconClass: "green",
+    type: "Application Edge",
+    version: "1.4.0",
+    owner: "platform-team",
+    status: "Included",
+    description: "Routes external commerce traffic into the governed service composition.",
+    bindingMode: "SERVICE",
+    deploymentShape: "CONTAINER",
+    substrateTarget: "On-Prem Cluster",
+    isolationPattern: "STRICT",
+    providedPorts: ["http.route", "auth.forward"],
+    requiredPorts: ["validation.order", "payment.authorize"]
+  },
+  order: {
+    name: "Order Service",
+    icon: "S",
+    iconClass: "leaf",
+    type: "Application Service",
+    version: "2.0.0",
+    owner: "orders-team",
+    status: "Included",
+    description: "Owns order intake and coordinates validation, inventory, and payment steps.",
+    bindingMode: "SERVICE",
+    deploymentShape: "CONTAINER",
+    substrateTarget: "On-Prem Cluster",
+    isolationPattern: "STRICT",
+    providedPorts: ["order.create", "order.query"],
+    requiredPorts: ["validate.order", "inventory.reserve", "payment.authorize"]
+  },
+  inventory: {
+    name: "Inventory Service",
+    icon: "S",
+    iconClass: "leaf",
+    type: "Application Service",
+    version: "1.8.2",
+    owner: "inventory-team",
+    status: "Included",
+    description: "Checks item availability and reserves stock for validated orders.",
+    bindingMode: "SERVICE",
+    deploymentShape: "CONTAINER",
+    substrateTarget: "On-Prem Cluster",
+    isolationPattern: "STRICT",
+    providedPorts: ["inventory.reserve", "inventory.release"],
+    requiredPorts: ["db.query", "event.publish"]
+  },
+  validation: {
+    name: "Validation Service",
+    icon: "V",
+    iconClass: "purple",
+    type: "Application Service",
+    version: "1.1.0",
+    owner: "payments-team",
+    status: "Valid",
+    description: "Validates orders, inventory, and payment requests using business rules and customer policies.",
+    bindingMode: "SERVICE",
+    deploymentShape: "CONTAINER",
+    substrateTarget: "On-Prem Cluster",
+    isolationPattern: "STRICT",
+    providedPorts: ["validate.order", "validate.payment", "validate.inventory"],
+    requiredPorts: ["customer.query", "policy.evaluate", "rules.fetch"]
+  },
+  payment: {
+    name: "Payment Service",
+    icon: "P",
+    iconClass: "leaf",
+    type: "Application Service",
+    version: "1.6.0",
+    owner: "payments-team",
+    status: "Included",
+    description: "Authorizes and captures payments after validation and order checks pass.",
+    bindingMode: "SERVICE",
+    deploymentShape: "CONTAINER",
+    substrateTarget: "On-Prem Cluster",
+    isolationPattern: "STRICT",
+    providedPorts: ["payment.authorize", "payment.capture"],
+    requiredPorts: ["validate.payment", "vault.secret"]
+  },
+  audit: {
+    name: "Audit Service",
+    icon: "A",
+    iconClass: "blue",
+    type: "Compliance Service",
+    version: "1.2.3",
+    owner: "risk-team",
+    status: "Included",
+    description: "Records signed decision and runtime events for compliance review.",
+    bindingMode: "EVENT",
+    deploymentShape: "CONTAINER",
+    substrateTarget: "On-Prem Cluster",
+    isolationPattern: "STRICT",
+    providedPorts: ["audit.write", "audit.query"],
+    requiredPorts: ["event.publish"]
+  },
+  notification: {
+    name: "Notification Service",
+    icon: "F",
+    iconClass: "orange",
+    type: "Application Service",
+    version: "1.0.5",
+    owner: "customer-exp-team",
+    status: "Included",
+    description: "Sends order lifecycle notifications after workflow checkpoints complete.",
+    bindingMode: "EVENT",
+    deploymentShape: "CONTAINER",
+    substrateTarget: "On-Prem Cluster",
+    isolationPattern: "STRICT",
+    providedPorts: ["notify.email", "notify.sms"],
+    requiredPorts: ["event.consume"]
+  },
+  workflow: {
+    name: "Workflow Service",
+    icon: "W",
+    iconClass: "blue",
+    type: "Orchestration Service",
+    version: "2.3.0",
+    owner: "platform-team",
+    status: "Included",
+    description: "Coordinates the e-commerce composition and enforces ordered execution.",
+    bindingMode: "SERVICE",
+    deploymentShape: "CONTAINER",
+    substrateTarget: "On-Prem Cluster",
+    isolationPattern: "STRICT",
+    providedPorts: ["workflow.start", "workflow.status"],
+    requiredPorts: ["order.create", "audit.write", "event.publish"]
+  },
+  adapter: {
+    name: "Storage Adapter",
+    icon: "S",
+    iconClass: "red",
+    type: "Adapter",
+    version: "1.3.1",
+    owner: "platform-team",
+    status: "Warning",
+    description: "Binds object storage operations to the substrate target selected by policy.",
+    bindingMode: "SERVICE",
+    deploymentShape: "SIDECAR",
+    substrateTarget: "On-Prem Cluster",
+    isolationPattern: "STRICT",
+    providedPorts: ["storage.put", "storage.get"],
+    requiredPorts: ["vault.secret", "storage.blob"]
+  },
+  substrate: {
+    name: "Substrate Base Plate",
+    icon: "S",
+    iconClass: "blue",
+    type: "Runtime Surface",
+    version: "profile:sha256",
+    owner: "runtime-platform",
+    status: "Reachable",
+    description: "Closed-world runtime layer containing only the substrate capabilities required by the derived profile.",
+    bindingMode: "SUBSTRATE",
+    deploymentShape: "RUNTIME",
+    substrateTarget: "On-Prem Cluster",
+    isolationPattern: "STRICT",
+    providedPorts: ["db.query", "event.publish", "vault.secret", "telemetry.otel", "container.schedule"],
+    requiredPorts: []
+  }
+};
 
 function toolGlyph(tool: string): string {
   return {

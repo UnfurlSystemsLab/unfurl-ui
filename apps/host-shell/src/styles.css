@@ -804,6 +804,12 @@ th, td {
   color: #0f172a;
 }
 
+.substrate-tile.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+
 .substrate-logo {
   display: grid;
   place-items: center;

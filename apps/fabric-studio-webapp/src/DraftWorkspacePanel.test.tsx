@@ -18,6 +18,17 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /Component Details/);
     assert.match(html, /Validate Connection/);
   });
+
+  it("renders inspectable component-specific metadata", () => {
+    const html = renderToString(<DraftWorkspacePanel client={client()} />);
+
+    assert.match(html, /Payment Service/);
+    assert.match(html, /Storage Adapter/);
+    assert.match(html, /Provided Ports/);
+    assert.match(html, /customer.query/);
+    assert.match(html, /policy.evaluate/);
+    assert.match(html, /rules.fetch/);
+  });
 });
 
 function client() {
