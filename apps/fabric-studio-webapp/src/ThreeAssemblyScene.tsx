@@ -17,8 +17,18 @@ export type ThreeAssemblySurfaceId =
 export type ThreeAssemblySceneProps = {
   readonly activeView: string;
   readonly selectedSurface: ThreeAssemblySurfaceId;
+  readonly selectedPartId?: string | undefined;
+  readonly extractedPartId?: string | undefined;
   readonly onSelect: (surface: ThreeAssemblySurfaceId) => void;
+  readonly onSelectPart?: (selection: ThreeAssemblySelection) => void;
   readonly onViewChange?: (view: string) => void;
+};
+
+export type ThreeAssemblySelection = {
+  readonly id: string;
+  readonly kind: "component" | "pipe" | "connector" | "substrate";
+  readonly surface: ThreeAssemblySurfaceId;
+  readonly label: string;
 };
 
 type ModulePlacement = {
@@ -38,6 +48,7 @@ type SceneHandles = {
   readonly substrateGroup: THREE.Group;
   readonly substratePlate: THREE.Mesh;
   readonly validationLines: readonly THREE.Line[];
+  readonly selectableParts: Map<string, THREE.Object3D>;
   readonly modeGroups: {
     readonly portGroup: THREE.Group;
     readonly substrateLinks: THREE.Group;
@@ -48,16 +59,30 @@ const initialCameraPosition = new THREE.Vector3(7.9, 5.0, 10.2);
 const initialCameraTarget = new THREE.Vector3(0.2, -0.7, 0.12);
 const viewShortcuts = ["Assembly", "Exploded", "Ports", "Substrate", "Validation"] as const;
 
-export function ThreeAssemblyScene({ activeView, selectedSurface, onSelect, onViewChange }: ThreeAssemblySceneProps) {
+export function ThreeAssemblyScene({
+  activeView,
+  selectedSurface,
+  selectedPartId,
+  extractedPartId,
+  onSelect,
+  onSelectPart,
+  onViewChange
+}: ThreeAssemblySceneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const onSelectRef = useRef(onSelect);
+  const onSelectPartRef = useRef(onSelectPart);
   const onViewChangeRef = useRef(onViewChange);
   const selectedRef = useRef(selectedSurface);
+  const selectedPartRef = useRef(selectedPartId);
+  const extractedPartRef = useRef(extractedPartId);
   const viewRef = useRef(activeView);
 
   onSelectRef.current = onSelect;
+  onSelectPartRef.current = onSelectPart;
   onViewChangeRef.current = onViewChange;
   selectedRef.current = selectedSurface;
+  selectedPartRef.current = selectedPartId;
+  extractedPartRef.current = extractedPartId;
   viewRef.current = activeView;
 
   useEffect(() => {
@@ -128,13 +153,13 @@ export function ThreeAssemblyScene({ activeView, selectedSurface, onSelect, onVi
       camera.updateProjectionMatrix();
     }
 
-    function raycastSurface(event: MouseEvent | PointerEvent): ThreeAssemblySurfaceId | undefined {
+    function raycastSelection(event: MouseEvent | PointerEvent): ThreeAssemblySelection | undefined {
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
       raycaster.setFromCamera(pointer, camera);
       const hit = raycaster.intersectObjects(clickable, true)[0];
-      return resolveSurface(hit?.object);
+      return resolveSelection(hit?.object);
     }
 
     function handlePointerDown(event: PointerEvent) {
@@ -148,15 +173,20 @@ export function ThreeAssemblyScene({ activeView, selectedSurface, onSelect, onVi
       if (moved > 5) {
         return;
       }
-      const surface = raycastSurface(event);
-      if (surface) {
-        onSelectRef.current(surface);
+      const selection = raycastSelection(event);
+      if (selection) {
+        onSelectRef.current(selection.surface);
+        onSelectPartRef.current?.(selection);
       }
     }
 
     function handleDoubleClick(event: MouseEvent) {
-      const surface = raycastSurface(event) ?? selectedRef.current;
-      focusSurface(surface);
+      const selection = raycastSelection(event);
+      if (selection) {
+        onSelectRef.current(selection.surface);
+        onSelectPartRef.current?.(selection);
+      }
+      focusSurface(selection?.surface ?? selectedRef.current);
     }
 
     function handlePointerLeave() {
@@ -232,7 +262,7 @@ export function ThreeAssemblyScene({ activeView, selectedSurface, onSelect, onVi
         }
       }
       controls.update();
-      applySceneState(handles, selectedRef.current, viewRef.current, frame);
+      applySceneState(handles, selectedRef.current, selectedPartRef.current, extractedPartRef.current, viewRef.current, frame);
       renderer.render(scene, camera);
       raf = window.requestAnimationFrame(animate);
     }
@@ -284,13 +314,14 @@ function addLighting(scene: THREE.Scene) {
 function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[]): SceneHandles {
   const moduleGroups = new Map<ThreeAssemblySurfaceId, THREE.Group>();
   const moduleBodies = new Map<ThreeAssemblySurfaceId, THREE.Mesh>();
+  const selectableParts = new Map<string, THREE.Object3D>();
 
   addWorkbenchBase(root);
   addGlassEnclosure(root);
 
   const pipeGroup = new THREE.Group();
   root.add(pipeGroup);
-  addServicePipes(pipeGroup);
+  addServicePipes(pipeGroup, clickable, selectableParts);
 
   const portGroup = new THREE.Group();
   root.add(portGroup);
@@ -301,8 +332,9 @@ function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[]): SceneHan
     const body = group.userData.body as THREE.Mesh;
     moduleBodies.set(module.id, body);
     clickable.push(body);
+    selectableParts.set(`component:${module.id}`, group);
     root.add(group);
-    addModulePorts(portGroup, module);
+    addModulePorts(portGroup, module, clickable, selectableParts);
   }
 
   const substrateGroup = createSubstrateBase();
@@ -310,6 +342,7 @@ function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[]): SceneHan
   moduleGroups.set("substrate", substrateGroup);
   moduleBodies.set("substrate", substratePlate);
   clickable.push(substratePlate);
+  selectableParts.set("substrate:base", substrateGroup);
   root.add(substrateGroup);
 
   const substrateLinks = createSubstrateLinks();
@@ -317,6 +350,7 @@ function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[]): SceneHan
 
   const { explodedGroup, validationLines } = createExplodedModule();
   clickable.push(explodedGroup.userData.body as THREE.Mesh);
+  selectableParts.set("component:validation:exploded", explodedGroup);
   root.add(explodedGroup);
 
   return {
@@ -326,6 +360,7 @@ function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[]): SceneHan
     substrateGroup,
     substratePlate,
     validationLines,
+    selectableParts,
     modeGroups: { portGroup, substrateLinks }
   };
 }
@@ -428,6 +463,7 @@ function createModule(module: ModulePlacement): THREE.Group {
   const group = new THREE.Group();
   group.position.set(...module.position);
   group.userData.surface = module.id;
+  group.userData.selection = componentSelection(module.id, module.label);
 
   const labelTexture = createLabelTexture(module.label, module.badge, module.accent);
   const shellMaterial = new THREE.MeshPhysicalMaterial({
@@ -450,6 +486,7 @@ function createModule(module: ModulePlacement): THREE.Group {
   body.castShadow = true;
   body.receiveShadow = true;
   body.userData.surface = module.id;
+  body.userData.selection = componentSelection(module.id, module.label);
   group.userData.body = body;
   group.add(body);
 
@@ -543,7 +580,12 @@ function roundRect(context: CanvasRenderingContext2D, x: number, y: number, widt
   context.closePath();
 }
 
-function addModulePorts(root: THREE.Group, module: ModulePlacement) {
+function addModulePorts(
+  root: THREE.Group,
+  module: ModulePlacement,
+  clickable: THREE.Object3D[],
+  selectableParts: Map<string, THREE.Object3D>
+) {
   const material = new THREE.MeshStandardMaterial({
     color: module.portColor,
     roughness: 0.14,
@@ -561,28 +603,62 @@ function addModulePorts(root: THREE.Group, module: ModulePlacement) {
     [0, bottomY, frontZ]
   ] as const;
 
-  for (const [x, y, z] of positions) {
+  positions.forEach(([x, y, z], index) => {
+    const selection: ThreeAssemblySelection = {
+      id: `connector:${module.id}:${index + 1}`,
+      kind: "connector",
+      surface: module.id,
+      label: `${module.label} connector ${index + 1}`
+    };
     const socket = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.08, 20), material);
     socket.rotation.x = Math.PI / 2;
     socket.position.set(module.position[0] + x, module.position[1] + y, module.position[2] + z);
+    socket.userData.surface = module.id;
+    socket.userData.selection = selection;
+    clickable.push(socket);
+    selectableParts.set(selection.id, socket);
     root.add(socket);
 
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.088, 0.014, 10, 24), ringMaterial);
     ring.position.copy(socket.position);
     ring.rotation.x = Math.PI / 2;
+    ring.userData.surface = module.id;
+    ring.userData.selection = selection;
+    selectableParts.set(`${selection.id}:ring`, ring);
     root.add(ring);
-  }
+  });
 }
 
-function addServicePipes(root: THREE.Group) {
+function addServicePipes(root: THREE.Group, clickable: THREE.Object3D[], selectableParts: Map<string, THREE.Object3D>) {
   const metal = 0x778899;
-  addPipe(root, [-3.2, 0.45, 1.22], [-1.72, 0.45, 1.12], metal, 0.045, true);
-  addPipe(root, [-1.74, 0.45, 1.12], [-0.4, 0.48, 1.06], metal, 0.045, true);
-  addPipe(root, [0.4, 0.48, 1.06], [1.76, 0.43, 1.15], metal, 0.045, true);
-  addPipe(root, [0.25, -0.45, 1.1], [0.45, -1.45, 1.0], 0x2563eb, 0.042, false);
-  addPipe(root, [-2.05, -1.55, 1.05], [0.45, -1.45, 1.0], 0x64748b, 0.035, true);
-  addPipe(root, [-0.74, -1.55, 0.98], [1.88, -1.55, 1.03], 0x64748b, 0.035, true);
-  addPipe(root, [2.08, -1.45, 1.03], [2.5, -2.08, 0.8], 0x2563eb, 0.035, false);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:gateway-order", "Gateway to order pipe", "gateway", [-3.2, 0.45, 1.22], [-1.72, 0.45, 1.12], metal, 0.045, true);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:inventory-validation", "Inventory to validation pipe", "inventory", [-1.74, 0.45, 1.12], [-0.4, 0.48, 1.06], metal, 0.045, true);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:validation-payment", "Validation to payment pipe", "validation", [0.4, 0.48, 1.06], [1.76, 0.43, 1.15], metal, 0.045, true);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:validation-workflow", "Validation substrate pipe", "validation", [0.25, -0.45, 1.1], [0.45, -1.45, 1.0], 0x2563eb, 0.042, false);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:audit-workflow", "Audit to workflow pipe", "audit", [-2.05, -1.55, 1.05], [0.45, -1.45, 1.0], 0x64748b, 0.035, true);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:notification-adapter", "Notification to adapter pipe", "notification", [-0.74, -1.55, 0.98], [1.88, -1.55, 1.03], 0x64748b, 0.035, true);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:adapter-substrate", "Adapter substrate pipe", "adapter", [2.08, -1.45, 1.03], [2.5, -2.08, 0.8], 0x2563eb, 0.035, false);
+}
+
+function addSelectablePipe(
+  root: THREE.Group,
+  clickable: THREE.Object3D[],
+  selectableParts: Map<string, THREE.Object3D>,
+  id: string,
+  label: string,
+  surface: ThreeAssemblySurfaceId,
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+  color: number,
+  radius: number,
+  withJoints: boolean
+) {
+  const pipe = addPipe(root, from, to, color, radius, withJoints);
+  const selection: ThreeAssemblySelection = { id, kind: "pipe", surface, label };
+  pipe.userData.surface = surface;
+  pipe.userData.selection = selection;
+  clickable.push(pipe);
+  selectableParts.set(id, pipe);
 }
 
 function addPipe(
@@ -620,6 +696,7 @@ function addPipe(
       root.add(joint);
     }
   }
+  return tube;
 }
 
 function createSubstrateBase(): THREE.Group {
@@ -638,6 +715,7 @@ function createSubstrateBase(): THREE.Group {
   );
   plate.position.set(0.05, -2.13, 2.1);
   plate.userData.surface = "substrate";
+  plate.userData.selection = { id: "substrate:base", kind: "substrate", surface: "substrate", label: "Substrate base plate" } satisfies ThreeAssemblySelection;
   plate.receiveShadow = true;
   group.userData.plate = plate;
   group.add(plate);
@@ -776,7 +854,14 @@ function createTextSprite(text: string, color: string, background: string): THRE
   return sprite;
 }
 
-function applySceneState(handles: SceneHandles, selected: ThreeAssemblySurfaceId, activeView: string, frame: number) {
+function applySceneState(
+  handles: SceneHandles,
+  selected: ThreeAssemblySurfaceId,
+  selectedPartId: string | undefined,
+  extractedPartId: string | undefined,
+  activeView: string,
+  frame: number
+) {
   for (const [id, group] of handles.moduleGroups) {
     const body = handles.moduleBodies.get(id);
     if (!body) {
@@ -789,7 +874,10 @@ function applySceneState(handles: SceneHandles, selected: ThreeAssemblySurfaceId
 
     const base = modulePlacementsById[id as ModulePlacement["id"]];
     if (base) {
-      group.position.y = base.position[1] + Math.sin(frame * 1.7 + base.position[0]) * 0.014;
+      const extractedThis = extractedPartId === `component:${id}`;
+      group.position.x = base.position[0] + (extractedThis ? 0.18 : 0);
+      group.position.y = base.position[1] + Math.sin(frame * 1.7 + base.position[0]) * 0.014 + (extractedThis ? 0.12 : 0);
+      group.position.z = base.position[2] + (extractedThis ? 0.78 : 0);
     }
     group.scale.setScalar(selectedThis ? 1.055 : 1);
     setObjectOpacity(group, dimmed ? 0.44 : 1);
@@ -828,6 +916,36 @@ function applySceneState(handles: SceneHandles, selected: ThreeAssemblySurfaceId
 
   setObjectOpacity(handles.modeGroups.portGroup, activeView === "Ports" ? 1 : 0.78);
   setObjectOpacity(handles.modeGroups.substrateLinks, activeView === "Substrate" ? 1 : 0.64);
+  applyPartState(handles, selectedPartId, extractedPartId, frame);
+}
+
+function applyPartState(handles: SceneHandles, selectedPartId: string | undefined, extractedPartId: string | undefined, frame: number) {
+  for (const [id, object] of handles.selectableParts) {
+    const selected = id === selectedPartId || id.startsWith(`${selectedPartId}:`);
+    const extracted = id === extractedPartId || id.startsWith(`${extractedPartId}:`);
+    object.traverse(child => {
+      if (!(child instanceof THREE.Mesh || child instanceof THREE.Line)) {
+        return;
+      }
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) {
+          if (selected || extracted) {
+            material.emissive.set(extracted ? 0x0ea5e9 : 0x7c3aed);
+            material.emissiveIntensity = extracted ? 0.42 + Math.sin(frame * 4) * 0.08 : 0.28;
+          }
+        }
+        if (material instanceof THREE.LineBasicMaterial || material instanceof THREE.LineDashedMaterial) {
+          material.opacity = selected || extracted ? 0.92 : material.opacity;
+        }
+      }
+      if (extracted && child instanceof THREE.Mesh && child.userData.selection?.kind !== "component") {
+        child.scale.setScalar(1.18);
+      } else if (child instanceof THREE.Mesh && child.userData.selection?.kind !== "component") {
+        child.scale.setScalar(selected ? 1.08 : 1);
+      }
+    });
+  }
 }
 
 function setObjectOpacity(object: THREE.Object3D, opacity: number) {
@@ -845,16 +963,25 @@ function setObjectOpacity(object: THREE.Object3D, opacity: number) {
   });
 }
 
-function resolveSurface(object: THREE.Object3D | undefined): ThreeAssemblySurfaceId | undefined {
+function resolveSelection(object: THREE.Object3D | undefined): ThreeAssemblySelection | undefined {
   let current: THREE.Object3D | null | undefined = object;
   while (current) {
-    const surface = current.userData.surface as ThreeAssemblySurfaceId | undefined;
-    if (surface) {
-      return surface;
+    const selection = current.userData.selection as ThreeAssemblySelection | undefined;
+    if (selection) {
+      return selection;
     }
     current = current.parent;
   }
   return undefined;
+}
+
+function componentSelection(surface: Exclude<ThreeAssemblySurfaceId, "substrate">, label: string): ThreeAssemblySelection {
+  return {
+    id: `component:${surface}`,
+    kind: "component",
+    surface,
+    label
+  };
 }
 
 function disposeObject(object: THREE.Object3D) {

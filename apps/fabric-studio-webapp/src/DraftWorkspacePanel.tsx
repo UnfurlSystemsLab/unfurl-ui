@@ -8,7 +8,7 @@ import {
   type DraftWorkspaceState
 } from "./draftWorkspace.js";
 import { buildSigningHandoff } from "./signingHandoff.js";
-import type { ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
+import type { ThreeAssemblySelection, ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
 
 const ThreeAssemblyScene = lazy(async () => {
   const module = await import("./ThreeAssemblyScene.js");
@@ -54,6 +54,14 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
   const [catalog, setCatalog] = useState<readonly VisualCatalogEntry[]>([]);
   const [catalogError, setCatalogError] = useState<string | undefined>();
   const [selectedComponent, setSelectedComponent] = useState<SelectedSurfaceId>("validation");
+  const [selectedPart, setSelectedPart] = useState<ThreeAssemblySelection>({
+    id: "component:validation",
+    kind: "component",
+    surface: "validation",
+    label: "Validation Service"
+  });
+  const [extractedPartId, setExtractedPartId] = useState<string | undefined>();
+  const [replacementEntryId, setReplacementEntryId] = useState("com.unfurl:validation-service:1.1.0");
   const [activeView, setActiveView] = useState("Assembly");
   const [activeInspectorTab, setActiveInspectorTab] = useState("Properties");
 
@@ -65,6 +73,7 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
           setBaseCatalogHash(current => current === "sha256:catalog" ? response.catalogHash : current);
           setCatalog(response.entries);
           setCatalogEntryId(response.entries[0]?.catalogEntryId ?? "com.unfurl:storage-s3:1.2.0");
+          setReplacementEntryId(response.entries[0]?.catalogEntryId ?? "com.unfurl:validation-service:1.1.0");
         }
       })
       .catch(error => {
@@ -97,7 +106,7 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
     try {
       setCatalogEntryId(entryId);
       setState(await applyDraftIntent(client, state, { type: "ADD_COMPONENT", catalogEntryId: entryId }));
-      setSelectedComponent("validation");
+      selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Validation Service" });
     } finally {
       setBusy(false);
     }
@@ -110,7 +119,7 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
     setBusy(true);
     try {
       setState(await applyDraftIntent(client, state, { type: "CONNECT", fromPort, toPort }));
-      setSelectedComponent("substrate");
+      selectScenePart({ id: "substrate:base", kind: "substrate", surface: "substrate", label: "Substrate base plate" });
     } finally {
       setBusy(false);
     }
@@ -123,6 +132,46 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
     setBusy(true);
     try {
       setState(await compileDraftWorkspace(client, state, { sign }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function selectScenePart(selection: ThreeAssemblySelection) {
+    setSelectedComponent(selection.surface);
+    setSelectedPart(selection);
+  }
+
+  function toggleTakeOut() {
+    setExtractedPartId(current => current === selectedPart.id ? undefined : selectedPart.id);
+  }
+
+  async function disconnectSelectedPipe() {
+    if (state?.status !== "READY" || selectedPart.kind !== "pipe") {
+      return;
+    }
+    setBusy(true);
+    try {
+      setState(await applyDraftIntent(client, state, { type: "DISCONNECT", pipeId: selectedPart.id }));
+      setExtractedPartId(undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function replaceSelectedComponent() {
+    if (state?.status !== "READY" || selectedPart.kind !== "component") {
+      return;
+    }
+    setBusy(true);
+    try {
+      setState(await applyDraftIntent(client, state, {
+        type: "REPLACE_COMPONENT",
+        oldComponentId: selectedPart.surface,
+        newCatalogEntryId: replacementEntryId
+      }));
+      setCatalogEntryId(replacementEntryId);
+      setExtractedPartId(undefined);
     } finally {
       setBusy(false);
     }
@@ -199,7 +248,15 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
 
             <div className={`composition-plane ${viewClassName(activeView)}`}>
               <Suspense fallback={<div className="three-assembly-scene" aria-label="3D assembly scene" />}>
-              <ThreeAssemblyScene activeView={activeView} selectedSurface={selectedComponent} onSelect={setSelectedComponent} onViewChange={setActiveView} />
+              <ThreeAssemblyScene
+                activeView={activeView}
+                selectedSurface={selectedComponent}
+                selectedPartId={selectedPart.id}
+                extractedPartId={extractedPartId}
+                onSelect={setSelectedComponent}
+                onSelectPart={selectScenePart}
+                onViewChange={setActiveView}
+              />
             </Suspense>
             <div className="view-mode-badge">
               <strong>{activeView}</strong>
@@ -219,24 +276,24 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
               <path className="pipe pipe-pending" d="M312 382 C410 450 510 464 610 542" />
             </svg>
 
-            <button type="button" className={moduleClass("component-module gateway-module", selectedComponent, "gateway")} onClick={() => setSelectedComponent("gateway")}>
+            <button type="button" className={moduleClass("component-module gateway-module", selectedComponent, "gateway")} onClick={() => selectScenePart({ id: "component:gateway", kind: "component", surface: "gateway", label: "API Gateway" })}>
               <span className="module-icon green">N</span>
               <strong>API Gateway</strong>
               <span className="module-status">Included</span>
             </button>
-            <button type="button" className={moduleClass("component-module order-module", selectedComponent, "order")} onClick={() => setSelectedComponent("order")}>
+            <button type="button" className={moduleClass("component-module order-module", selectedComponent, "order")} onClick={() => selectScenePart({ id: "component:order", kind: "component", surface: "order", label: "Order Service" })}>
               <span className="module-icon leaf">S</span>
               <strong>Order Service</strong>
               <span className="port-dot right" />
               <span className="port-dot bottom" />
             </button>
-            <button type="button" className={moduleClass("component-module inventory-module", selectedComponent, "inventory")} onClick={() => setSelectedComponent("inventory")}>
+            <button type="button" className={moduleClass("component-module inventory-module", selectedComponent, "inventory")} onClick={() => selectScenePart({ id: "component:inventory", kind: "component", surface: "inventory", label: "Inventory Service" })}>
               <span className="module-icon leaf">S</span>
               <strong>Inventory Service</strong>
               <span className="port-dot left" />
               <span className="port-dot right" />
             </button>
-            <button type="button" className={moduleClass("component-module validation-module", selectedComponent, "validation")} onClick={() => setSelectedComponent("validation")}>
+            <button type="button" className={moduleClass("component-module validation-module", selectedComponent, "validation")} onClick={() => selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Validation Service" })}>
               <span className="module-icon purple">V</span>
               <strong>Validation Service</strong>
               <span className="port-handle offer-port">{ports[0] ?? "validate.order"}</span>
@@ -245,32 +302,32 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
               <span className="port-dot right" />
               <span className="port-dot bottom" />
             </button>
-            <button type="button" className={moduleClass("component-module payment-module", selectedComponent, "payment")} onClick={() => setSelectedComponent("payment")}>
+            <button type="button" className={moduleClass("component-module payment-module", selectedComponent, "payment")} onClick={() => selectScenePart({ id: "component:payment", kind: "component", surface: "payment", label: "Payment Service" })}>
               <span className="module-icon leaf">P</span>
               <strong>Payment Service</strong>
               <span className="port-dot left" />
             </button>
-            <button type="button" className={moduleClass("component-module audit-module", selectedComponent, "audit")} onClick={() => setSelectedComponent("audit")}>
+            <button type="button" className={moduleClass("component-module audit-module", selectedComponent, "audit")} onClick={() => selectScenePart({ id: "component:audit", kind: "component", surface: "audit", label: "Audit Service" })}>
               <span className="module-icon blue">A</span>
               <strong>Audit Service</strong>
               <span className="port-dot right" />
             </button>
-            <button type="button" className={moduleClass("component-module notification-module", selectedComponent, "notification")} onClick={() => setSelectedComponent("notification")}>
+            <button type="button" className={moduleClass("component-module notification-module", selectedComponent, "notification")} onClick={() => selectScenePart({ id: "component:notification", kind: "component", surface: "notification", label: "Notification Service" })}>
               <span className="module-icon orange">F</span>
               <strong>Notification Service</strong>
               <span className="port-dot right" />
             </button>
-            <button type="button" className={moduleClass("component-module workflow-module", selectedComponent, "workflow")} onClick={() => setSelectedComponent("workflow")}>
+            <button type="button" className={moduleClass("component-module workflow-module", selectedComponent, "workflow")} onClick={() => selectScenePart({ id: "component:workflow", kind: "component", surface: "workflow", label: "Workflow Service" })}>
               <span className="module-icon blue">W</span>
               <strong>Workflow Service</strong>
               <span className="port-dot bottom" />
             </button>
-            <button type="button" className={moduleClass("component-module adapter-module", selectedComponent, "adapter")} onClick={() => setSelectedComponent("adapter")}>
+            <button type="button" className={moduleClass("component-module adapter-module", selectedComponent, "adapter")} onClick={() => selectScenePart({ id: "component:adapter", kind: "component", surface: "adapter", label: "Storage Adapter" })}>
               <span className="module-icon red">S</span>
               <strong>Storage Adapter</strong>
               <span className="port-dot bottom" />
             </button>
-            <button type="button" className={moduleClass("exploded-module", selectedComponent, "validation")} onClick={() => setSelectedComponent("validation")}>
+            <button type="button" className={moduleClass("exploded-module", selectedComponent, "validation")} onClick={() => selectScenePart({ id: "component:validation:exploded", kind: "component", surface: "validation", label: "Validation Service exploded inspection" })}>
               <span className="module-icon purple">V</span>
               <strong>Validation Service</strong>
               <span>Exploded inspection</span>
@@ -281,7 +338,7 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
           <div className="substrate-strip" aria-label="Substrate runtime layer">
             <div className="substrate-label">Substrate Runtime Layer</div>
             {substrateCapabilities.map(capability => (
-              <button type="button" className={selectedComponent === "substrate" ? "substrate-tile selected" : "substrate-tile"} key={capability.name} onClick={() => setSelectedComponent("substrate")}>
+              <button type="button" className={selectedComponent === "substrate" ? "substrate-tile selected" : "substrate-tile"} key={capability.name} onClick={() => selectScenePart({ id: "substrate:base", kind: "substrate", surface: "substrate", label: "Substrate base plate" })}>
                 <span className={`substrate-logo ${capability.status}`}>{capability.short}</span>
                 <strong>{capability.name}</strong>
                 <span className="health-dot" />
@@ -305,6 +362,38 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
               </button>
             ))}
           </div>
+          <section className="inspector-card">
+            <h2>Selected Scene Part</h2>
+            <dl>
+              <dt>Part</dt><dd>{selectedPart.label}</dd>
+              <dt>Kind</dt><dd>{selectedPart.kind}</dd>
+              <dt>State</dt><dd>{extractedPartId === selectedPart.id ? "Taken out for inspection" : "Installed"}</dd>
+            </dl>
+            <div className="scene-action-row">
+              <button type="button" className="secondary" onClick={toggleTakeOut}>
+                {extractedPartId === selectedPart.id ? "Return to Assembly" : "Take Out"}
+              </button>
+              <button type="button" className="secondary" disabled={busy || state?.status !== "READY" || selectedPart.kind !== "pipe"} onClick={disconnectSelectedPipe}>
+                Disconnect Pipe
+              </button>
+            </div>
+          </section>
+          <section className="inspector-card">
+            <h2>Replace Component</h2>
+            <label>
+              Outer replacement candidate
+              <select value={replacementEntryId} onChange={event => setReplacementEntryId(event.target.value)}>
+                {paletteEntries.map(entry => (
+                  <option value={entry.catalogEntryId} key={entry.catalogEntryId}>{paletteLabel(entry)}</option>
+                ))}
+              </select>
+            </label>
+            <button type="button" disabled={busy || state?.status !== "READY" || selectedPart.kind !== "component"} onClick={replaceSelectedComponent}>
+              Validate & Replace
+            </button>
+            {state?.status !== "READY" && <p className="live-data-notice">Create a draft before governed replacements are allowed.</p>}
+            {state?.status === "READY" && state.lastResponse?.status === "INVALID" && <p className="studio-error">{state.lastResponse.reason}: {state.lastResponse.details}</p>}
+          </section>
           <section className="inspector-card">
             <h2>Component Details</h2>
             <dl>

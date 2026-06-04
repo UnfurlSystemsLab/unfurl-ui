@@ -17,6 +17,10 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /3D assembly scene/);
     assert.match(html, /Inspector/);
     assert.match(html, /Component Details/);
+    assert.match(html, /Selected Scene Part/);
+    assert.match(html, /Take Out/);
+    assert.match(html, /Replace Component/);
+    assert.match(html, /Validate &amp; Replace/);
     assert.match(html, /Validate Connection/);
   });
 

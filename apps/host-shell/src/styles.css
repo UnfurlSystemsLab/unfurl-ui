@@ -8,7 +8,7 @@ body {
   margin: 0;
 }
 
-button, input {
+button, input, select {
   font: inherit;
 }
 
@@ -45,6 +45,17 @@ input {
   box-sizing: border-box;
   border: 1px solid #c8ccd4;
   border-radius: 6px;
+  padding: 8px;
+  margin-top: 4px;
+}
+
+select {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #c8ccd4;
+  border-radius: 6px;
+  background: white;
   padding: 8px;
   margin-top: 4px;
 }
@@ -964,6 +975,17 @@ th, td {
   display: grid;
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.scene-action-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.scene-action-row button {
+  min-width: 0;
 }
 
 .inspector-result {
