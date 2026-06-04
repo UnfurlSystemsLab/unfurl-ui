@@ -176,7 +176,11 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
             ))}
           </div>
 
-          <div className="composition-plane">
+          <div className={`composition-plane ${viewClassName(activeView)}`}>
+            <div className="view-mode-badge">
+              <strong>{activeView}</strong>
+              <span>{viewDescription(activeView)}</span>
+            </div>
             <div className="assembly-cabinet" aria-hidden="true">
               <span className="cabinet-bolt top-left" />
               <span className="cabinet-bolt top-right" />
@@ -455,18 +459,32 @@ function fallbackCatalog(): readonly VisualCatalogEntry[] {
 
 function toolGlyph(tool: string): string {
   return {
-    Select: "↖",
-    Move: "✣",
-    Rotate: "⟳",
-    Pan: "✥",
-    Zoom: "⌕",
-    Isolate: "□",
-    Hide: "◌",
-    "Show All": "◎",
-    Connections: "⌁",
-    Measure: "⌞",
-    "Reset View": "⟲"
-  }[tool] ?? "•";
+    Select: "SEL",
+    Move: "MOV",
+    Rotate: "ROT",
+    Pan: "PAN",
+    Zoom: "ZOM",
+    Isolate: "ISO",
+    Hide: "HID",
+    "Show All": "ALL",
+    Connections: "CON",
+    Measure: "MEA",
+    "Reset View": "RST"
+  }[tool] ?? "DOT";
+}
+
+function viewClassName(view: string): string {
+  return `view-${view.toLowerCase()}`;
+}
+
+function viewDescription(view: string): string {
+  return {
+    Assembly: "complete governed composition",
+    Exploded: "selected component pulled forward",
+    Ports: "offers, requirements, and handles emphasized",
+    Substrate: "runtime layer and closed-world sockets emphasized",
+    Validation: "policy and compatibility status emphasized"
+  }[view] ?? "composition surface";
 }
 
 const substrateCapabilities = [
