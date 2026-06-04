@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { StudioFabricClient } from "@unfurl/fabric-validation-client";
 import type { VisualCatalogEntry } from "@unfurl/visual-manifest";
 import {
@@ -8,6 +8,12 @@ import {
   type DraftWorkspaceState
 } from "./draftWorkspace.js";
 import { buildSigningHandoff } from "./signingHandoff.js";
+import type { ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
+
+const ThreeAssemblyScene = lazy(async () => {
+  const module = await import("./ThreeAssemblyScene.js");
+  return { default: module.ThreeAssemblyScene };
+});
 
 export type DraftWorkspacePanelProps = {
   readonly client: Pick<
@@ -17,17 +23,7 @@ export type DraftWorkspacePanelProps = {
   readonly initialBaseCatalogHash?: string | undefined;
 };
 
-type SelectedSurfaceId =
-  | "gateway"
-  | "order"
-  | "inventory"
-  | "validation"
-  | "payment"
-  | "audit"
-  | "notification"
-  | "workflow"
-  | "adapter"
-  | "substrate";
+type SelectedSurfaceId = ThreeAssemblySurfaceId;
 
 type InspectorDetails = {
   readonly name: string;
@@ -202,6 +198,9 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
           </div>
 
           <div className={`composition-plane ${viewClassName(activeView)}`}>
+            <Suspense fallback={<div className="three-assembly-scene" aria-label="3D assembly scene" />}>
+              <ThreeAssemblyScene activeView={activeView} selectedSurface={selectedComponent} onSelect={setSelectedComponent} />
+            </Suspense>
             <div className="view-mode-badge">
               <strong>{activeView}</strong>
               <span>{viewDescription(activeView)}</span>

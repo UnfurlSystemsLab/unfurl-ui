@@ -14,6 +14,7 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /API Gateway/);
     assert.match(html, /Validation Service/);
     assert.match(html, /Substrate Runtime Layer/);
+    assert.match(html, /3D assembly scene/);
     assert.match(html, /Inspector/);
     assert.match(html, /Component Details/);
     assert.match(html, /Validate Connection/);
