@@ -197,9 +197,9 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
             ))}
           </div>
 
-          <div className={`composition-plane ${viewClassName(activeView)}`}>
-            <Suspense fallback={<div className="three-assembly-scene" aria-label="3D assembly scene" />}>
-              <ThreeAssemblyScene activeView={activeView} selectedSurface={selectedComponent} onSelect={setSelectedComponent} />
+            <div className={`composition-plane ${viewClassName(activeView)}`}>
+              <Suspense fallback={<div className="three-assembly-scene" aria-label="3D assembly scene" />}>
+              <ThreeAssemblyScene activeView={activeView} selectedSurface={selectedComponent} onSelect={setSelectedComponent} onViewChange={setActiveView} />
             </Suspense>
             <div className="view-mode-badge">
               <strong>{activeView}</strong>

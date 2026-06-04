@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 export type ThreeAssemblySurfaceId =
   | "gateway"
@@ -17,6 +18,7 @@ export type ThreeAssemblySceneProps = {
   readonly activeView: string;
   readonly selectedSurface: ThreeAssemblySurfaceId;
   readonly onSelect: (surface: ThreeAssemblySurfaceId) => void;
+  readonly onViewChange?: (view: string) => void;
 };
 
 type ModulePlacement = {
@@ -42,13 +44,19 @@ type SceneHandles = {
   };
 };
 
-export function ThreeAssemblyScene({ activeView, selectedSurface, onSelect }: ThreeAssemblySceneProps) {
+const initialCameraPosition = new THREE.Vector3(7.9, 5.0, 10.2);
+const initialCameraTarget = new THREE.Vector3(0.2, -0.7, 0.12);
+const viewShortcuts = ["Assembly", "Exploded", "Ports", "Substrate", "Validation"] as const;
+
+export function ThreeAssemblyScene({ activeView, selectedSurface, onSelect, onViewChange }: ThreeAssemblySceneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const onSelectRef = useRef(onSelect);
+  const onViewChangeRef = useRef(onViewChange);
   const selectedRef = useRef(selectedSurface);
   const viewRef = useRef(activeView);
 
   onSelectRef.current = onSelect;
+  onViewChangeRef.current = onViewChange;
   selectedRef.current = selectedSurface;
   viewRef.current = activeView;
 
@@ -71,8 +79,29 @@ export function ThreeAssemblyScene({ activeView, selectedSurface, onSelect }: Th
     scene.fog = new THREE.Fog(0xf8fbff, 10, 22);
 
     const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
-    camera.position.set(7.9, 5.0, 10.2);
-    camera.lookAt(0.2, -0.7, 0.12);
+    camera.position.copy(initialCameraPosition);
+    camera.lookAt(initialCameraTarget);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.copy(initialCameraTarget);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.enablePan = true;
+    controls.enableZoom = true;
+    controls.minDistance = 4.8;
+    controls.maxDistance = 17;
+    controls.minPolarAngle = 0.24;
+    controls.maxPolarAngle = 1.42;
+    controls.screenSpacePanning = true;
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: THREE.MOUSE.PAN
+    };
+    controls.touches = {
+      ONE: THREE.TOUCH.ROTATE,
+      TWO: THREE.TOUCH.DOLLY_PAN
+    };
 
     addLighting(scene);
 
@@ -87,6 +116,10 @@ export function ThreeAssemblyScene({ activeView, selectedSurface, onSelect }: Th
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
+    const downPoint = new THREE.Vector2();
+    const focusTarget = new THREE.Vector3();
+    const focusCameraPosition = new THREE.Vector3();
+    let hasFocusAnimation = false;
 
     function resize() {
       const rect = hostElement.getBoundingClientRect();
@@ -95,21 +128,91 @@ export function ThreeAssemblyScene({ activeView, selectedSurface, onSelect }: Th
       camera.updateProjectionMatrix();
     }
 
-    function handlePointerDown(event: PointerEvent) {
+    function raycastSurface(event: MouseEvent | PointerEvent): ThreeAssemblySurfaceId | undefined {
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
       raycaster.setFromCamera(pointer, camera);
       const hit = raycaster.intersectObjects(clickable, true)[0];
-      const surface = resolveSurface(hit?.object);
+      return resolveSurface(hit?.object);
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      downPoint.set(event.clientX, event.clientY);
+      renderer.domElement.style.cursor = "grabbing";
+    }
+
+    function handlePointerUp(event: PointerEvent) {
+      renderer.domElement.style.cursor = "grab";
+      const moved = downPoint.distanceTo(new THREE.Vector2(event.clientX, event.clientY));
+      if (moved > 5) {
+        return;
+      }
+      const surface = raycastSurface(event);
       if (surface) {
         onSelectRef.current(surface);
       }
     }
 
+    function handleDoubleClick(event: MouseEvent) {
+      const surface = raycastSurface(event) ?? selectedRef.current;
+      focusSurface(surface);
+    }
+
+    function handlePointerLeave() {
+      renderer.domElement.style.cursor = "grab";
+    }
+
+    function handleContextMenu(event: MouseEvent) {
+      event.preventDefault();
+    }
+
+    function focusSurface(surface: ThreeAssemblySurfaceId) {
+      const object = handles.moduleGroups.get(surface);
+      if (!object) {
+        return;
+      }
+      object.getWorldPosition(focusTarget);
+      const currentDirection = camera.position.clone().sub(controls.target).normalize();
+      const distance = surface === "substrate" ? 7.2 : 5.4;
+      focusCameraPosition.copy(focusTarget).addScaledVector(currentDirection, distance);
+      hasFocusAnimation = true;
+    }
+
+    function resetCamera() {
+      focusTarget.copy(initialCameraTarget);
+      focusCameraPosition.copy(initialCameraPosition);
+      hasFocusAnimation = true;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "r" || event.key === "Escape") {
+        resetCamera();
+      } else if (key === "f") {
+        focusSurface(selectedRef.current);
+      } else if (/^[1-5]$/.test(event.key)) {
+        const nextView = viewShortcuts[Number(event.key) - 1];
+        if (nextView) {
+          onViewChangeRef.current?.(nextView);
+        }
+      }
+    }
+
     renderer.domElement.addEventListener("pointerdown", handlePointerDown);
+    renderer.domElement.addEventListener("pointerup", handlePointerUp);
+    renderer.domElement.addEventListener("pointerleave", handlePointerLeave);
+    renderer.domElement.addEventListener("dblclick", handleDoubleClick);
+    window.addEventListener("keydown", handleKeyDown);
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(hostElement);
+    renderer.domElement.style.cursor = "grab";
+    renderer.domElement.addEventListener("contextmenu", handleContextMenu);
     resize();
 
     let frame = 0;
@@ -119,6 +222,16 @@ export function ThreeAssemblyScene({ activeView, selectedSurface, onSelect }: Th
       root.rotation.y = -0.23 + Math.sin(frame * 0.8) * 0.01;
       root.rotation.x = -0.06 + Math.sin(frame * 0.55) * 0.006;
       handles.explodedGroup.position.y = -0.42 + Math.sin(frame * 1.4) * 0.018;
+      if (hasFocusAnimation) {
+        controls.target.lerp(focusTarget, 0.08);
+        camera.position.lerp(focusCameraPosition, 0.08);
+        if (controls.target.distanceTo(focusTarget) < 0.015 && camera.position.distanceTo(focusCameraPosition) < 0.02) {
+          controls.target.copy(focusTarget);
+          camera.position.copy(focusCameraPosition);
+          hasFocusAnimation = false;
+        }
+      }
+      controls.update();
       applySceneState(handles, selectedRef.current, viewRef.current, frame);
       renderer.render(scene, camera);
       raf = window.requestAnimationFrame(animate);
@@ -128,7 +241,13 @@ export function ThreeAssemblyScene({ activeView, selectedSurface, onSelect }: Th
     return () => {
       window.cancelAnimationFrame(raf);
       resizeObserver.disconnect();
+      controls.dispose();
       renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+      renderer.domElement.removeEventListener("pointerup", handlePointerUp);
+      renderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
+      renderer.domElement.removeEventListener("dblclick", handleDoubleClick);
+      renderer.domElement.removeEventListener("contextmenu", handleContextMenu);
+      window.removeEventListener("keydown", handleKeyDown);
       hostElement.removeChild(renderer.domElement);
       renderer.dispose();
       disposeObject(scene);

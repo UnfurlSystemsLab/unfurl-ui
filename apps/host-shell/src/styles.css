@@ -531,12 +531,15 @@ th, td {
   z-index: 2;
   opacity: 1;
   pointer-events: auto;
+  touch-action: none;
 }
 
 .three-assembly-scene canvas {
   display: block;
   width: 100%;
   height: 100%;
+  cursor: grab;
+  outline: none;
 }
 
 .view-mode-badge {
