@@ -516,11 +516,12 @@ th, td {
 
 .composition-plane {
   position: relative;
-  min-height: 600px;
+  min-height: 680px;
   overflow: hidden;
   background:
-    radial-gradient(circle at 48% 44%, rgba(186, 230, 253, 0.46), transparent 38%),
-    linear-gradient(135deg, #f8fbff 0%, #edf5fc 100%);
+    radial-gradient(circle at 52% 40%, rgba(186, 230, 253, 0.42), transparent 36%),
+    radial-gradient(circle at 68% 62%, rgba(124, 58, 237, 0.12), transparent 24%),
+    linear-gradient(135deg, #fbfdff 0%, #edf5fc 100%);
   perspective: 1200px;
 }
 
@@ -630,24 +631,26 @@ th, td {
   justify-items: center;
   align-content: center;
   gap: 3px;
-  width: 104px;
-  min-height: 58px;
-  border: 1px solid rgba(148, 163, 184, 0.38);
-  border-radius: 7px;
-  padding: 6px 8px;
-  color: #111827;
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.1);
+  width: 92px;
+  min-height: 42px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 6px;
+  padding: 4px 6px;
+  color: transparent;
+  background: transparent;
+  box-shadow: none;
   text-align: center;
-  font-size: 11px;
-  backdrop-filter: blur(6px);
+  font-size: 10px;
+  opacity: 0.02;
+  backdrop-filter: none;
 }
 
 .component-module.selected,
 .exploded-module {
-  border-color: #7c3aed;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.26), 0 12px 26px rgba(76, 29, 149, 0.16);
+  border-color: rgba(124, 58, 237, 0.18);
+  background: transparent;
+  box-shadow: none;
+  opacity: 0.04;
 }
 
 .view-exploded .assembly-cabinet {
@@ -714,7 +717,6 @@ th, td {
 .exploded-module { right: 48px; top: 230px; width: 126px; min-height: 102px; }
 
 .view-assembly .exploded-module,
-.view-ports .exploded-module,
 .view-substrate .exploded-module,
 .view-validation .exploded-module {
   display: none;
