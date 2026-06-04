@@ -5,14 +5,15 @@ import { createHttpStudioFabricClient, createMockStudioApiFetch } from "@unfurl/
 import { DraftWorkspacePanel } from "./DraftWorkspacePanel.js";
 
 describe("DraftWorkspacePanel", () => {
-  it("renders session, intent, compile, and handoff sections", () => {
+  it("renders the governed composition workbench", () => {
     const html = renderToString(<DraftWorkspacePanel client={client()} />);
 
-    assert.match(html, /Draft Workspace/);
-    assert.match(html, /Create Draft/);
-    assert.match(html, /Add Component/);
-    assert.match(html, /Connect Ports/);
-    assert.match(html, /Signing Handoff/);
+    assert.match(html, /Unfurl Studio Workbench/);
+    assert.match(html, /Catalog/);
+    assert.match(html, /Document Workflow/);
+    assert.match(html, /Substrate/);
+    assert.match(html, /Inspector/);
+    assert.match(html, /Validate Connection/);
   });
 });
 

@@ -22,7 +22,7 @@ describe("AppShell", () => {
 
   for (const [path, text] of [
     ["/components/fabric-studio/catalog", "Catalog Palette"],
-    ["/components/fabric-studio/workspace", "Draft Workspace"],
+    ["/components/fabric-studio/workspace", "Unfurl Studio Workbench"],
     ["/components/fabric-studio/read-only", "Read-Only Studio"],
     ["/components/fabric-studio/signing", "Signing Handoff"],
     ["/components/fabric-studio/graph", "Graph View"],
@@ -41,7 +41,7 @@ describe("AppShell", () => {
 
       assert.match(html, new RegExp(text));
       assert.match(html, /Catalog Palette/);
-      assert.match(html, /Draft Workspace/);
+      assert.match(html, /Studio Workbench/);
       assert.match(html, /Read-Only Studio/);
       assert.match(html, /Signing Handoff/);
       assert.match(html, /Graph View/);

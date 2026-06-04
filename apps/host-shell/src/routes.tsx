@@ -17,7 +17,7 @@ import { useSearchParams } from "react-router-dom";
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/components/fabric-studio/deployment-planner" replace />} />
+      <Route path="/" element={<Navigate to="/components/fabric-studio/workspace" replace />} />
       <Route path="/components/fabric-studio/catalog" element={<CatalogRoute />} />
       <Route path="/components/fabric-studio/workspace" element={<WorkspaceRoute />} />
       <Route path="/components/fabric-studio/read-only" element={<ReadOnlyRoute />} />

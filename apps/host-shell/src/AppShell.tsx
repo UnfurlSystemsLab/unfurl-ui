@@ -16,7 +16,7 @@ export function AppShell({ mode = studioMode() }: AppShellProps) {
             Catalog Palette
           </NavLink>
           <NavLink to="/components/fabric-studio/workspace">
-            Draft Workspace
+            Studio Workbench
           </NavLink>
           <NavLink to="/components/fabric-studio/read-only">
             Read-Only Studio
