@@ -39,6 +39,9 @@ export function AppShell({ mode = studioMode() }: AppShellProps) {
           <NavLink to="/components/fabric-studio/diff">
             Diff
           </NavLink>
+          <NavLink to="/components/fabric-studio/help">
+            Help
+          </NavLink>
         </nav>
         <div className="mode-pill">{mode} mode</div>
       </aside>

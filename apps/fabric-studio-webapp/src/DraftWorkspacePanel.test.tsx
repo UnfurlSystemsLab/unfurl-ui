@@ -12,7 +12,11 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /Guided Tour/);
     assert.match(html, /Welcome to Unfurl Studio/);
     assert.match(html, /governed visual workbench/);
-    assert.match(html, /scanned catalog/);
+    assert.match(html, /href="\/components\/fabric-studio\/help#scanned-catalog"/);
+    assert.match(html, /href="\/components\/fabric-studio\/help#component-claims"/);
+    assert.match(html, /href="\/components\/fabric-studio\/help#needs"/);
+    assert.match(html, /href="\/components\/fabric-studio\/help#trust-policy"/);
+    assert.match(html, /href="\/components\/fabric-studio\/help#deployment-policy"/);
     assert.match(html, /Step.*1.*of.*8/s);
     assert.match(html, /Assembly/);
     assert.match(html, /Catalog/);

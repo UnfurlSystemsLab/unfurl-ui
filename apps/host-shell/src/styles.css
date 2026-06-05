@@ -151,6 +151,29 @@ th, td {
   margin-bottom: 16px;
 }
 
+.studio-help-page {
+  max-width: 980px;
+}
+
+.help-section {
+  scroll-margin-top: 76px;
+}
+
+.help-section h2 {
+  margin: 0 0 8px;
+}
+
+.help-section pre {
+  overflow: auto;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .shape-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -1102,6 +1125,11 @@ th, td {
   margin: 0;
   color: #334155;
   line-height: 1.45;
+}
+
+.tutorial-card a {
+  color: #1d4ed8;
+  font-weight: 800;
 }
 
 .tutorial-dots {

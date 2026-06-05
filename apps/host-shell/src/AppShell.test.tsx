@@ -28,7 +28,8 @@ describe("AppShell", () => {
     ["/components/fabric-studio/graph", "Graph View"],
     ["/components/fabric-studio/audit", "Decision Audit"],
     ["/components/fabric-studio/intents", "Intent History"],
-    ["/components/fabric-studio/diff", "Visual Diff"]
+    ["/components/fabric-studio/diff", "Visual Diff"],
+    ["/components/fabric-studio/help", "Studio Setup Help"]
   ] as const) {
     it(`renders ${path}`, () => {
       const html = renderToString(
@@ -49,6 +50,7 @@ describe("AppShell", () => {
       assert.match(html, /Audit/);
       assert.match(html, /Intents/);
       assert.match(html, /Diff/);
+      assert.match(html, /Help/);
     });
   }
 });

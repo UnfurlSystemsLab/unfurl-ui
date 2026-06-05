@@ -8,6 +8,7 @@ import {
   IntentHistoryPanel,
   ReadOnlyStudioPanel,
   SigningHandoffPanel,
+  StudioHelpPanel,
   VisualDiffPanel,
   createAllShapesDeploymentPlannerState
 } from "@unfurl/fabric-studio-webapp";
@@ -26,6 +27,7 @@ export function AppRoutes() {
       <Route path="/components/fabric-studio/audit" element={<AuditRoute />} />
       <Route path="/components/fabric-studio/intents" element={<IntentHistoryRoute />} />
       <Route path="/components/fabric-studio/diff" element={<VisualDiffRoute />} />
+      <Route path="/components/fabric-studio/help" element={<StudioHelpPanel />} />
       <Route path="/components/fabric-studio/deployment-planner" element={<DeploymentPlannerRoute />} />
     </Routes>
   );

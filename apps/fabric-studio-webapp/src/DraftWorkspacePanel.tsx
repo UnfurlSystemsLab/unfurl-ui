@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import type { StudioFabricClient } from "@unfurl/fabric-validation-client";
 import type { VisualCatalogEntry } from "@unfurl/visual-manifest";
 import {
@@ -54,7 +55,7 @@ type ReplacementCandidate = {
 type TutorialStep = {
   readonly id: string;
   readonly title: string;
-  readonly body: string;
+  readonly body: ReactNode;
   readonly target: "catalog" | "stage" | "views" | "inspector" | "replacement" | "substrate" | "compile";
   readonly action?: () => void;
 };
@@ -211,7 +212,17 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
     {
       id: "intro",
       title: "Welcome to Unfurl Studio",
-      body: "Studio is a governed visual workbench for assembling Intelligent Components into a Fabric composition. Before you compile, you need a scanned catalog, component claims, needs, and any trust or deployment policy you want Fabric to enforce.",
+      body: (
+        <>
+          Studio is a governed visual workbench for assembling Intelligent Components into a Fabric composition.
+          Before you compile, set up a{" "}
+          <a href="/components/fabric-studio/help#scanned-catalog">scanned catalog</a>,{" "}
+          <a href="/components/fabric-studio/help#component-claims">component claims</a>,{" "}
+          <a href="/components/fabric-studio/help#needs">needs</a>,{" "}
+          <a href="/components/fabric-studio/help#trust-policy">trust policy</a>, and{" "}
+          <a href="/components/fabric-studio/help#deployment-policy">deployment policy</a>.
+        </>
+      ),
       target: "stage"
     },
     {

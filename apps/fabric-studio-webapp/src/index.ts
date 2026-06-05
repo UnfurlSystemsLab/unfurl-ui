@@ -27,6 +27,7 @@ export * from "./DecisionAuditPanel.js";
 export * from "./GraphPanel.js";
 export * from "./IntentHistoryPanel.js";
 export * from "./VisualDiffPanel.js";
+export * from "./StudioHelpPanel.js";
 export * from "./SelectedShapesPanel.js";
 export * from "./RejectedShapesPanel.js";
 export * from "./IsolationMatchesPanel.js";
