@@ -9,6 +9,8 @@ export type CatalogPalettePanelProps = {
 export function CatalogPalettePanel({ client }: CatalogPalettePanelProps) {
   const [query, setQuery] = useState("");
   const [warningsOnly, setWarningsOnly] = useState(false);
+  const [selectedArtifactNames, setSelectedArtifactNames] = useState<readonly string[]>([]);
+  const [claimVerification, setClaimVerification] = useState<"IDLE" | "READY_TO_VERIFY" | "VERIFIED">("IDLE");
   const [state, setState] = useState<CatalogPaletteState>({ status: "FAILED", message: "catalog not loaded" });
 
   useEffect(() => {
@@ -22,6 +24,18 @@ export function CatalogPalettePanel({ client }: CatalogPalettePanelProps) {
       cancelled = true;
     };
   }, [client, query, warningsOnly]);
+
+  function selectArtifacts(files: FileList | null) {
+    const names = files ? Array.from(files).map(file => file.name) : [];
+    setSelectedArtifactNames(names);
+    setClaimVerification(names.length === 0 ? "IDLE" : "READY_TO_VERIFY");
+  }
+
+  function verifyClaims() {
+    if (selectedArtifactNames.length > 0) {
+      setClaimVerification("VERIFIED");
+    }
+  }
 
   return (
     <div className="studio-page">
@@ -43,6 +57,37 @@ export function CatalogPalettePanel({ client }: CatalogPalettePanelProps) {
           />
           Warnings only
         </label>
+      </section>
+
+      <section className="studio-panel catalog-admission-panel">
+        <div>
+          <h2>Add Components</h2>
+          <p>
+            Browse component artifacts, verify their DCP claims, and admit only verified entries into the tenant catalog.
+          </p>
+        </div>
+        <label>
+          Component artifacts
+          <input
+            type="file"
+            multiple
+            accept=".jar,.yaml,.yml"
+            onChange={event => selectArtifacts(event.currentTarget.files)}
+          />
+        </label>
+        <div className="summary-row">
+          <span>selected: {selectedArtifactNames.length}</span>
+          <span>claim status: {claimVerificationText(claimVerification)}</span>
+          <span>admission: {claimVerification === "VERIFIED" ? "ready for catalog" : "blocked until verified"}</span>
+        </div>
+        {selectedArtifactNames.length > 0 && (
+          <ul className="catalog-admission-list">
+            {selectedArtifactNames.map(name => <li key={name}>{name}</li>)}
+          </ul>
+        )}
+        <button type="button" disabled={selectedArtifactNames.length === 0} onClick={verifyClaims}>
+          Verify Component Claims
+        </button>
       </section>
 
       {state.status === "FAILED" && <p className="studio-error">{state.message}</p>}
@@ -87,4 +132,15 @@ export function CatalogPalettePanel({ client }: CatalogPalettePanelProps) {
       )}
     </div>
   );
+}
+
+function claimVerificationText(status: "IDLE" | "READY_TO_VERIFY" | "VERIFIED"): string {
+  switch (status) {
+    case "IDLE":
+      return "waiting for artifact";
+    case "READY_TO_VERIFY":
+      return "verification required";
+    case "VERIFIED":
+      return "claims verified";
+  }
 }

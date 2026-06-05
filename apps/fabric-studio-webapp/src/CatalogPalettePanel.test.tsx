@@ -11,6 +11,10 @@ describe("CatalogPalettePanel", () => {
     assert.match(html, /Catalog Palette/);
     assert.match(html, /Search catalog/);
     assert.match(html, /Warnings only/);
+    assert.match(html, /Add Components/);
+    assert.match(html, /Component artifacts/);
+    assert.match(html, /Verify Component Claims/);
+    assert.match(html, /blocked until verified/);
   });
 });
 
