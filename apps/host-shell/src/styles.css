@@ -283,6 +283,7 @@ th, td {
 
 .studio-workbench-page {
   min-height: calc(100vh - 65px);
+  position: relative;
 }
 
 .workbench-topbar {
@@ -342,6 +343,26 @@ th, td {
   display: flex;
   gap: 8px;
   white-space: nowrap;
+}
+
+.tutorial-active .workbench-palette,
+.tutorial-active .workbench-stage,
+.tutorial-active .workbench-inspector,
+.tutorial-active .substrate-strip,
+.tutorial-active .workbench-actions {
+  transition: box-shadow 160ms ease, filter 160ms ease;
+}
+
+.tutorial-target-catalog .workbench-palette,
+.tutorial-target-stage .workbench-stage,
+.tutorial-target-views .workbench-view-tabs,
+.tutorial-target-inspector .workbench-inspector,
+.tutorial-target-replacement .workbench-inspector,
+.tutorial-target-substrate .substrate-strip,
+.tutorial-target-compile .workbench-actions {
+  position: relative;
+  z-index: 18;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.28), 0 16px 40px rgba(15, 23, 42, 0.16);
 }
 
 .workbench-grid {
@@ -1024,6 +1045,79 @@ th, td {
 
 .replacement-card.blocked.selected {
   box-shadow: inset 3px 0 0 #dc2626;
+}
+
+.tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  background: rgba(15, 23, 42, 0.12);
+}
+
+.tutorial-card {
+  position: fixed;
+  z-index: 41;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 32px));
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+  padding: 14px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+  pointer-events: auto;
+}
+
+.tutorial-card-catalog { left: 292px; top: 132px; }
+.tutorial-card-stage,
+.tutorial-card-views { left: 50%; top: 148px; transform: translateX(-50%); }
+.tutorial-card-inspector,
+.tutorial-card-replacement,
+.tutorial-card-compile { right: 378px; top: 148px; }
+.tutorial-card-substrate { left: 50%; bottom: 118px; transform: translateX(-50%); }
+
+.tutorial-progress,
+.tutorial-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.tutorial-progress span {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.tutorial-card h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.tutorial-card p {
+  margin: 0;
+  color: #334155;
+  line-height: 1.45;
+}
+
+.tutorial-dots {
+  display: flex;
+  gap: 5px;
+}
+
+.tutorial-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+.tutorial-dots span.active {
+  background: #2563eb;
 }
 
 .inspector-result {

@@ -51,6 +51,16 @@ type ReplacementCandidate = {
   readonly reason: string;
 };
 
+type TutorialStep = {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly target: "catalog" | "stage" | "views" | "inspector" | "replacement" | "substrate" | "compile";
+  readonly action?: () => void;
+};
+
+const tutorialStorageKey = "unfurl-studio-workbench-tutorial-dismissed";
+
 export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:catalog" }: DraftWorkspacePanelProps) {
   const [baseCatalogHash, setBaseCatalogHash] = useState(initialBaseCatalogHash);
   const [needsId, setNeedsId] = useState("");
@@ -73,6 +83,8 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
   const [replacementEntryId, setReplacementEntryId] = useState("com.unfurl:validation-service:1.1.0");
   const [activeView, setActiveView] = useState("Assembly");
   const [activeInspectorTab, setActiveInspectorTab] = useState("Properties");
+  const [tutorialOpen, setTutorialOpen] = useState(() => shouldShowTutorial());
+  const [tutorialStepIndex, setTutorialStepIndex] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,6 +207,64 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
     [selectedPart.surface, paletteEntries]
   );
   const selectedReplacement = replacementCandidates.find(candidate => candidate.catalogEntryId === replacementEntryId) ?? replacementCandidates[0];
+  const tutorialSteps = useMemo<readonly TutorialStep[]>(() => [
+    {
+      id: "catalog",
+      title: "Start with the catalog",
+      body: "Catalog entries are visual projections of DCP/Fabric facts. Additions and replacements remain governed by Fabric validation.",
+      target: "catalog"
+    },
+    {
+      id: "camera",
+      title: "Move through the assembly",
+      body: "Drag to rotate, right-drag to pan, wheel to zoom, double-click a component to focus it, and press 1-5 to switch views.",
+      target: "stage"
+    },
+    {
+      id: "select",
+      title: "Select real scene parts",
+      body: "Components, pipes, connectors, and the substrate base are selectable. The inspector changes based on the selected part.",
+      target: "inspector",
+      action: () => selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Validation Service" })
+    },
+    {
+      id: "takeout",
+      title: "Take parts out for inspection",
+      body: "Take Out is visual-only: it helps inspection without changing the CompositionContract or SubstrateProfile.",
+      target: "inspector",
+      action: () => {
+        selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Validation Service" });
+        setExtractedPartId("component:validation");
+      }
+    },
+    {
+      id: "replace",
+      title: "Replace only when allowed",
+      body: "Allowed and blocked replacements are explained here. Validate & Replace sends a Fabric intent; Studio never swaps blindly.",
+      target: "replacement",
+      action: () => {
+        selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Validation Service" });
+        setActiveInspectorTab("Properties");
+      }
+    },
+    {
+      id: "substrate",
+      title: "Review the runtime base",
+      body: "Substrate view shows the closed-world runtime surface: only required substrate ports should be active.",
+      target: "substrate",
+      action: () => {
+        setActiveView("Substrate");
+        selectScenePart({ id: "substrate:base", kind: "substrate", surface: "substrate", label: "Substrate base plate" });
+      }
+    },
+    {
+      id: "compile",
+      title: "Compile after validation",
+      body: "Create a draft, validate changes, then compile. The button stays guarded until the draft is ready.",
+      target: "compile"
+    }
+  ], []);
+  const activeTutorialStep = tutorialSteps[tutorialStepIndex] ?? tutorialSteps[0];
 
   useEffect(() => {
     if (!replacementCandidates.some(candidate => candidate.catalogEntryId === replacementEntryId)) {
@@ -202,8 +272,37 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
     }
   }, [replacementCandidates, replacementEntryId]);
 
+  useEffect(() => {
+    activeTutorialStep?.action?.();
+  }, [activeTutorialStep]);
+
+  function openTutorial() {
+    setTutorialStepIndex(0);
+    setTutorialOpen(true);
+  }
+
+  function closeTutorial(persist: boolean) {
+    setTutorialOpen(false);
+    setExtractedPartId(undefined);
+    if (persist) {
+      try {
+        window.localStorage.setItem(tutorialStorageKey, "true");
+      } catch {
+        // Ignore storage failures; the tutorial can still be dismissed for this render.
+      }
+    }
+  }
+
+  function nextTutorialStep() {
+    setTutorialStepIndex(current => Math.min(current + 1, tutorialSteps.length - 1));
+  }
+
+  function previousTutorialStep() {
+    setTutorialStepIndex(current => Math.max(current - 1, 0));
+  }
+
   return (
-    <div className="studio-workbench-page" aria-label="Unfurl Studio Workbench">
+    <div className={`studio-workbench-page ${tutorialOpen ? `tutorial-active tutorial-target-${activeTutorialStep?.target}` : ""}`} aria-label="Unfurl Studio Workbench">
       <header className="workbench-topbar">
         <div className="workbench-breadcrumbs">
           <span>Studio</span>
@@ -218,6 +317,7 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
           ))}
         </div>
         <div className="workbench-actions">
+          <button type="button" className="secondary" onClick={openTutorial}>Guided Tour</button>
           <button type="button" className="secondary" disabled={busy}>Save Draft</button>
           <button type="button" disabled={busy} onClick={create}>{busy ? "Working..." : "New Draft"}</button>
           <button type="button" disabled={busy || state?.status !== "READY"} onClick={compile}>Compile & Validate</button>
@@ -506,6 +606,31 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
           <span>{handoff?.status ?? "unavailable"}</span>
         </div>
       </footer>
+      {tutorialOpen && activeTutorialStep && (
+        <div className="tutorial-overlay" role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
+          <div className={`tutorial-card tutorial-card-${activeTutorialStep.target}`}>
+            <div className="tutorial-progress">
+              <span>Step {tutorialStepIndex + 1} of {tutorialSteps.length}</span>
+              <button type="button" className="icon-button" onClick={() => closeTutorial(true)}>Skip</button>
+            </div>
+            <h2 id="tutorial-title">{activeTutorialStep.title}</h2>
+            <p>{activeTutorialStep.body}</p>
+            <div className="tutorial-dots" aria-hidden="true">
+              {tutorialSteps.map((step, index) => (
+                <span className={index === tutorialStepIndex ? "active" : ""} key={step.id} />
+              ))}
+            </div>
+            <div className="tutorial-actions">
+              <button type="button" className="secondary" disabled={tutorialStepIndex === 0} onClick={previousTutorialStep}>Back</button>
+              {tutorialStepIndex === tutorialSteps.length - 1 ? (
+                <button type="button" onClick={() => closeTutorial(true)}>Finish</button>
+              ) : (
+                <button type="button" onClick={nextTutorialStep}>Next</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -567,6 +692,17 @@ function PortList({ kind, names }: { readonly kind: "provided" | "required"; rea
       ))}
     </div>
   );
+}
+
+function shouldShowTutorial(): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+  try {
+    return window.localStorage.getItem(tutorialStorageKey) !== "true";
+  } catch {
+    return true;
+  }
 }
 
 function paletteLabel(entry: VisualCatalogEntry | undefined): string {
