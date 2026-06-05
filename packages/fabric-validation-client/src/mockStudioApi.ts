@@ -9,6 +9,7 @@ import type {
   ExtractNeedsResponse,
   ListAssembliesResponse,
   SaveDraftResponse,
+  StudioLayoutState,
   ReplacementCandidatesResponse,
   StudioAssemblySummary,
   FetchLike,
@@ -31,6 +32,7 @@ export type MockStudioApiFixtures = {
   readonly needsResponse?: ExtractNeedsResponse;
   readonly assembliesResponse?: ListAssembliesResponse;
   readonly saveDraftResponse?: SaveDraftResponse;
+  readonly layoutState?: StudioLayoutState;
   readonly intentResponse?: IntentResponse;
   readonly compileResponse?: CompileDraftCandidateResponse;
   readonly resolveDeploymentResponse?: ResolveDeploymentResponse;
@@ -352,6 +354,20 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
         warnings: []
       });
     }
+    if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/layout`) {
+      return ok(fixtures.layoutState ?? layout(session));
+    }
+    if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/layout`) {
+      const body = parseJson<Partial<StudioLayoutState>>(init?.body);
+      return ok(fixtures.layoutState ?? {
+        ...layout(session),
+        activeView: body?.activeView ?? "Assembly",
+        semanticZoomLevel: body?.semanticZoomLevel ?? "ASSEMBLY_DCP",
+        selectedSurface: body?.selectedSurface ?? "validation",
+        camera: body?.camera ?? {},
+        annotations: body?.annotations ?? []
+      });
+    }
     if (method === "GET" && (path === `/studio/sessions/${encodeURIComponent(session.sessionId)}` || path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}`))) {
       return ok(session);
     }
@@ -414,6 +430,18 @@ function assembly(session: StudioDraftSession): StudioAssemblySummary {
     deploymentShape: "CONTAINERIZED_SERVICE",
     currentCandidateId: session.currentCandidateId ?? "",
     sceneRevision: session.sceneRevision
+  };
+}
+
+function layout(session: StudioDraftSession): StudioLayoutState {
+  return {
+    tenantId: session.tenantId,
+    assemblyId: session.assemblyId,
+    activeView: "Assembly",
+    semanticZoomLevel: "ASSEMBLY_DCP",
+    selectedSurface: "validation",
+    camera: {},
+    annotations: []
   };
 }
 

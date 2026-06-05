@@ -12,6 +12,9 @@ import type {
   ListAssembliesResponse,
   SaveDraftRequest,
   SaveDraftResponse,
+  LoadLayoutStateRequest,
+  SaveLayoutStateRequest,
+  StudioLayoutState,
   StudioAssemblySummary,
   DynamicDcpProjectionResponse,
   ReplacementCandidatesRequest,
@@ -111,6 +114,25 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/drafts/save`,
+        { ...body, ...scope }
+      );
+    },
+    loadLayoutState: async (body?: LoadLayoutStateRequest) => {
+      const scope = resolveScope(defaultScope, body ?? {});
+      return request<StudioLayoutState>(
+        fetchImpl,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/layout`
+      );
+    },
+    saveLayoutState: async (body: SaveLayoutStateRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      return request<StudioLayoutState>(
+        fetchImpl,
+        baseUrl,
+        "POST",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/layout`,
         { ...body, ...scope }
       );
     },

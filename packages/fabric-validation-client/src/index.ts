@@ -160,6 +160,31 @@ export type SaveDraftResponse = {
   readonly warnings: readonly string[];
 };
 
+export type StudioLayoutState = {
+  readonly tenantId: string;
+  readonly assemblyId: string;
+  readonly activeView: string;
+  readonly semanticZoomLevel: "PARENT_DCP" | "ASSEMBLY_DCP" | "CHILD_DCP" | string;
+  readonly selectedSurface: string;
+  readonly camera: Record<string, unknown>;
+  readonly annotations: readonly string[];
+};
+
+export type LoadLayoutStateRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+};
+
+export type SaveLayoutStateRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly activeView: string;
+  readonly semanticZoomLevel: "PARENT_DCP" | "ASSEMBLY_DCP" | "CHILD_DCP" | string;
+  readonly selectedSurface: string;
+  readonly camera?: Record<string, unknown>;
+  readonly annotations?: readonly string[];
+};
+
 export type DynamicDcpProjectionRequest = {
   readonly tenantId?: string;
   readonly assemblyId?: string;
@@ -369,6 +394,8 @@ export interface StudioFabricClient {
   readonly listAssemblies?: (request?: ListAssembliesRequest) => Promise<ListAssembliesResponse>;
   readonly createAssembly?: (request: CreateAssemblyRequest) => Promise<StudioAssemblySummary>;
   readonly saveDraft?: (request: SaveDraftRequest) => Promise<SaveDraftResponse>;
+  readonly loadLayoutState?: (request?: LoadLayoutStateRequest) => Promise<StudioLayoutState>;
+  readonly saveLayoutState?: (request: SaveLayoutStateRequest) => Promise<StudioLayoutState>;
   readonly loadDynamicDcpProjection?: (request?: DynamicDcpProjectionRequest) => Promise<DynamicDcpProjectionResponse>;
   readonly loadReplacementCandidates?: (request: ReplacementCandidatesRequest) => Promise<ReplacementCandidatesResponse>;
   readonly loadCompositionView: (request: LoadCompositionViewRequest) => Promise<LoadCompositionViewResponse>;

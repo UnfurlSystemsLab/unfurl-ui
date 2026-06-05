@@ -148,6 +148,46 @@ describe("HTTP Studio Fabric client", () => {
     });
   });
 
+  it("loads and saves tenant assembly layout state", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: fakeFetch(calls, {
+        tenantId: "tenant-local",
+        assemblyId: "assembly-demo",
+        activeView: "Exploded",
+        semanticZoomLevel: "CHILD_DCP",
+        selectedSurface: "payment",
+        camera: { distance: 5.5 },
+        annotations: ["inspect payment replacement"]
+      })
+    });
+
+    await client.loadLayoutState?.();
+    const saved = await client.saveLayoutState?.({
+      activeView: "Exploded",
+      semanticZoomLevel: "CHILD_DCP",
+      selectedSurface: "payment",
+      camera: { distance: 5.5 },
+      annotations: ["inspect payment replacement"]
+    });
+
+    assert.equal(saved?.selectedSurface, "payment");
+    assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-local/assemblies/assembly-demo/layout");
+    assert.equal(calls[0]?.method, "GET");
+    assert.equal(calls[1]?.input, "http://fabric.local/studio/tenants/tenant-local/assemblies/assembly-demo/layout");
+    assert.equal(calls[1]?.method, "POST");
+    assert.deepEqual(JSON.parse(calls[1]?.body ?? "{}"), {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      activeView: "Exploded",
+      semanticZoomLevel: "CHILD_DCP",
+      selectedSurface: "payment",
+      camera: { distance: 5.5 },
+      annotations: ["inspect payment replacement"]
+    });
+  });
+
   it("loads the dynamic DCP projection for a tenant assembly", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

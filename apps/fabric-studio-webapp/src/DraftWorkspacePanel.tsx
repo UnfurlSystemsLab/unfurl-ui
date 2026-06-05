@@ -5,6 +5,7 @@ import {
   DEFAULT_STUDIO_TENANT_ID,
   type DynamicDcpProjectionResponse,
   type StudioReplacementCandidate as FabricReplacementCandidate,
+  type StudioLayoutState,
   type StudioFabricClient
 } from "@unfurl/fabric-validation-client";
 import type { VisualCatalogEntry } from "@unfurl/visual-manifest";
@@ -27,6 +28,8 @@ export type DraftWorkspacePanelProps = {
     StudioFabricClient,
     "extractNeeds" |
     "saveDraft" |
+    "loadLayoutState" |
+    "saveLayoutState" |
     "loadDynamicDcpProjection" |
     "loadReplacementCandidates" |
     "listCatalogVisuals" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate"
@@ -170,29 +173,70 @@ export function DraftWorkspacePanel({
   }, [client, tenantId, assemblyId]);
 
   useEffect(() => {
-    const saved = readLayoutState(tenantId, assemblyId);
-    if (!saved) {
+    let cancelled = false;
+    const fallback = () => {
+      const saved = readLayoutState(tenantId, assemblyId);
+      if (saved && !cancelled) {
+        applyLayoutState(saved);
+      }
+    };
+    if (!client.loadLayoutState) {
+      fallback();
       return;
     }
-    setActiveView(saved.activeView);
-    setRequestedSemanticZoomLevel(saved.semanticZoomLevel);
-    setSemanticZoomLevel(saved.semanticZoomLevel);
-    setSelectedComponent(saved.selectedSurface);
-    selectScenePart({
-      id: `component:${saved.selectedSurface}`,
-      kind: saved.selectedSurface === "substrate" ? "substrate" : "component",
-      surface: saved.selectedSurface,
-      label: inspectorDetails[saved.selectedSurface].name
-    });
-  }, [tenantId, assemblyId]);
+    void client.loadLayoutState({
+      tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
+      assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID
+    }).then(layout => {
+      if (!cancelled) {
+        applyLayoutState(toLayoutState(layout));
+      }
+    }).catch(fallback);
+    return () => {
+      cancelled = true;
+    };
+  }, [client, tenantId, assemblyId]);
 
   useEffect(() => {
-    writeLayoutState(tenantId, assemblyId, {
+    const state = {
       activeView,
       semanticZoomLevel,
       selectedSurface: selectedComponent
+    };
+    writeLayoutState(tenantId, assemblyId, state);
+    if (!client.saveLayoutState) {
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      void client.saveLayoutState?.({
+        tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
+        assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID,
+        activeView,
+        semanticZoomLevel,
+        selectedSurface: selectedComponent,
+        camera: {},
+        annotations: []
+      }).catch(() => {
+        // Server-side layout persistence is best-effort; local layout state remains available.
+      });
+    }, 250);
+    return () => {
+      window.clearTimeout(handle);
+    };
+  }, [client, tenantId, assemblyId, activeView, semanticZoomLevel, selectedComponent]);
+
+  function applyLayoutState(layout: LayoutState) {
+    setActiveView(layout.activeView);
+    setRequestedSemanticZoomLevel(layout.semanticZoomLevel);
+    setSemanticZoomLevel(layout.semanticZoomLevel);
+    setSelectedComponent(layout.selectedSurface);
+    selectScenePart({
+      id: layout.selectedSurface === "substrate" ? "substrate:base" : `component:${layout.selectedSurface}`,
+      kind: layout.selectedSurface === "substrate" ? "substrate" : "component",
+      surface: layout.selectedSurface,
+      label: inspectorDetails[layout.selectedSurface].name
     });
-  }, [tenantId, assemblyId, activeView, semanticZoomLevel, selectedComponent]);
+  }
 
   useEffect(() => {
     const componentNodeId = dynamicProjection ? projectionNodeIdForSelection(selectedPart, dynamicProjection) : undefined;
@@ -1416,6 +1460,30 @@ function writeLayoutState(tenantId: string, assemblyId: string, state: LayoutSta
 
 function layoutStateKey(tenantId: string, assemblyId: string): string {
   return `unfurl-studio-layout:${tenantId.trim() || DEFAULT_STUDIO_TENANT_ID}:${assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID}`;
+}
+
+function toLayoutState(layout: StudioLayoutState): LayoutState {
+  return {
+    activeView: validView(layout.activeView),
+    semanticZoomLevel: validSemanticZoomLevel(layout.semanticZoomLevel),
+    selectedSurface: validSurface(layout.selectedSurface)
+  };
+}
+
+function validView(value: string): string {
+  return ["Assembly", "Exploded", "Ports", "Substrate", "Validation"].includes(value) ? value : "Assembly";
+}
+
+function validSemanticZoomLevel(value: string): SemanticZoomLevel {
+  return value === "PARENT_DCP" || value === "CHILD_DCP" || value === "ASSEMBLY_DCP"
+    ? value
+    : "ASSEMBLY_DCP";
+}
+
+function validSurface(value: string): SelectedSurfaceId {
+  return Object.prototype.hasOwnProperty.call(inspectorDetails, value)
+    ? value as SelectedSurfaceId
+    : "validation";
 }
 
 function nodeLabel(projection: DynamicDcpProjectionResponse, nodeId: string): string {
