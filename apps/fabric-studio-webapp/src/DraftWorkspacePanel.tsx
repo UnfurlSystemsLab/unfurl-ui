@@ -13,7 +13,7 @@ import {
   type DraftWorkspaceState
 } from "./draftWorkspace.js";
 import { buildSigningHandoff } from "./signingHandoff.js";
-import type { ThreeAssemblySelection, ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
+import type { SemanticZoomLevel, ThreeAssemblySelection, ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
 
 const ThreeAssemblyScene = lazy(async () => {
   const module = await import("./ThreeAssemblyScene.js");
@@ -112,6 +112,7 @@ export function DraftWorkspacePanel({
   const [saveDeploymentShape, setSaveDeploymentShape] = useState("CONTAINERIZED_SERVICE");
   const [saveDraftStatus, setSaveDraftStatus] = useState<string | undefined>();
   const [draftComponentCount, setDraftComponentCount] = useState<number | undefined>(initialDraftComponentCount);
+  const [semanticZoomLevel, setSemanticZoomLevel] = useState<SemanticZoomLevel>("ASSEMBLY_DCP");
 
   useEffect(() => {
     let cancelled = false;
@@ -535,15 +536,21 @@ export function DraftWorkspacePanel({
                   selectedSurface={selectedComponent}
                   selectedPartId={selectedPart.id}
                   extractedPartId={extractedPartId}
-                  onSelect={setSelectedComponent}
-                  onSelectPart={selectScenePart}
-                  onViewChange={setActiveView}
-                />
-              </Suspense>
+                onSelect={setSelectedComponent}
+                onSelectPart={selectScenePart}
+                onViewChange={setActiveView}
+                onSemanticZoomChange={setSemanticZoomLevel}
+              />
+            </Suspense>
               )}
             <div className="view-mode-badge">
               <strong>{activeView}</strong>
               <span>{showEmptyAssembly ? "empty governed draft" : viewDescription(activeView)}</span>
+            </div>
+            <div className="semantic-zoom-badge" aria-label="Semantic DCP zoom">
+              <strong>Semantic Zoom</strong>
+              <span>{semanticZoomLabel(semanticZoomLevel)}</span>
+              <small>{semanticZoomDescription(semanticZoomLevel)}</small>
             </div>
             {showEmptyAssembly && (
               <div className="empty-assembly-state" role="status">
@@ -660,6 +667,7 @@ export function DraftWorkspacePanel({
             <dl>
               <dt>Part</dt><dd>{selectedPart.label}</dd>
               <dt>Kind</dt><dd>{selectedPart.kind}</dd>
+              <dt>DCP Level</dt><dd>{semanticZoomLabel(semanticZoomLevel)}</dd>
               <dt>State</dt><dd>{extractedPartId === selectedPart.id ? "Taken out for inspection" : "Installed"}</dd>
             </dl>
             <div className="scene-action-row">
@@ -1146,6 +1154,22 @@ function viewDescription(view: string): string {
     Substrate: "runtime layer and closed-world sockets emphasized",
     Validation: "policy and compatibility status emphasized"
   }[view] ?? "composition surface";
+}
+
+function semanticZoomLabel(level: SemanticZoomLevel): string {
+  return {
+    PARENT_DCP: "Parent DCP",
+    ASSEMBLY_DCP: "Assembly DCP",
+    CHILD_DCP: "Child DCP"
+  }[level];
+}
+
+function semanticZoomDescription(level: SemanticZoomLevel): string {
+  return {
+    PARENT_DCP: "zoomed out to tenant/application composition context",
+    ASSEMBLY_DCP: "current validated assembly graph",
+    CHILD_DCP: "zoomed in to descendant components and internal responsibilities"
+  }[level];
 }
 
 const substrateCapabilities = [

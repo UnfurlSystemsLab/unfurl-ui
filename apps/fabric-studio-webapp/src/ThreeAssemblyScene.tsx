@@ -22,7 +22,10 @@ export type ThreeAssemblySceneProps = {
   readonly onSelect: (surface: ThreeAssemblySurfaceId) => void;
   readonly onSelectPart?: (selection: ThreeAssemblySelection) => void;
   readonly onViewChange?: (view: string) => void;
+  readonly onSemanticZoomChange?: (level: SemanticZoomLevel) => void;
 };
+
+export type SemanticZoomLevel = "PARENT_DCP" | "ASSEMBLY_DCP" | "CHILD_DCP";
 
 export type ThreeAssemblySelection = {
   readonly id: string;
@@ -47,6 +50,8 @@ type SceneHandles = {
   readonly explodedGroup: THREE.Group;
   readonly substrateGroup: THREE.Group;
   readonly substratePlate: THREE.Mesh;
+  readonly parentDcpGroup: THREE.Group;
+  readonly childDcpGroup: THREE.Group;
   readonly validationLines: readonly THREE.Line[];
   readonly selectableParts: Map<string, THREE.Object3D>;
   readonly modeGroups: {
@@ -66,12 +71,14 @@ export function ThreeAssemblyScene({
   extractedPartId,
   onSelect,
   onSelectPart,
-  onViewChange
+  onViewChange,
+  onSemanticZoomChange
 }: ThreeAssemblySceneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const onSelectRef = useRef(onSelect);
   const onSelectPartRef = useRef(onSelectPart);
   const onViewChangeRef = useRef(onViewChange);
+  const onSemanticZoomChangeRef = useRef(onSemanticZoomChange);
   const selectedRef = useRef(selectedSurface);
   const selectedPartRef = useRef(selectedPartId);
   const extractedPartRef = useRef(extractedPartId);
@@ -80,6 +87,7 @@ export function ThreeAssemblyScene({
   onSelectRef.current = onSelect;
   onSelectPartRef.current = onSelectPart;
   onViewChangeRef.current = onViewChange;
+  onSemanticZoomChangeRef.current = onSemanticZoomChange;
   selectedRef.current = selectedSurface;
   selectedPartRef.current = selectedPartId;
   extractedPartRef.current = extractedPartId;
@@ -145,6 +153,7 @@ export function ThreeAssemblyScene({
     const focusTarget = new THREE.Vector3();
     const focusCameraPosition = new THREE.Vector3();
     let hasFocusAnimation = false;
+    let semanticZoomLevel: SemanticZoomLevel = "ASSEMBLY_DCP";
 
     function resize() {
       const rect = hostElement.getBoundingClientRect();
@@ -215,6 +224,17 @@ export function ThreeAssemblyScene({
       hasFocusAnimation = true;
     }
 
+    function semanticLevelFromCamera(): SemanticZoomLevel {
+      const distance = camera.position.distanceTo(controls.target);
+      if (distance <= 6.2) {
+        return "CHILD_DCP";
+      }
+      if (distance >= 16.6) {
+        return "PARENT_DCP";
+      }
+      return "ASSEMBLY_DCP";
+    }
+
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
@@ -262,7 +282,12 @@ export function ThreeAssemblyScene({
         }
       }
       controls.update();
-      applySceneState(handles, selectedRef.current, selectedPartRef.current, extractedPartRef.current, viewRef.current, frame);
+      const nextSemanticZoomLevel = semanticLevelFromCamera();
+      if (nextSemanticZoomLevel !== semanticZoomLevel) {
+        semanticZoomLevel = nextSemanticZoomLevel;
+        onSemanticZoomChangeRef.current?.(semanticZoomLevel);
+      }
+      applySceneState(handles, selectedRef.current, selectedPartRef.current, extractedPartRef.current, viewRef.current, semanticZoomLevel, frame);
       renderer.render(scene, camera);
       raf = window.requestAnimationFrame(animate);
     }
@@ -348,6 +373,12 @@ function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[]): SceneHan
   const substrateLinks = createSubstrateLinks();
   root.add(substrateLinks);
 
+  const parentDcpGroup = createParentDcpContext();
+  root.add(parentDcpGroup);
+
+  const childDcpGroup = createChildDcpConstructs(clickable, selectableParts);
+  root.add(childDcpGroup);
+
   const { explodedGroup, validationLines } = createExplodedModule();
   clickable.push(explodedGroup.userData.body as THREE.Mesh);
   selectableParts.set("component:validation:exploded", explodedGroup);
@@ -359,10 +390,83 @@ function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[]): SceneHan
     explodedGroup,
     substrateGroup,
     substratePlate,
+    parentDcpGroup,
+    childDcpGroup,
     validationLines,
     selectableParts,
     modeGroups: { portGroup, substrateLinks }
   };
+}
+
+function createParentDcpContext(): THREE.Group {
+  const group = new THREE.Group();
+  group.position.set(-0.34, 0.0, -0.05);
+
+  const ringMaterial = new THREE.MeshStandardMaterial({
+    color: 0x2563eb,
+    transparent: true,
+    opacity: 0.16,
+    roughness: 0.22,
+    metalness: 0.08
+  });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(5.25, 0.035, 12, 96), ringMaterial);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.set(0, -0.58, 0.12);
+  group.add(ring);
+
+  const label = createTextSprite("Parent DCP: E-Commerce Platform", "#1d4ed8", "rgba(255,255,255,0.78)");
+  label.scale.set(2.2, 0.36, 1);
+  label.position.set(-2.85, 1.72, -1.82);
+  group.add(label);
+
+  return group;
+}
+
+function createChildDcpConstructs(clickable: THREE.Object3D[], selectableParts: Map<string, THREE.Object3D>): THREE.Group {
+  const group = new THREE.Group();
+  group.position.set(0.32, -0.42, 1.42);
+  const children = [
+    ["Rules DCP", -0.52, 0.34, 0x7c3aed],
+    ["Policy DCP", 0, 0.52, 0x2563eb],
+    ["Customer DCP", 0.52, 0.34, 0x16a34a]
+  ] as const;
+
+  for (const [label, x, y, color] of children) {
+    const child = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, 0.26, 0.18),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.24, metalness: 0.12, emissive: color, emissiveIntensity: 0.08 })
+    );
+    child.position.set(x, y, 0);
+    child.userData.surface = "validation";
+    child.userData.selection = {
+      id: `component:validation:${label.toLowerCase().replaceAll(" ", "-")}`,
+      kind: "component",
+      surface: "validation",
+      label
+    } satisfies ThreeAssemblySelection;
+    clickable.push(child);
+    selectableParts.set(child.userData.selection.id, child);
+    group.add(child);
+
+    const edge = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(0.44, 0.28, 0.2)),
+      new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.8 })
+    );
+    edge.position.copy(child.position);
+    group.add(edge);
+
+    const text = createTextSprite(label, "#0f172a", "rgba(255,255,255,0.72)");
+    text.scale.set(0.62, 0.16, 1);
+    text.position.set(x, y - 0.26, 0.03);
+    group.add(text);
+  }
+
+  const title = createTextSprite("Child DCP constructs", "#6d28d9", "rgba(255,255,255,0.76)");
+  title.scale.set(1.35, 0.22, 1);
+  title.position.set(0, 0.92, 0.02);
+  group.add(title);
+
+  return group;
 }
 
 function addWorkbenchBase(root: THREE.Group) {
@@ -860,6 +964,7 @@ function applySceneState(
   selectedPartId: string | undefined,
   extractedPartId: string | undefined,
   activeView: string,
+  semanticZoomLevel: SemanticZoomLevel,
   frame: number
 ) {
   for (const [id, group] of handles.moduleGroups) {
@@ -916,6 +1021,11 @@ function applySceneState(
 
   setObjectOpacity(handles.modeGroups.portGroup, activeView === "Ports" ? 1 : 0.78);
   setObjectOpacity(handles.modeGroups.substrateLinks, activeView === "Substrate" ? 1 : 0.64);
+  handles.parentDcpGroup.visible = semanticZoomLevel === "PARENT_DCP";
+  handles.childDcpGroup.visible = semanticZoomLevel === "CHILD_DCP";
+  setObjectOpacity(handles.parentDcpGroup, semanticZoomLevel === "PARENT_DCP" ? 1 : 0);
+  setObjectOpacity(handles.childDcpGroup, semanticZoomLevel === "CHILD_DCP" ? 1 : 0);
+  handles.childDcpGroup.position.y = -0.42 + Math.sin(frame * 1.3) * 0.018;
   applyPartState(handles, selectedPartId, extractedPartId, frame);
 }
 

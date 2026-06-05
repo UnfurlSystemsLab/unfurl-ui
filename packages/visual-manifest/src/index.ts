@@ -45,8 +45,32 @@ export type VisualCatalogEntry = {
   readonly claimHash: string;
   readonly artifactSha256: string;
   readonly visualManifest?: VisualManifest;
+  readonly dynamicComposition?: DynamicCompositionMetadata;
   readonly visualIntegrity: VisualIntegrity;
   readonly warnings: readonly VisualWarning[];
+};
+
+export type DynamicCompositionMetadata = {
+  readonly compositionMode: "STATIC" | "DYNAMIC";
+  readonly dcpType?: "COMPANY" | "SUBSTRATE" | "MODULE" | "COMPONENT" | string;
+  readonly compatibleDescendants: readonly string[];
+  readonly selectionPolicy?: DynamicSelectionPolicy;
+  readonly binding?: DynamicBindingPolicy;
+};
+
+export type DynamicSelectionPolicy = {
+  readonly strategy: "FIXED" | "POLICY_DRIVEN" | "TENANT_DRIVEN" | "ENVIRONMENT_DRIVEN" | string;
+  readonly rules: readonly DynamicSelectionRule[];
+};
+
+export type DynamicSelectionRule = {
+  readonly when: string;
+  readonly prefer: string;
+};
+
+export type DynamicBindingPolicy = {
+  readonly mode: "EARLY_BOUND" | "LATE_BOUND" | string;
+  readonly validation: "REQUIRED_BEFORE_ACTIVATION" | "OPTIONAL" | string;
 };
 
 export type VisualWarning = {

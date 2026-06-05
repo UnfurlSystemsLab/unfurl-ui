@@ -28,6 +28,7 @@ export type StudioDraftSession = {
   readonly assemblyId: string;
   readonly sessionId: string;
   readonly baseCatalogHash: string;
+  readonly compositionMode?: "STATIC" | "DYNAMIC";
   readonly needsId?: string;
   readonly trustPolicyId?: string;
   readonly currentCandidateId?: string;

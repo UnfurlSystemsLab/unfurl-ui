@@ -57,6 +57,26 @@ export const studioApiExampleCatalog: ListCatalogVisualsResponse = {
           inspectable: true
         }
       },
+      dynamicComposition: {
+        compositionMode: "DYNAMIC",
+        dcpType: "COMPONENT",
+        compatibleDescendants: [
+          "component.azure-blob",
+          "component.minio-storage",
+          "component.local-storage-gateway"
+        ],
+        selectionPolicy: {
+          strategy: "POLICY_DRIVEN",
+          rules: [
+            { when: "environment == aws", prefer: "component.storage-s3" },
+            { when: "tenant.dataResidency == private", prefer: "component.minio-storage" }
+          ]
+        },
+        binding: {
+          mode: "LATE_BOUND",
+          validation: "REQUIRED_BEFORE_ACTIVATION"
+        }
+      },
       visualIntegrity: {
         visualManifestHash: "sha256:visual-storage-s3",
         assets: []
@@ -71,6 +91,7 @@ export const studioApiExampleSession: StudioDraftSession = {
   assemblyId: DEFAULT_STUDIO_ASSEMBLY_ID,
   sessionId: "studio-session-123",
   baseCatalogHash: "sha256:catalog",
+  compositionMode: "DYNAMIC",
   currentCandidateId: "cand-abc123",
   sceneRevision: 7,
   warnings: []

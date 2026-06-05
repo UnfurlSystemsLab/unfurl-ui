@@ -35,6 +35,9 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /Validation Service/);
     assert.match(html, /Substrate Runtime Layer/);
     assert.match(html, /3D assembly scene/);
+    assert.match(html, /Semantic Zoom/);
+    assert.match(html, /Assembly DCP/);
+    assert.match(html, /current validated assembly graph/);
     assert.match(html, /Inspector/);
     assert.match(html, /Component Details/);
     assert.match(html, /Selected Scene Part/);
