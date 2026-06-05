@@ -78,6 +78,9 @@ export function DraftWorkspacePanel({
   const [assemblyId, setAssemblyId] = useState(initialAssemblyId);
   const [baseCatalogHash, setBaseCatalogHash] = useState(initialBaseCatalogHash);
   const [needsId, setNeedsId] = useState("");
+  const [targetApplicationName, setTargetApplicationName] = useState("E-Commerce Platform");
+  const [targetApplicationFiles, setTargetApplicationFiles] = useState<readonly string[]>([]);
+  const [needsExtractionStatus, setNeedsExtractionStatus] = useState<"IDLE" | "READY" | "EXTRACTED">("IDLE");
   const [catalogEntryId, setCatalogEntryId] = useState("com.unfurl:storage-s3:1.2.0");
   const [fromPort, setFromPort] = useState("workflow.storage.required");
   const [toPort, setToPort] = useState("storage-s3.storage.put");
@@ -133,6 +136,18 @@ export function DraftWorkspacePanel({
     } finally {
       setBusy(false);
     }
+  }
+
+  function loadTargetApplication(files: FileList | null) {
+    const names = files ? Array.from(files).map(file => file.name) : [];
+    setTargetApplicationFiles(names);
+    setNeedsExtractionStatus(names.length === 0 ? "IDLE" : "READY");
+  }
+
+  function extractNeeds() {
+    const normalizedAssembly = assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID;
+    setNeedsId(`${normalizedAssembly}-extracted-needs`);
+    setNeedsExtractionStatus("EXTRACTED");
   }
 
   async function addComponent(entryId = catalogEntryId) {
@@ -378,6 +393,29 @@ export function DraftWorkspacePanel({
             Assembly
             <input value={assemblyId} onChange={event => setAssemblyId(event.target.value)} />
           </label>
+          <div className="target-app-loader">
+            <label>
+              Target application
+              <input value={targetApplicationName} onChange={event => setTargetApplicationName(event.target.value)} />
+            </label>
+            <label>
+              Load target app
+              <input
+                type="file"
+                multiple
+                accept=".yaml,.yml,.json"
+                onChange={event => loadTargetApplication(event.currentTarget.files)}
+              />
+            </label>
+            <div className="summary-row">
+              <span>target: {targetApplicationName}</span>
+              <span>files: {targetApplicationFiles.length}</span>
+              <span>needs: {needsExtractionText(needsExtractionStatus)}</span>
+            </div>
+            <button type="button" className="secondary" disabled={targetApplicationFiles.length === 0} onClick={extractNeeds}>
+              Extract Needs
+            </button>
+          </div>
           <label>
             Needs ID
             <input value={needsId} onChange={event => setNeedsId(event.target.value)} />
@@ -988,6 +1026,17 @@ function toolGlyph(tool: string): string {
     Measure: "MEA",
     "Reset View": "RST"
   }[tool] ?? "DOT";
+}
+
+function needsExtractionText(status: "IDLE" | "READY" | "EXTRACTED"): string {
+  switch (status) {
+    case "IDLE":
+      return "load target app first";
+    case "READY":
+      return "ready to extract";
+    case "EXTRACTED":
+      return "extracted";
+  }
 }
 
 function viewClassName(view: string): string {

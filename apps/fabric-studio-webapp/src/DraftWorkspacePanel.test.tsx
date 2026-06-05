@@ -14,6 +14,11 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /tenant-local/);
     assert.match(html, /Assembly/);
     assert.match(html, /assembly-demo/);
+    assert.match(html, /Target application/);
+    assert.match(html, /E-Commerce Platform/);
+    assert.match(html, /Load target app/);
+    assert.match(html, /Extract Needs/);
+    assert.match(html, /load target app first/);
     assert.match(html, /Welcome to Unfurl Studio/);
     assert.match(html, /governed visual workbench/);
     assert.match(html, /href="\/components\/fabric-studio\/help#scanned-catalog"/);
