@@ -603,7 +603,27 @@ th, td {
 .workbench-stage {
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto minmax(560px, 1fr) auto;
+  grid-template-rows: auto auto minmax(560px, 1fr) auto;
+}
+
+.save-draft-panel {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 240px) minmax(180px, 240px) auto;
+  gap: 10px;
+  align-items: end;
+  border-bottom: 1px solid #dbe3ef;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.save-draft-panel > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.save-draft-panel span {
+  color: #475569;
+  font-size: 12px;
 }
 
 .stage-toolbar {

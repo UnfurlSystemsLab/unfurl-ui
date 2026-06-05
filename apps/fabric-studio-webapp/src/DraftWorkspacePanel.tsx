@@ -80,6 +80,7 @@ export function DraftWorkspacePanel({
   const [baseCatalogHash, setBaseCatalogHash] = useState(initialBaseCatalogHash);
   const [needsId, setNeedsId] = useState("");
   const [targetApplicationName, setTargetApplicationName] = useState("E-Commerce Platform");
+  const [targetDeploymentTarget, setTargetDeploymentTarget] = useState("On-Prem Cluster");
   const [targetApplicationFiles, setTargetApplicationFiles] = useState<readonly string[]>([]);
   const [needsExtractionStatus, setNeedsExtractionStatus] = useState<"IDLE" | "READY" | "EXTRACTED">("IDLE");
   const [catalogEntryId, setCatalogEntryId] = useState("com.unfurl:storage-s3:1.2.0");
@@ -103,6 +104,10 @@ export function DraftWorkspacePanel({
   const [activeInspectorTab, setActiveInspectorTab] = useState("Properties");
   const [tutorialOpen, setTutorialOpen] = useState(() => shouldShowTutorial());
   const [tutorialStepIndex, setTutorialStepIndex] = useState(0);
+  const [saveDraftOpen, setSaveDraftOpen] = useState(false);
+  const [saveDeploymentTarget, setSaveDeploymentTarget] = useState(targetDeploymentTarget);
+  const [saveDeploymentShape, setSaveDeploymentShape] = useState("CONTAINERIZED_SERVICE");
+  const [saveDraftStatus, setSaveDraftStatus] = useState<string | undefined>();
 
   useEffect(() => {
     let cancelled = false;
@@ -152,13 +157,24 @@ export function DraftWorkspacePanel({
         tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
         assemblyId: normalizedAssembly,
         targetApplicationName,
-        fileNames: targetApplicationFiles
+        fileNames: targetApplicationFiles,
+        defaultDeploymentTarget: targetDeploymentTarget
       });
       setNeedsId(response.needsId);
     } else {
       setNeedsId(`${normalizedAssembly}-extracted-needs`);
     }
     setNeedsExtractionStatus("EXTRACTED");
+  }
+
+  function openSaveDraft() {
+    setSaveDeploymentTarget(targetDeploymentTarget);
+    setSaveDraftOpen(true);
+  }
+
+  function saveDraft() {
+    setSaveDraftStatus(`Draft saved for ${saveDeploymentTarget} using ${saveDeploymentShape}.`);
+    setSaveDraftOpen(false);
   }
 
   async function addComponent(entryId = catalogEntryId) {
@@ -376,7 +392,7 @@ export function DraftWorkspacePanel({
         </div>
         <div className="workbench-actions">
           <button type="button" className="secondary" onClick={openTutorial}>Guided Tour</button>
-          <button type="button" className="secondary" disabled={busy}>Save Draft</button>
+          <button type="button" className="secondary" disabled={busy} onClick={openSaveDraft}>Save Draft</button>
           <button type="button" disabled={busy} onClick={create}>{busy ? "Working..." : "New Draft"}</button>
           <button type="button" disabled={busy || state?.status !== "READY"} onClick={compile}>Compile & Validate</button>
         </div>
@@ -410,6 +426,10 @@ export function DraftWorkspacePanel({
               <input value={targetApplicationName} onChange={event => setTargetApplicationName(event.target.value)} />
             </label>
             <label>
+              Default deployment
+              <input value={targetDeploymentTarget} onChange={event => setTargetDeploymentTarget(event.target.value)} />
+            </label>
+            <label>
               Load target app
               <input
                 type="file"
@@ -420,6 +440,7 @@ export function DraftWorkspacePanel({
             </label>
             <div className="summary-row">
               <span>target: {targetApplicationName}</span>
+              <span>deployment: {targetDeploymentTarget}</span>
               <span>files: {targetApplicationFiles.length}</span>
               <span>needs: {needsExtractionText(needsExtractionStatus)}</span>
             </div>
@@ -446,6 +467,32 @@ export function DraftWorkspacePanel({
         </aside>
 
         <main className="workbench-stage" aria-label="Composition workbench">
+          {saveDraftOpen && (
+            <section className="save-draft-panel" aria-label="Save draft deployment options">
+              <div>
+                <strong>Save Draft</strong>
+                <span>Confirm deployment for this assembly before saving.</span>
+              </div>
+              <label>
+                Deployment target
+                <input value={saveDeploymentTarget} onChange={event => setSaveDeploymentTarget(event.target.value)} />
+              </label>
+              <label>
+                Deployment shape
+                <select value={saveDeploymentShape} onChange={event => setSaveDeploymentShape(event.target.value)}>
+                  <option value="IN_PROCESS_LIBRARY">In-process library</option>
+                  <option value="SPRING_BOOT_SERVICE">Spring Boot service</option>
+                  <option value="CONTAINERIZED_SERVICE">Containerized service</option>
+                  <option value="REMOTE_MICROSERVICE">Remote microservice</option>
+                </select>
+              </label>
+              <div className="button-row">
+                <button type="button" onClick={saveDraft}>Save With Deployment</button>
+                <button type="button" className="secondary" onClick={() => setSaveDraftOpen(false)}>Cancel</button>
+              </div>
+            </section>
+          )}
+          {saveDraftStatus && <p className="live-data-notice">{saveDraftStatus}</p>}
           <div className="stage-toolbar" aria-label="Workbench tools">
             {["Select", "Move", "Rotate", "Pan", "Zoom", "Isolate", "Hide", "Show All", "Connections", "Measure", "Reset View"].map(tool => (
               <button type="button" className={tool === "Select" ? "tool-button active" : "tool-button"} key={tool}>

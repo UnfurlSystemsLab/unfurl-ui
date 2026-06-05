@@ -16,6 +16,8 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /assembly-demo/);
     assert.match(html, /Target application/);
     assert.match(html, /E-Commerce Platform/);
+    assert.match(html, /Default deployment/);
+    assert.match(html, /On-Prem Cluster/);
     assert.match(html, /Load target app/);
     assert.match(html, /Extract Needs/);
     assert.match(html, /load target app first/);
