@@ -97,6 +97,45 @@ the shape so production multitenancy does not require a model rewrite.
 
 ---
 
+## 2B. Dynamic composite DCP interpretation
+
+Studio is the visual operator surface for DCP's dynamic composite model. DCP is
+not a fixed hierarchy where a company always contains one substrate, one module
+layer, and one component layer. A DCP can contain descendant DCPs at several
+levels, and those descendants can be selected, replaced, enabled, disabled, or
+rebound based on tenant, policy, deployment environment, runtime context, and
+requested capabilities.
+
+Example:
+
+```text
+Tenant A -> Azure substrate + Keycloak + Azure Blob + Azure OpenAI
+Tenant B -> AWS substrate + Auth0 + S3 + Bedrock
+Tenant C -> private substrate + Keycloak + MinIO + Local Model Gateway
+```
+
+Studio should make that late-bound composition visible:
+
+- Dynamic discovery appears as the catalog and compatible-alternatives palette.
+- Dynamic selection appears as candidate choice, replacement, and policy
+  preference.
+- Dynamic validation appears as connection status, rejection reasons, and
+  compatibility reports.
+- Dynamic binding appears as validated pipes, substrate ports, and deployment
+  bindings.
+
+This is why taking out a component, replacing it with an outer/alternative
+component, or rebinding a pipe is a first-class Studio workflow. The visual move
+is only an operator intent; DCP/Fabric decide whether the dynamic composition is
+still valid.
+
+Hard rule:
+
+> Studio edits the dynamic composition through validated intents. It never
+> mutates the composition by rewriting the rendered scene.
+
+---
+
 ## 3. Component artifact layout
 
 Each Intelligent Component JAR can carry:
