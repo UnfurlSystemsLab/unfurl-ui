@@ -71,6 +71,19 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /tenant-retail/);
     assert.match(html, /checkout-platform/);
   });
+
+  it("renders a blank assembly for a new draft", () => {
+    const html = renderToString(
+      <DraftWorkspacePanel client={client()} initialDraftComponentCount={0} />
+    );
+
+    assert.match(html, /Empty Assembly/);
+    assert.match(html, /Import or add verified catalog components/);
+    assert.match(html, /empty governed draft/);
+    assert.match(html, /Components/);
+    assert.match(html, /Substrate Ports Used/);
+    assert.match(html, /0 \/ 12/);
+  });
 });
 
 function client() {
