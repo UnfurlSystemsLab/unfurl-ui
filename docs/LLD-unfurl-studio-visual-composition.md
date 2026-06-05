@@ -65,6 +65,38 @@ Rule:
 
 ---
 
+## 2A. Tenant and assembly scope
+
+Studio is designed as a multitenant system. A tenant is the isolation boundary
+for catalog entries, visual assets, needs, trust policy, deployment policy,
+draft sessions, compiled contracts, substrate profiles, audit history, and
+saved layout metadata.
+
+A tenant can own multiple assemblies. An assembly is the durable design-time
+workspace for one target application or solution. Each assembly may have many
+draft sessions, extracted needs, deployment defaults, saved layouts, compiled
+contracts, and substrate profiles.
+
+Rules:
+
+1. Every Studio/Fabric API request is scoped by tenant and assembly, either
+   through authenticated context or explicit `tenantId` / `assemblyId` fields.
+2. Candidate matching, replacement suggestions, visual assets, and deployment
+   policy resolution must not cross tenant boundaries.
+3. A component can be visible in multiple tenant catalogs, but each tenant's
+   trust decision, deployment policy, and assembly state remain separate.
+4. Layout-only browser state should be keyed by tenant, user, and assembly so
+   one assembly's camera, placement, annotations, or tutorial progress does not
+   leak into another assembly.
+5. Compile/export operates on the current validated assembly revision, not on
+   global UI state.
+
+For local MVP fixture mode, Studio may use a synthetic tenant and assembly such
+as `tenant-local` and `assembly-demo`, but DTOs and storage keys should preserve
+the shape so production multitenancy does not require a model rewrite.
+
+---
+
 ## 3. Component artifact layout
 
 Each Intelligent Component JAR can carry:
@@ -754,6 +786,8 @@ to global UI state.
 
 ```ts
 type StudioDraftSession = {
+  tenantId: string;
+  assemblyId: string;
   sessionId: string;
   baseCatalogHash: string;
   needsId?: string;
@@ -767,6 +801,7 @@ type StudioDraftSession = {
 The session model supports:
 
 - multiple users or browser tabs
+- multiple assemblies per tenant
 - ordered intents
 - stale response rejection
 - candidate state versioning
@@ -777,6 +812,8 @@ Every semantic intent includes the session and base revision:
 
 ```json
 {
+  "tenantId": "tenant-payments",
+  "assemblyId": "assembly-checkout",
   "sessionId": "studio-session-123",
   "baseRevision": 7,
   "type": "CONNECT",
@@ -808,6 +845,10 @@ Stale response:
 Studio must reject stale responses and refresh the session before applying
 further semantic edits.
 
+`tenantId` and `assemblyId` are not cosmetic metadata. Fabric must reject an
+intent when the session, catalog, needs, trust policy, deployment policy, or
+current candidate belongs to a different tenant or assembly.
+
 ---
 
 ## 24. View state vs composition state
@@ -831,6 +872,10 @@ View state is local or per-user:
 - collapsed panels
 - selected inspector tab
 - palette filters
+
+View state is also tenant/assembly scoped. A saved placement or annotation from
+one assembly must not appear in another assembly unless the operator explicitly
+copies it.
 
 Only composition state participates in compile/export. View state may be saved
 as Studio layout metadata, but it must never be treated as a contract source.
@@ -866,34 +911,39 @@ way.
 HTTP-shaped version:
 
 ```text
-GET  /studio/catalog
-GET  /studio/catalog/{entryId}/visual
-POST /studio/sessions
-POST /studio/sessions/{id}/intents
-GET  /studio/sessions/{id}
-POST /studio/sessions/{id}/compile
-GET  /studio/assets/{assetId}
+GET  /studio/tenants/{tenantId}/catalog
+GET  /studio/tenants/{tenantId}/catalog/{entryId}/visual
+GET  /studio/tenants/{tenantId}/assemblies
+POST /studio/tenants/{tenantId}/assemblies
+POST /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions
+POST /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions/{id}/intents
+GET  /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions/{id}
+POST /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions/{id}/compile
+GET  /studio/tenants/{tenantId}/assets/{assetId}
 ```
 
 Service-method version:
 
 ```text
-listCatalogVisuals()
-getCatalogVisual(entryId)
-createDraftComposition(request)
-applyIntent(sessionId, intent)
-getDraftSession(sessionId)
-compileCandidate(sessionId)
-getVisualAsset(assetId)
+listCatalogVisuals(tenantId)
+getCatalogVisual(tenantId, entryId)
+listAssemblies(tenantId)
+createAssembly(tenantId, request)
+createDraftComposition(tenantId, assemblyId, request)
+applyIntent(tenantId, assemblyId, sessionId, intent)
+getDraftSession(tenantId, assemblyId, sessionId)
+compileCandidate(tenantId, assemblyId, sessionId)
+getVisualAsset(tenantId, assetId)
 ```
 
 API rules:
 
-1. Asset URLs are Fabric-issued and hash-pinned.
-2. Intent responses include revision information.
-3. Compile/export uses the current validated session revision.
-4. Catalog visuals include visual integrity metadata.
-5. API errors must be renderable in both 3D/2D views and table view.
+1. Tenant scope is enforced before catalog, asset, assembly, or session access.
+2. Asset URLs are Fabric-issued, hash-pinned, and tenant-scoped.
+3. Intent responses include revision information.
+4. Compile/export uses the current validated assembly session revision.
+5. Catalog visuals include visual integrity metadata.
+6. API errors must be renderable in both 3D/2D views and table view.
 
 ---
 
