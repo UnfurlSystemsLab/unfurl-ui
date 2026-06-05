@@ -19,6 +19,7 @@ export type ThreeAssemblySceneProps = {
   readonly selectedSurface: ThreeAssemblySurfaceId;
   readonly selectedPartId?: string | undefined;
   readonly extractedPartId?: string | undefined;
+  readonly semanticProjection?: SemanticDcpSceneProjection | undefined;
   readonly onSelect: (surface: ThreeAssemblySurfaceId) => void;
   readonly onSelectPart?: (selection: ThreeAssemblySelection) => void;
   readonly onViewChange?: (view: string) => void;
@@ -26,6 +27,19 @@ export type ThreeAssemblySceneProps = {
 };
 
 export type SemanticZoomLevel = "PARENT_DCP" | "ASSEMBLY_DCP" | "CHILD_DCP";
+
+export type SemanticDcpSceneProjection = {
+  readonly parentLabel: string;
+  readonly assemblyLabel: string;
+  readonly childNodes: readonly SemanticDcpSceneNode[];
+};
+
+export type SemanticDcpSceneNode = {
+  readonly nodeId: string;
+  readonly label: string;
+  readonly dcpType: string;
+  readonly replacementAllowed: boolean;
+};
 
 export type ThreeAssemblySelection = {
   readonly id: string;
@@ -63,12 +77,22 @@ type SceneHandles = {
 const initialCameraPosition = new THREE.Vector3(7.9, 5.0, 10.2);
 const initialCameraTarget = new THREE.Vector3(0.2, -0.7, 0.12);
 const viewShortcuts = ["Assembly", "Exploded", "Ports", "Substrate", "Validation"] as const;
+const defaultSemanticProjection: SemanticDcpSceneProjection = {
+  parentLabel: "E-Commerce Platform",
+  assemblyLabel: "Checkout Assembly",
+  childNodes: [
+    { nodeId: "component.rules", label: "Rules DCP", dcpType: "COMPONENT", replacementAllowed: true },
+    { nodeId: "component.policy", label: "Policy DCP", dcpType: "COMPONENT", replacementAllowed: true },
+    { nodeId: "component.customer", label: "Customer DCP", dcpType: "COMPONENT", replacementAllowed: false }
+  ]
+};
 
 export function ThreeAssemblyScene({
   activeView,
   selectedSurface,
   selectedPartId,
   extractedPartId,
+  semanticProjection,
   onSelect,
   onSelectPart,
   onViewChange,
@@ -145,7 +169,7 @@ export function ThreeAssemblyScene({
     root.position.set(-0.34, 0.0, -0.05);
     scene.add(root);
 
-    const handles = buildAssembly(root, clickable);
+    const handles = buildAssembly(root, clickable, semanticProjection ?? defaultSemanticProjection);
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -307,7 +331,7 @@ export function ThreeAssemblyScene({
       renderer.dispose();
       disposeObject(scene);
     };
-  }, []);
+  }, [semanticProjection]);
 
   return <div className="three-assembly-scene" aria-label="3D assembly scene" ref={hostRef} />;
 }
@@ -336,7 +360,7 @@ function addLighting(scene: THREE.Scene) {
   scene.add(purpleLight);
 }
 
-function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[]): SceneHandles {
+function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[], semanticProjection: SemanticDcpSceneProjection): SceneHandles {
   const moduleGroups = new Map<ThreeAssemblySurfaceId, THREE.Group>();
   const moduleBodies = new Map<ThreeAssemblySurfaceId, THREE.Mesh>();
   const selectableParts = new Map<string, THREE.Object3D>();
@@ -373,10 +397,10 @@ function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[]): SceneHan
   const substrateLinks = createSubstrateLinks();
   root.add(substrateLinks);
 
-  const parentDcpGroup = createParentDcpContext();
+  const parentDcpGroup = createParentDcpContext(semanticProjection);
   root.add(parentDcpGroup);
 
-  const childDcpGroup = createChildDcpConstructs(clickable, selectableParts);
+  const childDcpGroup = createChildDcpConstructs(clickable, selectableParts, semanticProjection);
   root.add(childDcpGroup);
 
   const { explodedGroup, validationLines } = createExplodedModule();
@@ -398,7 +422,7 @@ function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[]): SceneHan
   };
 }
 
-function createParentDcpContext(): THREE.Group {
+function createParentDcpContext(semanticProjection: SemanticDcpSceneProjection): THREE.Group {
   const group = new THREE.Group();
   group.position.set(-0.34, 0.0, -0.05);
 
@@ -414,7 +438,7 @@ function createParentDcpContext(): THREE.Group {
   ring.position.set(0, -0.58, 0.12);
   group.add(ring);
 
-  const label = createTextSprite("Parent DCP: E-Commerce Platform", "#1d4ed8", "rgba(255,255,255,0.78)");
+  const label = createTextSprite(`Parent DCP: ${semanticProjection.parentLabel}`, "#1d4ed8", "rgba(255,255,255,0.78)");
   label.scale.set(2.2, 0.36, 1);
   label.position.set(-2.85, 1.72, -1.82);
   group.add(label);
@@ -422,16 +446,18 @@ function createParentDcpContext(): THREE.Group {
   return group;
 }
 
-function createChildDcpConstructs(clickable: THREE.Object3D[], selectableParts: Map<string, THREE.Object3D>): THREE.Group {
+function createChildDcpConstructs(
+  clickable: THREE.Object3D[],
+  selectableParts: Map<string, THREE.Object3D>,
+  semanticProjection: SemanticDcpSceneProjection
+): THREE.Group {
   const group = new THREE.Group();
   group.position.set(0.32, -0.42, 1.42);
-  const children = [
-    ["Rules DCP", -0.52, 0.34, 0x7c3aed],
-    ["Policy DCP", 0, 0.52, 0x2563eb],
-    ["Customer DCP", 0.52, 0.34, 0x16a34a]
-  ] as const;
+  const children = sceneChildNodes(semanticProjection);
 
-  for (const [label, x, y, color] of children) {
+  for (const [index, childNode] of children.entries()) {
+    const [x, y] = childPosition(index, children.length);
+    const color = childNode.replacementAllowed ? 0x16a34a : 0x7c3aed;
     const child = new THREE.Mesh(
       new THREE.BoxGeometry(0.42, 0.26, 0.18),
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.24, metalness: 0.12, emissive: color, emissiveIntensity: 0.08 })
@@ -439,10 +465,10 @@ function createChildDcpConstructs(clickable: THREE.Object3D[], selectableParts: 
     child.position.set(x, y, 0);
     child.userData.surface = "validation";
     child.userData.selection = {
-      id: `component:validation:${label.toLowerCase().replaceAll(" ", "-")}`,
+      id: `component:validation:${childNode.nodeId.replaceAll(":", "-")}`,
       kind: "component",
       surface: "validation",
-      label
+      label: childNode.label
     } satisfies ThreeAssemblySelection;
     clickable.push(child);
     selectableParts.set(child.userData.selection.id, child);
@@ -455,18 +481,33 @@ function createChildDcpConstructs(clickable: THREE.Object3D[], selectableParts: 
     edge.position.copy(child.position);
     group.add(edge);
 
-    const text = createTextSprite(label, "#0f172a", "rgba(255,255,255,0.72)");
+    const text = createTextSprite(childNode.label, "#0f172a", "rgba(255,255,255,0.72)");
     text.scale.set(0.62, 0.16, 1);
     text.position.set(x, y - 0.26, 0.03);
     group.add(text);
   }
 
-  const title = createTextSprite("Child DCP constructs", "#6d28d9", "rgba(255,255,255,0.76)");
+  const title = createTextSprite(`${semanticProjection.assemblyLabel} child DCPs`, "#6d28d9", "rgba(255,255,255,0.76)");
   title.scale.set(1.35, 0.22, 1);
   title.position.set(0, 0.92, 0.02);
   group.add(title);
 
   return group;
+}
+
+function sceneChildNodes(semanticProjection: SemanticDcpSceneProjection): readonly SemanticDcpSceneNode[] {
+  return semanticProjection.childNodes.length === 0
+    ? defaultSemanticProjection.childNodes
+    : semanticProjection.childNodes.slice(0, 5);
+}
+
+function childPosition(index: number, count: number): readonly [number, number] {
+  const radius = count > 3 ? 0.62 : 0.54;
+  const start = count === 1 ? Math.PI / 2 : Math.PI * 0.86;
+  const end = count === 1 ? Math.PI / 2 : Math.PI * 0.14;
+  const t = count <= 1 ? 0 : index / (count - 1);
+  const angle = start + (end - start) * t;
+  return [Math.cos(angle) * radius, 0.42 + Math.sin(angle) * 0.34];
 }
 
 function addWorkbenchBase(root: THREE.Group) {

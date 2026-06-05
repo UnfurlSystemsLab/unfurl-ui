@@ -14,7 +14,7 @@ import {
   type DraftWorkspaceState
 } from "./draftWorkspace.js";
 import { buildSigningHandoff } from "./signingHandoff.js";
-import type { SemanticZoomLevel, ThreeAssemblySelection, ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
+import type { SemanticDcpSceneProjection, SemanticZoomLevel, ThreeAssemblySelection, ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
 
 const ThreeAssemblyScene = lazy(async () => {
   const module = await import("./ThreeAssemblyScene.js");
@@ -315,6 +315,10 @@ export function DraftWorkspacePanel({
   const paletteEntries = catalog.length === 0 ? fallbackCatalog() : catalog;
   const showFallbackAssembly = draftComponentCount === undefined || draftComponentCount > 0;
   const showEmptyAssembly = draftComponentCount === 0;
+  const semanticSceneProjection = useMemo(
+    () => dynamicProjection ? toSemanticSceneProjection(dynamicProjection) : undefined,
+    [dynamicProjection]
+  );
   const replacementCandidates = useMemo(
     () => buildReplacementCandidates(selectedPart.surface, paletteEntries),
     [selectedPart.surface, paletteEntries]
@@ -561,16 +565,18 @@ export function DraftWorkspacePanel({
               {showFallbackAssembly && (
                 <Suspense fallback={<div className="three-assembly-scene" aria-label="3D assembly scene" />}>
                 <ThreeAssemblyScene
+                  key={semanticSceneProjectionKey(semanticSceneProjection)}
                   activeView={activeView}
                   selectedSurface={selectedComponent}
                   selectedPartId={selectedPart.id}
                   extractedPartId={extractedPartId}
-                onSelect={setSelectedComponent}
-                onSelectPart={selectScenePart}
-                onViewChange={setActiveView}
-                onSemanticZoomChange={setSemanticZoomLevel}
-              />
-            </Suspense>
+                  semanticProjection={semanticSceneProjection}
+                  onSelect={setSelectedComponent}
+                  onSelectPart={selectScenePart}
+                  onViewChange={setActiveView}
+                  onSemanticZoomChange={setSemanticZoomLevel}
+                />
+              </Suspense>
               )}
             <div className="view-mode-badge">
               <strong>{activeView}</strong>
@@ -1232,6 +1238,36 @@ function semanticZoomDescription(level: SemanticZoomLevel): string {
 
 function nodeLabel(projection: DynamicDcpProjectionResponse, nodeId: string): string {
   return projection.nodes.find(node => node.nodeId === nodeId)?.label ?? nodeId;
+}
+
+function toSemanticSceneProjection(projection: DynamicDcpProjectionResponse): SemanticDcpSceneProjection {
+  const root = projection.nodes.find(node => node.nodeId === projection.rootNodeId)
+    ?? projection.nodes.find(node => node.level === "PARENT");
+  const focus = projection.nodes.find(node => node.nodeId === projection.focusNodeId)
+    ?? projection.nodes.find(node => node.level === "ASSEMBLY");
+  return {
+    parentLabel: root?.label ?? "Parent DCP",
+    assemblyLabel: focus?.label ?? "Assembly DCP",
+    childNodes: projection.nodes
+      .filter(node => node.level === "CHILD")
+      .map(node => ({
+        nodeId: node.nodeId,
+        label: node.label,
+        dcpType: node.dcpType,
+        replacementAllowed: node.replacementAllowed
+      }))
+  };
+}
+
+function semanticSceneProjectionKey(projection: SemanticDcpSceneProjection | undefined): string {
+  if (!projection) {
+    return "semantic:fallback";
+  }
+  return [
+    projection.parentLabel,
+    projection.assemblyLabel,
+    projection.childNodes.map(node => `${node.nodeId}:${node.label}:${node.replacementAllowed}`).join("|")
+  ].join("::");
 }
 
 const substrateCapabilities = [
