@@ -10,6 +10,10 @@ describe("DraftWorkspacePanel", () => {
 
     assert.match(html, /Unfurl Studio Workbench/);
     assert.match(html, /Guided Tour/);
+    assert.match(html, /Tenant/);
+    assert.match(html, /tenant-local/);
+    assert.match(html, /Assembly/);
+    assert.match(html, /assembly-demo/);
     assert.match(html, /Welcome to Unfurl Studio/);
     assert.match(html, /governed visual workbench/);
     assert.match(html, /href="\/components\/fabric-studio\/help#scanned-catalog"/);
@@ -46,6 +50,19 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /customer.query/);
     assert.match(html, /policy.evaluate/);
     assert.match(html, /rules.fetch/);
+  });
+
+  it("renders the requested tenant and assembly scope", () => {
+    const html = renderToString(
+      <DraftWorkspacePanel
+        client={client()}
+        initialTenantId="tenant-retail"
+        initialAssemblyId="checkout-platform"
+      />
+    );
+
+    assert.match(html, /tenant-retail/);
+    assert.match(html, /checkout-platform/);
   });
 });
 

@@ -35,6 +35,19 @@ describe("AppShell", () => {
     assert.match(html, /checkout-platform/);
   });
 
+  it("passes workspace tenant and assembly query params into Studio", () => {
+    const html = renderToString(
+      <MemoryRouter initialEntries={["/components/fabric-studio/workspace?tenantId=tenant-retail&assemblyId=checkout-platform"]}>
+        <StudioClientProvider mode="fixture">
+          <AppShell mode="fixture" />
+        </StudioClientProvider>
+      </MemoryRouter>
+    );
+
+    assert.match(html, /tenant-retail/);
+    assert.match(html, /checkout-platform/);
+  });
+
   for (const [path, text] of [
     ["/components/fabric-studio/catalog", "Catalog Palette"],
     ["/components/fabric-studio/workspace", "Unfurl Studio Workbench"],

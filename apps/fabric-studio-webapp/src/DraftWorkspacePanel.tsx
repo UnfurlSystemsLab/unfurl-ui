@@ -1,6 +1,10 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { StudioFabricClient } from "@unfurl/fabric-validation-client";
+import {
+  DEFAULT_STUDIO_ASSEMBLY_ID,
+  DEFAULT_STUDIO_TENANT_ID,
+  type StudioFabricClient
+} from "@unfurl/fabric-validation-client";
 import type { VisualCatalogEntry } from "@unfurl/visual-manifest";
 import {
   applyDraftIntent,
@@ -21,6 +25,8 @@ export type DraftWorkspacePanelProps = {
     StudioFabricClient,
     "listCatalogVisuals" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate"
   >;
+  readonly initialTenantId?: string | undefined;
+  readonly initialAssemblyId?: string | undefined;
   readonly initialBaseCatalogHash?: string | undefined;
 };
 
@@ -62,7 +68,14 @@ type TutorialStep = {
 
 const tutorialStorageKey = "unfurl-studio-workbench-tutorial-dismissed";
 
-export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:catalog" }: DraftWorkspacePanelProps) {
+export function DraftWorkspacePanel({
+  client,
+  initialTenantId = DEFAULT_STUDIO_TENANT_ID,
+  initialAssemblyId = DEFAULT_STUDIO_ASSEMBLY_ID,
+  initialBaseCatalogHash = "sha256:catalog"
+}: DraftWorkspacePanelProps) {
+  const [tenantId, setTenantId] = useState(initialTenantId);
+  const [assemblyId, setAssemblyId] = useState(initialAssemblyId);
   const [baseCatalogHash, setBaseCatalogHash] = useState(initialBaseCatalogHash);
   const [needsId, setNeedsId] = useState("");
   const [catalogEntryId, setCatalogEntryId] = useState("com.unfurl:storage-s3:1.2.0");
@@ -89,7 +102,7 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
 
   useEffect(() => {
     let cancelled = false;
-    void client.listCatalogVisuals()
+    void client.listCatalogVisuals({ tenantId })
       .then(response => {
         if (!cancelled) {
           setBaseCatalogHash(current => current === "sha256:catalog" ? response.catalogHash : current);
@@ -106,12 +119,14 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, tenantId]);
 
   async function create() {
     setBusy(true);
     try {
       setState(await createDraftWorkspace(client, {
+        tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
+        assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID,
         baseCatalogHash,
         ...(needsId.trim() === "" ? {} : { needsId: needsId.trim() })
       }));
@@ -355,6 +370,14 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
             <input aria-label="Search components" placeholder="Search components..." />
             <button type="button" className="icon-button" aria-label="Filter catalog">Filter</button>
           </div>
+          <label>
+            Tenant
+            <input value={tenantId} onChange={event => setTenantId(event.target.value)} />
+          </label>
+          <label>
+            Assembly
+            <input value={assemblyId} onChange={event => setAssemblyId(event.target.value)} />
+          </label>
           <label>
             Needs ID
             <input value={needsId} onChange={event => setNeedsId(event.target.value)} />

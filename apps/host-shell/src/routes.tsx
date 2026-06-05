@@ -44,6 +44,8 @@ function WorkspaceRoute() {
   return (
     <DraftWorkspacePanel
       client={client}
+      initialTenantId={searchParams.get("tenantId") ?? undefined}
+      initialAssemblyId={searchParams.get("assemblyId") ?? undefined}
       initialBaseCatalogHash={searchParams.get("catalogHash") ?? undefined}
     />
   );
