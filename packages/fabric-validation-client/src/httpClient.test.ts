@@ -22,6 +22,29 @@ describe("HTTP Studio Fabric client", () => {
     ]);
   });
 
+  it("uses configured tenant and assembly defaults for scoped endpoints", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      defaultTenantId: "tenant-payments",
+      defaultAssemblyId: "assembly-checkout",
+      fetch: fakeFetch(calls, {
+        session: session({ sessionId: "studio-session-123", sceneRevision: 0 })
+      })
+    });
+
+    await client.listCatalogVisuals();
+    await client.createDraftComposition({ baseCatalogHash: "sha256:catalog" });
+
+    assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-payments/catalog");
+    assert.equal(calls[1]?.input, "http://fabric.local/studio/tenants/tenant-payments/assemblies/assembly-checkout/sessions");
+    assert.deepEqual(JSON.parse(calls[1]?.body ?? "{}"), {
+      tenantId: "tenant-payments",
+      assemblyId: "assembly-checkout",
+      baseCatalogHash: "sha256:catalog"
+    });
+  });
+
   it("loads a read-only composition view by posting contract and profile paths", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

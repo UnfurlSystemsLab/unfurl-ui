@@ -1,6 +1,11 @@
 import { createContext, useContext } from "react";
 import type { ReactNode } from "react";
-import { createHttpStudioFabricClient, type StudioFabricClient } from "@unfurl/fabric-validation-client";
+import {
+  DEFAULT_STUDIO_ASSEMBLY_ID,
+  DEFAULT_STUDIO_TENANT_ID,
+  createHttpStudioFabricClient,
+  type StudioFabricClient
+} from "@unfurl/fabric-validation-client";
 import { createFixtureStudioFabricClient } from "./fixtures/deploymentResolutionFixtures.js";
 
 const StudioClientContext = createContext<StudioFabricClient | null>(null);
@@ -11,16 +16,24 @@ export type StudioClientProviderProps = {
   readonly children: ReactNode;
   readonly mode?: "live" | "fixture";
   readonly apiBaseUrl?: string;
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
 };
 
 export function StudioClientProvider({
   children,
   mode = studioMode(),
   apiBaseUrl = studioApiBaseUrl(),
+  tenantId = studioTenantId(),
+  assemblyId = studioAssemblyId()
 }: StudioClientProviderProps) {
   const client = mode === "fixture"
     ? createFixtureStudioFabricClient()
-    : createHttpStudioFabricClient({ baseUrl: apiBaseUrl });
+    : createHttpStudioFabricClient({
+        baseUrl: apiBaseUrl,
+        defaultTenantId: tenantId,
+        defaultAssemblyId: assemblyId
+      });
   return (
     <StudioClientContext.Provider value={client}>
       {children}
@@ -45,4 +58,16 @@ export function studioApiBaseUrl(): string {
   const env = (import.meta as ImportMeta & { readonly env?: { readonly VITE_STUDIO_API_BASE_URL?: string } }).env;
   const fromEnv = env?.VITE_STUDIO_API_BASE_URL?.trim();
   return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_STUDIO_API_BASE_URL;
+}
+
+export function studioTenantId(): string {
+  const env = (import.meta as ImportMeta & { readonly env?: { readonly VITE_STUDIO_TENANT_ID?: string } }).env;
+  const fromEnv = env?.VITE_STUDIO_TENANT_ID?.trim();
+  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_STUDIO_TENANT_ID;
+}
+
+export function studioAssemblyId(): string {
+  const env = (import.meta as ImportMeta & { readonly env?: { readonly VITE_STUDIO_ASSEMBLY_ID?: string } }).env;
+  const fromEnv = env?.VITE_STUDIO_ASSEMBLY_ID?.trim();
+  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_STUDIO_ASSEMBLY_ID;
 }

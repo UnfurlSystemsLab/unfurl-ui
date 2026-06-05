@@ -1,12 +1,18 @@
 import { NavLink } from "react-router-dom";
 import { AppRoutes } from "./routes.js";
-import { studioMode } from "./StudioClientContext.js";
+import { studioAssemblyId, studioMode, studioTenantId } from "./StudioClientContext.js";
 
 export type AppShellProps = {
   readonly mode?: "live" | "fixture";
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
 };
 
-export function AppShell({ mode = studioMode() }: AppShellProps) {
+export function AppShell({
+  mode = studioMode(),
+  tenantId = studioTenantId(),
+  assemblyId = studioAssemblyId()
+}: AppShellProps) {
   return (
     <div className="app-shell">
       <aside className="side-nav">
@@ -43,7 +49,11 @@ export function AppShell({ mode = studioMode() }: AppShellProps) {
             Help
           </NavLink>
         </nav>
-        <div className="mode-pill">{mode} mode</div>
+        <div className="shell-context">
+          <span className="scope-pill" title="Tenant">{tenantId}</span>
+          <span className="scope-pill" title="Assembly">{assemblyId}</span>
+          <span className="mode-pill">{mode} mode</span>
+        </div>
       </aside>
       <main className="app-main">
         <AppRoutes />

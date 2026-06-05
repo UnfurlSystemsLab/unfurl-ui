@@ -122,13 +122,33 @@ th, td {
   font-weight: 750;
 }
 
-.mode-pill {
+.shell-context {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.mode-pill,
+.scope-pill {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   padding: 6px 8px;
   color: #64748b;
   font-size: 12px;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mode-pill {
   text-transform: uppercase;
+}
+
+.scope-pill {
+  background: #f8fafc;
+  color: #334155;
 }
 
 .app-main {

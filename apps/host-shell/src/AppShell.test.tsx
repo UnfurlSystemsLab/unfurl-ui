@@ -18,6 +18,21 @@ describe("AppShell", () => {
     assert.match(html, /Unfurl Studio/);
     assert.match(html, /Deployment Planner/);
     assert.match(html, /fixture.*mode/s);
+    assert.match(html, /tenant-local/);
+    assert.match(html, /assembly-demo/);
+  });
+
+  it("renders the active tenant and assembly context", () => {
+    const html = renderToString(
+      <MemoryRouter initialEntries={["/components/fabric-studio/workspace"]}>
+        <StudioClientProvider mode="fixture">
+          <AppShell mode="fixture" tenantId="tenant-payments" assemblyId="checkout-platform" />
+        </StudioClientProvider>
+      </MemoryRouter>
+    );
+
+    assert.match(html, /tenant-payments/);
+    assert.match(html, /checkout-platform/);
   });
 
   for (const [path, text] of [
