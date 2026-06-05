@@ -22,6 +22,7 @@ export type CatalogPalette = {
 };
 
 export type CatalogPaletteFilter = {
+  readonly tenantId?: string;
   readonly query?: string;
   readonly category?: CatalogPaletteItem["category"];
   readonly includeWarningsOnly?: boolean;
@@ -42,7 +43,9 @@ export async function loadCatalogPalette(
   filter: CatalogPaletteFilter = {}
 ): Promise<CatalogPaletteState> {
   try {
-    const response = await client.listCatalogVisuals();
+    const response = await client.listCatalogVisuals(
+      filter.tenantId === undefined ? undefined : { tenantId: filter.tenantId }
+    );
     return {
       status: "READY",
       palette: buildCatalogPalette(response.catalogHash, response.entries, filter)

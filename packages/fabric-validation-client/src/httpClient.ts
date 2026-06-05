@@ -3,6 +3,10 @@ import type {
   CompileDraftCandidateResponse,
   CreateDraftCompositionRequest,
   CreateDraftCompositionResponse,
+  AdmitCatalogArtifactsRequest,
+  AdmitCatalogArtifactsResponse,
+  ExtractNeedsRequest,
+  ExtractNeedsResponse,
   IntentResponse,
   ListCatalogVisualsResponse,
   LoadCompositionViewRequest,
@@ -56,6 +60,26 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     listCatalogVisuals: async body => {
       const tenantId = encodeURIComponent(body?.tenantId ?? defaultScope.tenantId);
       return request<ListCatalogVisualsResponse>(fetchImpl, baseUrl, "GET", `/studio/tenants/${tenantId}/catalog`);
+    },
+    admitCatalogArtifacts: async body => {
+      const scope = resolveScope(defaultScope, body);
+      return request<AdmitCatalogArtifactsResponse>(
+        fetchImpl,
+        baseUrl,
+        "POST",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/catalog/admissions`,
+        { ...body, ...scope }
+      );
+    },
+    extractNeeds: async body => {
+      const scope = resolveScope(defaultScope, body);
+      return request<ExtractNeedsResponse>(
+        fetchImpl,
+        baseUrl,
+        "POST",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/needs/extract`,
+        { ...body, ...scope }
+      );
     },
     loadCompositionView: async (body: LoadCompositionViewRequest) =>
       request<LoadCompositionViewResponse>(fetchImpl, baseUrl, "POST", "/studio/composition-view", body),

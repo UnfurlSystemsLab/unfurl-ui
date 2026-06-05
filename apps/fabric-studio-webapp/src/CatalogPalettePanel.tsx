@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import type { StudioFabricClient } from "@unfurl/fabric-validation-client";
-import { loadCatalogPalette, type CatalogPaletteState } from "./catalogPalette.js";
+import { buildCatalogPalette, loadCatalogPalette, type CatalogPaletteState } from "./catalogPalette.js";
 
 export type CatalogPalettePanelProps = {
-  readonly client: Pick<StudioFabricClient, "listCatalogVisuals">;
+  readonly client: Pick<StudioFabricClient, "listCatalogVisuals" | "admitCatalogArtifacts">;
+  readonly tenantId?: string | undefined;
+  readonly assemblyId?: string | undefined;
 };
 
-export function CatalogPalettePanel({ client }: CatalogPalettePanelProps) {
+export function CatalogPalettePanel({ client, tenantId = "tenant-local", assemblyId = "assembly-demo" }: CatalogPalettePanelProps) {
   const [query, setQuery] = useState("");
   const [warningsOnly, setWarningsOnly] = useState(false);
   const [selectedArtifactNames, setSelectedArtifactNames] = useState<readonly string[]>([]);
@@ -15,7 +17,7 @@ export function CatalogPalettePanel({ client }: CatalogPalettePanelProps) {
 
   useEffect(() => {
     let cancelled = false;
-    void loadCatalogPalette(client, { query, includeWarningsOnly: warningsOnly }).then(next => {
+    void loadCatalogPalette(client, { tenantId, query, includeWarningsOnly: warningsOnly }).then(next => {
       if (!cancelled) {
         setState(next);
       }
@@ -31,9 +33,26 @@ export function CatalogPalettePanel({ client }: CatalogPalettePanelProps) {
     setClaimVerification(names.length === 0 ? "IDLE" : "READY_TO_VERIFY");
   }
 
-  function verifyClaims() {
+  async function verifyClaims() {
     if (selectedArtifactNames.length > 0) {
-      setClaimVerification("VERIFIED");
+      if (client.admitCatalogArtifacts) {
+        const response = await client.admitCatalogArtifacts({
+          tenantId,
+          assemblyId,
+          artifacts: selectedArtifactNames.map(fileName => ({ fileName }))
+        });
+        setClaimVerification(response.status === "VERIFIED" ? "VERIFIED" : "READY_TO_VERIFY");
+        setState({
+          status: "READY",
+          palette: buildCatalogPalette(response.catalog.catalogHash, response.catalog.entries, {
+            tenantId,
+            query,
+            includeWarningsOnly: warningsOnly
+          })
+        });
+      } else {
+        setClaimVerification("VERIFIED");
+      }
     }
   }
 
@@ -85,7 +104,7 @@ export function CatalogPalettePanel({ client }: CatalogPalettePanelProps) {
             {selectedArtifactNames.map(name => <li key={name}>{name}</li>)}
           </ul>
         )}
-        <button type="button" disabled={selectedArtifactNames.length === 0} onClick={verifyClaims}>
+        <button type="button" disabled={selectedArtifactNames.length === 0} onClick={() => void verifyClaims()}>
           Verify Component Claims
         </button>
       </section>

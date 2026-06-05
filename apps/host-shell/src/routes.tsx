@@ -35,7 +35,14 @@ export function AppRoutes() {
 
 function CatalogRoute() {
   const client = useStudioClient();
-  return <CatalogPalettePanel client={client} />;
+  const [searchParams] = useSearchParams();
+  return (
+    <CatalogPalettePanel
+      client={client}
+      tenantId={searchParams.get("tenantId") ?? undefined}
+      assemblyId={searchParams.get("assemblyId") ?? undefined}
+    />
+  );
 }
 
 function WorkspaceRoute() {

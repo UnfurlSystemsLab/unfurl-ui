@@ -45,6 +45,66 @@ describe("HTTP Studio Fabric client", () => {
     });
   });
 
+  it("admits component artifacts through the tenant catalog admission endpoint", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: fakeFetch(calls, {
+        tenantId: "tenant-local",
+        assemblyId: "assembly-demo",
+        status: "VERIFIED",
+        results: [],
+        catalog: { catalogHash: "sha256:catalog", entries: [] }
+      })
+    });
+
+    const response = await client.admitCatalogArtifacts?.({
+      assemblyId: "assembly-demo",
+      artifacts: [{ fileName: "payment.jar" }]
+    });
+
+    assert.equal(response?.status, "VERIFIED");
+    assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-local/catalog/admissions");
+    assert.deepEqual(JSON.parse(calls[0]?.body ?? "{}"), {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      artifacts: [{ fileName: "payment.jar" }]
+    });
+  });
+
+  it("extracts needs through the tenant assembly endpoint", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: fakeFetch(calls, {
+        tenantId: "tenant-local",
+        assemblyId: "assembly-demo",
+        needsId: "assembly-demo-extracted-needs",
+        targetApplicationName: "Checkout Platform",
+        suggestedNeedsYaml: "requiredCapabilities: []",
+        defaultDeploymentTarget: "kubernetes-prod",
+        warnings: []
+      })
+    });
+
+    const response = await client.extractNeeds?.({
+      assemblyId: "assembly-demo",
+      targetApplicationName: "Checkout Platform",
+      fileNames: ["workflow.yaml"],
+      defaultDeploymentTarget: "kubernetes-prod"
+    });
+
+    assert.equal(response?.needsId, "assembly-demo-extracted-needs");
+    assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-local/assemblies/assembly-demo/needs/extract");
+    assert.deepEqual(JSON.parse(calls[0]?.body ?? "{}"), {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      targetApplicationName: "Checkout Platform",
+      fileNames: ["workflow.yaml"],
+      defaultDeploymentTarget: "kubernetes-prod"
+    });
+  });
+
   it("loads a read-only composition view by posting contract and profile paths", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

@@ -23,6 +23,7 @@ const ThreeAssemblyScene = lazy(async () => {
 export type DraftWorkspacePanelProps = {
   readonly client: Pick<
     StudioFabricClient,
+    "extractNeeds" |
     "listCatalogVisuals" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate"
   >;
   readonly initialTenantId?: string | undefined;
@@ -144,9 +145,19 @@ export function DraftWorkspacePanel({
     setNeedsExtractionStatus(names.length === 0 ? "IDLE" : "READY");
   }
 
-  function extractNeeds() {
+  async function extractNeeds() {
     const normalizedAssembly = assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID;
-    setNeedsId(`${normalizedAssembly}-extracted-needs`);
+    if (client.extractNeeds) {
+      const response = await client.extractNeeds({
+        tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
+        assemblyId: normalizedAssembly,
+        targetApplicationName,
+        fileNames: targetApplicationFiles
+      });
+      setNeedsId(response.needsId);
+    } else {
+      setNeedsId(`${normalizedAssembly}-extracted-needs`);
+    }
     setNeedsExtractionStatus("EXTRACTED");
   }
 
@@ -412,7 +423,7 @@ export function DraftWorkspacePanel({
               <span>files: {targetApplicationFiles.length}</span>
               <span>needs: {needsExtractionText(needsExtractionStatus)}</span>
             </div>
-            <button type="button" className="secondary" disabled={targetApplicationFiles.length === 0} onClick={extractNeeds}>
+            <button type="button" className="secondary" disabled={targetApplicationFiles.length === 0} onClick={() => void extractNeeds()}>
               Extract Needs
             </button>
           </div>

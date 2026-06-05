@@ -71,6 +71,51 @@ export type ListCatalogVisualsRequest = {
   readonly tenantId?: string;
 };
 
+export type StudioComponentArtifactDraft = {
+  readonly fileName: string;
+  readonly sha256?: string;
+};
+
+export type AdmitCatalogArtifactsRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly artifacts: readonly StudioComponentArtifactDraft[];
+};
+
+export type StudioClaimVerificationResult = {
+  readonly fileName: string;
+  readonly status: "VERIFIED" | "REJECTED" | string;
+  readonly catalogEntryId: string;
+  readonly claimHash: string;
+  readonly warnings: readonly string[];
+};
+
+export type AdmitCatalogArtifactsResponse = {
+  readonly tenantId: string;
+  readonly assemblyId: string;
+  readonly status: "VERIFIED" | "REJECTED" | string;
+  readonly results: readonly StudioClaimVerificationResult[];
+  readonly catalog: ListCatalogVisualsResponse;
+};
+
+export type ExtractNeedsRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly targetApplicationName: string;
+  readonly fileNames: readonly string[];
+  readonly defaultDeploymentTarget?: string;
+};
+
+export type ExtractNeedsResponse = {
+  readonly tenantId: string;
+  readonly assemblyId: string;
+  readonly needsId: string;
+  readonly targetApplicationName: string;
+  readonly suggestedNeedsYaml: string;
+  readonly defaultDeploymentTarget: string;
+  readonly warnings: readonly string[];
+};
+
 export type LoadCompositionViewRequest = {
   readonly contractPath: string;
   readonly substrateProfilePath: string;
@@ -219,6 +264,8 @@ export type StudioScoreBreakdown = {
 
 export interface StudioFabricClient {
   readonly listCatalogVisuals: (request?: ListCatalogVisualsRequest) => Promise<ListCatalogVisualsResponse>;
+  readonly admitCatalogArtifacts?: (request: AdmitCatalogArtifactsRequest) => Promise<AdmitCatalogArtifactsResponse>;
+  readonly extractNeeds?: (request: ExtractNeedsRequest) => Promise<ExtractNeedsResponse>;
   readonly loadCompositionView: (request: LoadCompositionViewRequest) => Promise<LoadCompositionViewResponse>;
   readonly createDraftComposition: (request: CreateDraftCompositionRequest) => Promise<CreateDraftCompositionResponse>;
   readonly getDraftSession: (request: string | ({

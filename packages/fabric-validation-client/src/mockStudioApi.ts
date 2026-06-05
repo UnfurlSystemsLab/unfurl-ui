@@ -4,6 +4,8 @@ import type {
   CompileDraftCandidateResponse,
   CreateDraftCompositionRequest,
   CreateDraftCompositionResponse,
+  AdmitCatalogArtifactsResponse,
+  ExtractNeedsResponse,
   FetchLike,
   FetchResponseLike,
   IntentResponse,
@@ -18,6 +20,8 @@ export type MockStudioApiFixtures = {
   readonly catalog?: ListCatalogVisualsResponse;
   readonly compositionView?: LoadCompositionViewResponse;
   readonly session?: StudioDraftSession;
+  readonly admissionResponse?: AdmitCatalogArtifactsResponse;
+  readonly needsResponse?: ExtractNeedsResponse;
   readonly intentResponse?: IntentResponse;
   readonly compileResponse?: CompileDraftCandidateResponse;
   readonly resolveDeploymentResponse?: ResolveDeploymentResponse;
@@ -159,6 +163,34 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     if (method === "POST" && (path === "/studio/sessions" || path === sessionPath(session, ""))) {
       parseJson<CreateDraftCompositionRequest>(init?.body);
       return ok<CreateDraftCompositionResponse>({ session });
+    }
+    if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog/admissions`) {
+      const body = parseJson<{ readonly assemblyId?: string; readonly artifacts?: readonly { readonly fileName: string }[] }>(init?.body);
+      return ok(fixtures.admissionResponse ?? {
+        tenantId: session.tenantId,
+        assemblyId: body?.assemblyId ?? session.assemblyId,
+        status: "VERIFIED",
+        results: (body?.artifacts ?? []).map(artifact => ({
+          fileName: artifact.fileName,
+          status: "VERIFIED",
+          catalogEntryId: `uploaded:${artifact.fileName}`,
+          claimHash: `sha256:claim-${artifact.fileName}`,
+          warnings: []
+        })),
+        catalog: fixtures.catalog ?? studioApiExampleCatalog
+      });
+    }
+    if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/needs/extract`) {
+      const body = parseJson<{ readonly targetApplicationName?: string }>(init?.body);
+      return ok(fixtures.needsResponse ?? {
+        tenantId: session.tenantId,
+        assemblyId: session.assemblyId,
+        needsId: `${session.assemblyId}-extracted-needs`,
+        targetApplicationName: body?.targetApplicationName ?? "target application",
+        suggestedNeedsYaml: "requiredCapabilities:\n  - capability: target.application.run\n    capabilityVersion: ^1\n",
+        defaultDeploymentTarget: "",
+        warnings: []
+      });
     }
     if (method === "GET" && (path === `/studio/sessions/${encodeURIComponent(session.sessionId)}` || path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}`))) {
       return ok(session);
