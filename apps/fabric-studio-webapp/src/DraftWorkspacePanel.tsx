@@ -42,6 +42,15 @@ type InspectorDetails = {
   readonly requiredPorts: readonly string[];
 };
 
+type ReplacementCandidate = {
+  readonly catalogEntryId: string;
+  readonly label: string;
+  readonly owner: string;
+  readonly shape: string;
+  readonly status: "ALLOWED" | "BLOCKED";
+  readonly reason: string;
+};
+
 export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:catalog" }: DraftWorkspacePanelProps) {
   const [baseCatalogHash, setBaseCatalogHash] = useState(initialBaseCatalogHash);
   const [needsId, setNeedsId] = useState("");
@@ -160,7 +169,7 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
   }
 
   async function replaceSelectedComponent() {
-    if (state?.status !== "READY" || selectedPart.kind !== "component") {
+    if (state?.status !== "READY" || selectedPart.kind !== "component" || selectedReplacement?.status !== "ALLOWED") {
       return;
     }
     setBusy(true);
@@ -181,6 +190,17 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
   const selected = inspectorDetails[selectedComponent];
   const ports = useMemo(() => activePorts(catalog[0]), [catalog]);
   const paletteEntries = catalog.length === 0 ? fallbackCatalog() : catalog;
+  const replacementCandidates = useMemo(
+    () => buildReplacementCandidates(selectedPart.surface, paletteEntries),
+    [selectedPart.surface, paletteEntries]
+  );
+  const selectedReplacement = replacementCandidates.find(candidate => candidate.catalogEntryId === replacementEntryId) ?? replacementCandidates[0];
+
+  useEffect(() => {
+    if (!replacementCandidates.some(candidate => candidate.catalogEntryId === replacementEntryId)) {
+      setReplacementEntryId(replacementCandidates[0]?.catalogEntryId ?? "");
+    }
+  }, [replacementCandidates, replacementEntryId]);
 
   return (
     <div className="studio-workbench-page" aria-label="Unfurl Studio Workbench">
@@ -380,17 +400,24 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
           </section>
           <section className="inspector-card">
             <h2>Replace Component</h2>
-            <label>
-              Outer replacement candidate
-              <select value={replacementEntryId} onChange={event => setReplacementEntryId(event.target.value)}>
-                {paletteEntries.map(entry => (
-                  <option value={entry.catalogEntryId} key={entry.catalogEntryId}>{paletteLabel(entry)}</option>
-                ))}
-              </select>
-            </label>
-            <button type="button" disabled={busy || state?.status !== "READY" || selectedPart.kind !== "component"} onClick={replaceSelectedComponent}>
+            <div className="replacement-shelf" aria-label="Replacement candidates">
+              {replacementCandidates.map(candidate => (
+                <button
+                  type="button"
+                  className={replacementEntryId === candidate.catalogEntryId ? `replacement-card selected ${candidate.status.toLowerCase()}` : `replacement-card ${candidate.status.toLowerCase()}`}
+                  key={candidate.catalogEntryId}
+                  onClick={() => setReplacementEntryId(candidate.catalogEntryId)}
+                >
+                  <strong>{candidate.label}</strong>
+                  <span>{candidate.owner} / {candidate.shape}</span>
+                  <small>{candidate.status === "ALLOWED" ? "Allowed" : "Blocked"}: {candidate.reason}</small>
+                </button>
+              ))}
+            </div>
+            <button type="button" disabled={busy || state?.status !== "READY" || selectedPart.kind !== "component" || selectedReplacement?.status !== "ALLOWED"} onClick={replaceSelectedComponent}>
               Validate & Replace
             </button>
+            {selectedReplacement?.status === "BLOCKED" && <p className="studio-error">{selectedReplacement.reason}</p>}
             {state?.status !== "READY" && <p className="live-data-notice">Create a draft before governed replacements are allowed.</p>}
             {state?.status === "READY" && state.lastResponse?.status === "INVALID" && <p className="studio-error">{state.lastResponse.reason}: {state.lastResponse.details}</p>}
           </section>
@@ -551,6 +578,40 @@ function paletteLabel(entry: VisualCatalogEntry | undefined): string {
 
 function activePorts(entry: VisualCatalogEntry | undefined): readonly string[] {
   return entry?.visualManifest?.ports.map(port => port.id) ?? [];
+}
+
+function buildReplacementCandidates(
+  surface: ThreeAssemblySurfaceId,
+  catalogEntries: readonly VisualCatalogEntry[]
+): readonly ReplacementCandidate[] {
+  if (surface === "substrate") {
+    return [
+      {
+        catalogEntryId: "substrate:base",
+        label: "Runtime Base Plate",
+        owner: "runtime-platform",
+        shape: "RUNTIME",
+        status: "BLOCKED",
+        reason: "substrate base is derived from profile, not replaced from catalog"
+      }
+    ];
+  }
+
+  const local = replacementMatrix[surface] ?? [];
+  const catalog = catalogEntries.map(entry => ({
+    catalogEntryId: entry.catalogEntryId,
+    label: paletteLabel(entry),
+    owner: "catalog",
+    shape: entry.visualManifest?.fallbackShape.category ?? "COMPONENT",
+    status: "ALLOWED" as const,
+    reason: "catalog entry maps to a DCP-declared component capability"
+  }));
+
+  const byId = new Map<string, ReplacementCandidate>();
+  for (const candidate of [...local, ...catalog]) {
+    byId.set(candidate.catalogEntryId, candidate);
+  }
+  return [...byId.values()];
 }
 
 function moduleClass(baseClass: string, selected: SelectedSurfaceId, surface: SelectedSurfaceId): string {
@@ -780,3 +841,44 @@ const substrateCapabilities = [
   { name: "Prometheus", short: "P", status: "available" },
   { name: "Grafana", short: "G", status: "available" }
 ] as const;
+
+const replacementMatrix: Partial<Record<Exclude<ThreeAssemblySurfaceId, "substrate">, readonly ReplacementCandidate[]>> = {
+  gateway: [
+    { catalogEntryId: "com.unfurl:nginx-api-gateway:1.4.0", label: "Nginx API Gateway", owner: "platform-team", shape: "CONTAINER", status: "ALLOWED", reason: "offers http.route and auth.forward" },
+    { catalogEntryId: "com.unfurl:edge-router-lite:0.9.0", label: "Edge Router Lite", owner: "edge-team", shape: "SIDECAR", status: "BLOCKED", reason: "missing auth.forward capability" }
+  ],
+  order: [
+    { catalogEntryId: "com.unfurl:order-service:2.0.1", label: "Order Service 2.0.1", owner: "orders-team", shape: "CONTAINER", status: "ALLOWED", reason: "same required/provided port contract" },
+    { catalogEntryId: "com.unfurl:legacy-order-service:1.0.0", label: "Legacy Order Service", owner: "orders-team", shape: "REMOTE", status: "BLOCKED", reason: "requires storage.put@^1 instead of current storage.put@^2" }
+  ],
+  inventory: [
+    { catalogEntryId: "com.unfurl:inventory-service:1.9.0", label: "Inventory Service 1.9", owner: "inventory-team", shape: "CONTAINER", status: "ALLOWED", reason: "satisfies inventory.reserve and inventory.release" },
+    { catalogEntryId: "com.unfurl:warehouse-adapter:1.0.0", label: "Warehouse Adapter", owner: "supply-team", shape: "ADAPTER", status: "BLOCKED", reason: "refuses direct payment validation responsibility" }
+  ],
+  validation: [
+    { catalogEntryId: "com.unfurl:validation-service:1.1.0", label: "Validation Service", owner: "payments-team", shape: "CONTAINER", status: "ALLOWED", reason: "current selected component" },
+    { catalogEntryId: "com.unfurl:customer-policy-validator:1.2.0", label: "Customer Policy Validator", owner: "risk-team", shape: "CONTAINER", status: "ALLOWED", reason: "offers validate.order, validate.payment, and validate.inventory" },
+    { catalogEntryId: "com.unfurl:fraud-only-validator:1.0.0", label: "Fraud-only Validator", owner: "risk-team", shape: "SERVICE", status: "BLOCKED", reason: "does not offer validate.inventory" }
+  ],
+  payment: [
+    { catalogEntryId: "com.unfurl:payment-service:1.6.1", label: "Payment Service 1.6.1", owner: "payments-team", shape: "CONTAINER", status: "ALLOWED", reason: "same payment authorize/capture contract" },
+    { catalogEntryId: "com.unfurl:stripe-adapter:1.0.0", label: "Stripe Adapter", owner: "payments-team", shape: "MANAGED_EXTERNAL_ADAPTER", status: "BLOCKED", reason: "external adapter cannot own payment orchestration" }
+  ],
+  audit: [
+    { catalogEntryId: "com.unfurl:audit-service:1.3.0", label: "Audit Service 1.3", owner: "risk-team", shape: "CONTAINER", status: "ALLOWED", reason: "offers audit.write and audit.query" },
+    { catalogEntryId: "com.unfurl:log-sink:1.0.0", label: "Log Sink", owner: "observability-team", shape: "SIDECAR", status: "BLOCKED", reason: "logs events but does not provide signed audit.write" }
+  ],
+  notification: [
+    { catalogEntryId: "com.unfurl:notification-service:1.1.0", label: "Notification Service 1.1", owner: "customer-exp-team", shape: "CONTAINER", status: "ALLOWED", reason: "satisfies email and sms notification ports" },
+    { catalogEntryId: "com.unfurl:email-only-notifier:1.0.0", label: "Email-only Notifier", owner: "customer-exp-team", shape: "SERVICE", status: "BLOCKED", reason: "missing notify.sms" }
+  ],
+  workflow: [
+    { catalogEntryId: "com.unfurl:workflow-service:2.4.0", label: "Workflow Service 2.4", owner: "platform-team", shape: "CONTAINER", status: "ALLOWED", reason: "same orchestration interface contract" },
+    { catalogEntryId: "com.unfurl:batch-runner:1.0.0", label: "Batch Runner", owner: "platform-team", shape: "JOB", status: "BLOCKED", reason: "does not offer workflow.start" }
+  ],
+  adapter: [
+    { catalogEntryId: "com.unfurl:storage-adapter-s3:1.3.1", label: "S3 Storage Adapter", owner: "platform-team", shape: "SIDECAR", status: "ALLOWED", reason: "offers storage.put and storage.get" },
+    { catalogEntryId: "com.unfurl:storage-adapter-blob:1.2.0", label: "Azure Blob Adapter", owner: "platform-team", shape: "SIDECAR", status: "ALLOWED", reason: "compatible object storage capability range" },
+    { catalogEntryId: "com.unfurl:read-only-storage-adapter:1.0.0", label: "Read-only Storage Adapter", owner: "platform-team", shape: "ADAPTER", status: "BLOCKED", reason: "missing storage.put" }
+  ]
+};

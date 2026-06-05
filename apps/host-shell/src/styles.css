@@ -988,6 +988,44 @@ th, td {
   min-width: 0;
 }
 
+.replacement-shelf {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.replacement-card {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  border-color: #dbe3ef;
+  background: #f8fafc;
+  color: #0f172a;
+  padding: 8px;
+  text-align: left;
+}
+
+.replacement-card span,
+.replacement-card small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.replacement-card.allowed.selected {
+  border-color: #16a34a;
+  background: #f0fdf4;
+  box-shadow: inset 3px 0 0 #16a34a;
+}
+
+.replacement-card.blocked {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.replacement-card.blocked.selected {
+  box-shadow: inset 3px 0 0 #dc2626;
+}
+
 .inspector-result {
   margin-top: 14px;
   border-top: 1px solid #e5e7eb;
