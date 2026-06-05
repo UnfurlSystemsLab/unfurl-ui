@@ -209,6 +209,12 @@ export function DraftWorkspacePanel({ client, initialBaseCatalogHash = "sha256:c
   const selectedReplacement = replacementCandidates.find(candidate => candidate.catalogEntryId === replacementEntryId) ?? replacementCandidates[0];
   const tutorialSteps = useMemo<readonly TutorialStep[]>(() => [
     {
+      id: "intro",
+      title: "Welcome to Unfurl Studio",
+      body: "Studio is a governed visual workbench for assembling Intelligent Components into a Fabric composition. Before you compile, you need a scanned catalog, component claims, needs, and any trust or deployment policy you want Fabric to enforce.",
+      target: "stage"
+    },
+    {
       id: "catalog",
       title: "Start with the catalog",
       body: "Catalog entries are visual projections of DCP/Fabric facts. Additions and replacements remain governed by Fabric validation.",
