@@ -178,6 +178,44 @@ describe("HTTP Studio Fabric client", () => {
     ]);
   });
 
+  it("loads replacement candidates for a selected dynamic DCP node", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      defaultTenantId: "tenant-payments",
+      defaultAssemblyId: "assembly-checkout",
+      fetch: fakeFetch(calls, {
+        tenantId: "tenant-payments",
+        assemblyId: "assembly-checkout",
+        componentNodeId: "component.validation-service",
+        candidates: [
+          {
+            catalogEntryId: "com.unfurl:customer-policy-validator:1.2.0",
+            label: "Customer Policy Validator",
+            owner: "risk-team",
+            shape: "CONTAINER",
+            status: "ALLOWED",
+            reason: "compatible"
+          }
+        ],
+        warnings: []
+      })
+    });
+
+    const response = await client.loadReplacementCandidates?.({
+      componentNodeId: "component.validation-service"
+    });
+
+    assert.equal(response?.candidates[0]?.catalogEntryId, "com.unfurl:customer-policy-validator:1.2.0");
+    assert.deepEqual(calls, [
+      {
+        input: "http://fabric.local/studio/tenants/tenant-payments/assemblies/assembly-checkout/dynamic-dcp/replacements?componentNodeId=component.validation-service",
+        method: "GET",
+        body: undefined
+      }
+    ]);
+  });
+
   it("loads a read-only composition view by posting contract and profile paths", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

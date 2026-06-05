@@ -9,6 +9,7 @@ import type {
   ExtractNeedsResponse,
   ListAssembliesResponse,
   SaveDraftResponse,
+  ReplacementCandidatesResponse,
   StudioAssemblySummary,
   FetchLike,
   FetchResponseLike,
@@ -26,6 +27,7 @@ export type MockStudioApiFixtures = {
   readonly session?: StudioDraftSession;
   readonly admissionResponse?: AdmitCatalogArtifactsResponse;
   readonly dynamicDcpProjection?: DynamicDcpProjectionResponse;
+  readonly replacementCandidates?: ReplacementCandidatesResponse;
   readonly needsResponse?: ExtractNeedsResponse;
   readonly assembliesResponse?: ListAssembliesResponse;
   readonly saveDraftResponse?: SaveDraftResponse;
@@ -150,6 +152,39 @@ export const studioApiExampleDynamicDcpProjection: DynamicDcpProjectionResponse 
     { fromNodeId: "assembly:e-commerce-platform", toNodeId: "component.validation-service", relationship: "CONTAINS" },
     { fromNodeId: "assembly:e-commerce-platform", toNodeId: "component.storage-s3", relationship: "CONTAINS" },
     { fromNodeId: "component.validation-service", toNodeId: "component.storage-s3", relationship: "REQUIRES" }
+  ],
+  warnings: []
+};
+
+export const studioApiExampleReplacementCandidates: ReplacementCandidatesResponse = {
+  tenantId: DEFAULT_STUDIO_TENANT_ID,
+  assemblyId: DEFAULT_STUDIO_ASSEMBLY_ID,
+  componentNodeId: "component.validation-service",
+  candidates: [
+    {
+      catalogEntryId: "com.unfurl:validation-service:1.1.0",
+      label: "Validation Service",
+      owner: "current-selection",
+      shape: "COMPONENT",
+      status: "ALLOWED",
+      reason: "current selected component remains valid for this dynamic DCP slot"
+    },
+    {
+      catalogEntryId: "com.unfurl:customer-policy-validator:1.2.0",
+      label: "Customer Policy Validator",
+      owner: "risk-team",
+      shape: "CONTAINER",
+      status: "ALLOWED",
+      reason: "offers the validation capabilities required by Validation Service"
+    },
+    {
+      catalogEntryId: "com.unfurl:fraud-only-validator:1.0.0",
+      label: "Fraud-only Validator",
+      owner: "risk-team",
+      shape: "SERVICE",
+      status: "BLOCKED",
+      reason: "missing validate.inventory required by the selected DCP slot"
+    }
   ],
   warnings: []
 };
@@ -283,6 +318,12 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     }
     if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/dynamic-dcp`) {
       return ok(fixtures.dynamicDcpProjection ?? studioApiExampleDynamicDcpProjection);
+    }
+    if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/dynamic-dcp/replacements`) {
+      return ok(fixtures.replacementCandidates ?? {
+        ...studioApiExampleReplacementCandidates,
+        componentNodeId: url.searchParams.get("componentNodeId") ?? studioApiExampleReplacementCandidates.componentNodeId
+      });
     }
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies`) {
       const body = parseJson<{ readonly assemblyId: string; readonly targetApplicationName?: string; readonly defaultDeploymentTarget?: string }>(init?.body);

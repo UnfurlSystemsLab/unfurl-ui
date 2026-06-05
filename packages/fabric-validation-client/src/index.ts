@@ -193,6 +193,29 @@ export type DynamicDcpEdge = {
   readonly relationship: "CONTAINS" | "REQUIRES" | "BINDS" | "REPLACES" | string;
 };
 
+export type ReplacementCandidatesRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly componentNodeId: string;
+};
+
+export type StudioReplacementCandidate = {
+  readonly catalogEntryId: string;
+  readonly label: string;
+  readonly owner: string;
+  readonly shape: string;
+  readonly status: "ALLOWED" | "BLOCKED" | string;
+  readonly reason: string;
+};
+
+export type ReplacementCandidatesResponse = {
+  readonly tenantId: string;
+  readonly assemblyId: string;
+  readonly componentNodeId: string;
+  readonly candidates: readonly StudioReplacementCandidate[];
+  readonly warnings: readonly string[];
+};
+
 export type LoadCompositionViewRequest = {
   readonly contractPath: string;
   readonly substrateProfilePath: string;
@@ -347,6 +370,7 @@ export interface StudioFabricClient {
   readonly createAssembly?: (request: CreateAssemblyRequest) => Promise<StudioAssemblySummary>;
   readonly saveDraft?: (request: SaveDraftRequest) => Promise<SaveDraftResponse>;
   readonly loadDynamicDcpProjection?: (request?: DynamicDcpProjectionRequest) => Promise<DynamicDcpProjectionResponse>;
+  readonly loadReplacementCandidates?: (request: ReplacementCandidatesRequest) => Promise<ReplacementCandidatesResponse>;
   readonly loadCompositionView: (request: LoadCompositionViewRequest) => Promise<LoadCompositionViewResponse>;
   readonly createDraftComposition: (request: CreateDraftCompositionRequest) => Promise<CreateDraftCompositionResponse>;
   readonly getDraftSession: (request: string | ({

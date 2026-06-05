@@ -14,6 +14,8 @@ import type {
   SaveDraftResponse,
   StudioAssemblySummary,
   DynamicDcpProjectionResponse,
+  ReplacementCandidatesRequest,
+  ReplacementCandidatesResponse,
   IntentResponse,
   ListCatalogVisualsResponse,
   LoadCompositionViewRequest,
@@ -119,6 +121,16 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/dynamic-dcp`
+      );
+    },
+    loadReplacementCandidates: async (body: ReplacementCandidatesRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      const componentNodeId = encodeURIComponent(body.componentNodeId);
+      return request<ReplacementCandidatesResponse>(
+        fetchImpl,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/dynamic-dcp/replacements?componentNodeId=${componentNodeId}`
       );
     },
     loadCompositionView: async (body: LoadCompositionViewRequest) =>

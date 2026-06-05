@@ -4,6 +4,7 @@ import {
   DEFAULT_STUDIO_ASSEMBLY_ID,
   DEFAULT_STUDIO_TENANT_ID,
   type DynamicDcpProjectionResponse,
+  type StudioReplacementCandidate as FabricReplacementCandidate,
   type StudioFabricClient
 } from "@unfurl/fabric-validation-client";
 import type { VisualCatalogEntry } from "@unfurl/visual-manifest";
@@ -27,6 +28,7 @@ export type DraftWorkspacePanelProps = {
     "extractNeeds" |
     "saveDraft" |
     "loadDynamicDcpProjection" |
+    "loadReplacementCandidates" |
     "listCatalogVisuals" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate"
   >;
   readonly initialTenantId?: string | undefined;
@@ -119,6 +121,8 @@ export function DraftWorkspacePanel({
   const [semanticZoomLevel, setSemanticZoomLevel] = useState<SemanticZoomLevel>("ASSEMBLY_DCP");
   const [dynamicProjection, setDynamicProjection] = useState<DynamicDcpProjectionResponse | undefined>(initialDynamicProjection);
   const [dynamicProjectionError, setDynamicProjectionError] = useState<string | undefined>();
+  const [fabricReplacementCandidates, setFabricReplacementCandidates] = useState<readonly FabricReplacementCandidate[] | undefined>();
+  const [replacementCandidateError, setReplacementCandidateError] = useState<string | undefined>();
 
   useEffect(() => {
     let cancelled = false;
@@ -163,6 +167,34 @@ export function DraftWorkspacePanel({
       cancelled = true;
     };
   }, [client, tenantId, assemblyId]);
+
+  useEffect(() => {
+    const componentNodeId = dynamicProjection ? projectionNodeIdForSelection(selectedPart, dynamicProjection) : undefined;
+    if (!client.loadReplacementCandidates || !componentNodeId) {
+      setFabricReplacementCandidates(undefined);
+      setReplacementCandidateError(undefined);
+      return;
+    }
+    let cancelled = false;
+    void client.loadReplacementCandidates({
+      tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
+      assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID,
+      componentNodeId
+    }).then(response => {
+      if (!cancelled) {
+        setFabricReplacementCandidates(response.candidates);
+        setReplacementCandidateError(undefined);
+      }
+    }).catch(error => {
+      if (!cancelled) {
+        setFabricReplacementCandidates(undefined);
+        setReplacementCandidateError(error instanceof Error ? error.message : String(error));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, tenantId, assemblyId, selectedPart, dynamicProjection]);
 
   async function create() {
     setBusy(true);
@@ -320,8 +352,10 @@ export function DraftWorkspacePanel({
     [dynamicProjection]
   );
   const replacementCandidates = useMemo(
-    () => buildReplacementCandidates(selectedPart.surface, paletteEntries),
-    [selectedPart.surface, paletteEntries]
+    () => fabricReplacementCandidates
+      ? toReplacementCandidates(fabricReplacementCandidates)
+      : buildReplacementCandidates(selectedPart.surface, paletteEntries),
+    [fabricReplacementCandidates, selectedPart.surface, paletteEntries]
   );
   const selectedReplacement = replacementCandidates.find(candidate => candidate.catalogEntryId === replacementEntryId) ?? replacementCandidates[0];
   const tutorialSteps = useMemo<readonly TutorialStep[]>(() => [
@@ -716,6 +750,11 @@ export function DraftWorkspacePanel({
           </section>
           <section className="inspector-card">
             <h2>Replace Component</h2>
+            <p className="live-data-notice">
+              {fabricReplacementCandidates
+                ? "Replacement options are sourced from Fabric's dynamic DCP projection."
+                : "Replacement options are using local demo fallback data."}
+            </p>
             <div className="replacement-shelf" aria-label="Replacement candidates">
               {replacementCandidates.map(candidate => (
                 <button
@@ -734,6 +773,7 @@ export function DraftWorkspacePanel({
               Validate & Replace
             </button>
             {selectedReplacement?.status === "BLOCKED" && <p className="studio-error">{selectedReplacement.reason}</p>}
+            {replacementCandidateError && <p className="studio-error">{replacementCandidateError}</p>}
             {state?.status !== "READY" && <p className="live-data-notice">Create a draft before governed replacements are allowed.</p>}
             {state?.status === "READY" && state.lastResponse?.status === "INVALID" && <p className="studio-error">{state.lastResponse.reason}: {state.lastResponse.details}</p>}
           </section>
@@ -993,6 +1033,32 @@ function buildReplacementCandidates(
     byId.set(candidate.catalogEntryId, candidate);
   }
   return [...byId.values()];
+}
+
+function toReplacementCandidates(candidates: readonly FabricReplacementCandidate[]): readonly ReplacementCandidate[] {
+  return candidates.map(candidate => ({
+    catalogEntryId: candidate.catalogEntryId,
+    label: candidate.label,
+    owner: candidate.owner,
+    shape: candidate.shape,
+    status: candidate.status === "ALLOWED" ? "ALLOWED" : "BLOCKED",
+    reason: candidate.reason
+  }));
+}
+
+function projectionNodeIdForSelection(
+  selection: ThreeAssemblySelection,
+  projection: DynamicDcpProjectionResponse
+): string | undefined {
+  if (selection.kind !== "component") {
+    return undefined;
+  }
+  const mapped = projectionSurfaceNodeIds[selection.surface];
+  if (mapped && projection.nodes.some(node => node.nodeId === mapped)) {
+    return mapped;
+  }
+  const normalizedLabel = normalizeLabel(selection.label);
+  return projection.nodes.find(node => node.level === "CHILD" && normalizeLabel(node.label) === normalizedLabel)?.nodeId;
 }
 
 function moduleClass(baseClass: string, selected: SelectedSurfaceId, surface: SelectedSurfaceId): string {
@@ -1269,6 +1335,15 @@ function semanticSceneProjectionKey(projection: SemanticDcpSceneProjection | und
     projection.childNodes.map(node => `${node.nodeId}:${node.label}:${node.replacementAllowed}`).join("|")
   ].join("::");
 }
+
+function normalizeLabel(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+const projectionSurfaceNodeIds: Partial<Record<ThreeAssemblySurfaceId, string>> = {
+  validation: "component.validation-service",
+  adapter: "component.storage-s3"
+};
 
 const substrateCapabilities = [
   { name: "Java 21", short: "J", status: "active" },
