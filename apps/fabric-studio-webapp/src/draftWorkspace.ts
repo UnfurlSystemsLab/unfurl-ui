@@ -92,11 +92,11 @@ export async function applyDraftIntent(
   }
 
   try {
-    const intent = toStudioIntent(state.session.sessionId, currentRevision(state.history), command);
+    const intent = toStudioIntent(state.session, currentRevision(state.history), command);
     const response = await client.applyIntent(intent);
 
     if (response.status === "VALID") {
-      const session = await client.getDraftSession(state.session.sessionId);
+      const session = await client.getDraftSession(sessionRef(state.session));
       return {
         status: "READY",
         session,
@@ -106,7 +106,7 @@ export async function applyDraftIntent(
     }
 
     if (response.status === "STALE_REVISION") {
-      const session = await client.getDraftSession(state.session.sessionId);
+      const session = await client.getDraftSession(sessionRef(state.session));
       return {
         status: "READY",
         session,
@@ -139,6 +139,8 @@ export async function compileDraftWorkspace(
   try {
     const baseRequest: CompileDraftCandidateRequest = {
       sessionId: state.session.sessionId,
+      tenantId: state.session.tenantId,
+      assemblyId: state.session.assemblyId,
       expectedRevision: currentRevision(state.history)
     };
     const request: CompileDraftCandidateRequest = {
@@ -149,7 +151,7 @@ export async function compileDraftWorkspace(
     const response = await client.compileCandidate(request);
 
     if (response.status === "STALE_REVISION") {
-      const session = await client.getDraftSession(state.session.sessionId);
+      const session = await client.getDraftSession(sessionRef(state.session));
       return {
         status: "READY",
         session,
@@ -170,23 +172,36 @@ export async function compileDraftWorkspace(
   }
 }
 
-function toStudioIntent(sessionId: string, baseRevision: number, command: DraftIntentCommand): StudioIntent {
+function toStudioIntent(session: StudioDraftSession, baseRevision: number, command: DraftIntentCommand): StudioIntent {
+  const scope = {
+    tenantId: session.tenantId,
+    assemblyId: session.assemblyId,
+    sessionId: session.sessionId,
+    baseRevision
+  };
   switch (command.type) {
     case "ADD_COMPONENT":
-      return { sessionId, baseRevision, type: "ADD_COMPONENT", catalogEntryId: command.catalogEntryId };
+      return { ...scope, type: "ADD_COMPONENT", catalogEntryId: command.catalogEntryId };
     case "CONNECT":
-      return { sessionId, baseRevision, type: "CONNECT", fromPort: command.fromPort, toPort: command.toPort };
+      return { ...scope, type: "CONNECT", fromPort: command.fromPort, toPort: command.toPort };
     case "DISCONNECT":
-      return { sessionId, baseRevision, type: "DISCONNECT", pipeId: command.pipeId };
+      return { ...scope, type: "DISCONNECT", pipeId: command.pipeId };
     case "REPLACE_COMPONENT":
       return {
-        sessionId,
-        baseRevision,
+        ...scope,
         type: "REPLACE_COMPONENT",
         oldComponentId: command.oldComponentId,
         newCatalogEntryId: command.newCatalogEntryId
       };
   }
+}
+
+function sessionRef(session: StudioDraftSession) {
+  return {
+    tenantId: session.tenantId,
+    assemblyId: session.assemblyId,
+    sessionId: session.sessionId
+  };
 }
 
 function errorMessage(error: unknown): string {

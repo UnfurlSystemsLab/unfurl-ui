@@ -15,6 +15,9 @@ import type {
   StudioVisualAsset
 } from "./index.js";
 
+export const DEFAULT_STUDIO_TENANT_ID = "tenant-local";
+export const DEFAULT_STUDIO_ASSEMBLY_ID = "assembly-demo";
+
 export type FetchResponseLike = {
   readonly ok: boolean;
   readonly status: number;
@@ -34,6 +37,8 @@ export type FetchLike = (
 export type HttpStudioFabricClientOptions = {
   readonly baseUrl: string;
   readonly fetch?: FetchLike;
+  readonly defaultTenantId?: string;
+  readonly defaultAssemblyId?: string;
 };
 
 export function createHttpStudioFabricClient(options: HttpStudioFabricClientOptions): StudioFabricClient {
@@ -42,36 +47,65 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     throw new Error("fetch implementation is required");
   }
   const baseUrl = normalizeBaseUrl(options.baseUrl);
+  const defaultScope = {
+    tenantId: options.defaultTenantId ?? DEFAULT_STUDIO_TENANT_ID,
+    assemblyId: options.defaultAssemblyId ?? DEFAULT_STUDIO_ASSEMBLY_ID
+  };
 
   return {
-    listCatalogVisuals: async () =>
-      request<ListCatalogVisualsResponse>(fetchImpl, baseUrl, "GET", "/studio/catalog"),
+    listCatalogVisuals: async body => {
+      const tenantId = encodeURIComponent(body?.tenantId ?? defaultScope.tenantId);
+      return request<ListCatalogVisualsResponse>(fetchImpl, baseUrl, "GET", `/studio/tenants/${tenantId}/catalog`);
+    },
     loadCompositionView: async (body: LoadCompositionViewRequest) =>
       request<LoadCompositionViewResponse>(fetchImpl, baseUrl, "POST", "/studio/composition-view", body),
-    createDraftComposition: async (body: CreateDraftCompositionRequest) =>
-      request<CreateDraftCompositionResponse>(fetchImpl, baseUrl, "POST", "/studio/sessions", body),
-    getDraftSession: async (sessionId: string) =>
-      request<StudioDraftSession>(fetchImpl, baseUrl, "GET", `/studio/sessions/${encodeURIComponent(sessionId)}`),
+    createDraftComposition: async (body: CreateDraftCompositionRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      return request<CreateDraftCompositionResponse>(
+        fetchImpl,
+        baseUrl,
+        "POST",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions`,
+        { ...body, ...scope }
+      );
+    },
+    getDraftSession: async body => {
+      const sessionRef = typeof body === "string" ? { sessionId: body } : body;
+      const scope = resolveScope(defaultScope, sessionRef);
+      return request<StudioDraftSession>(
+        fetchImpl,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(sessionRef.sessionId)}`
+      );
+    },
     applyIntent: async (body: StudioIntent) =>
       request<IntentResponse>(
         fetchImpl,
         baseUrl,
         "POST",
-        `/studio/sessions/${encodeURIComponent(body.sessionId)}/intents`,
+        `/studio/tenants/${encodeURIComponent(body.tenantId)}/assemblies/${encodeURIComponent(body.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/intents`,
         body
       ),
-    compileCandidate: async (body: CompileDraftCandidateRequest) =>
-      request<CompileDraftCandidateResponse>(
+    compileCandidate: async (body: CompileDraftCandidateRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      return request<CompileDraftCandidateResponse>(
         fetchImpl,
         baseUrl,
         "POST",
-        `/studio/sessions/${encodeURIComponent(body.sessionId)}/compile`,
-        body
-      ),
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/compile`,
+        { ...body, ...scope }
+      );
+    },
     resolveDeployment: async (body: ResolveDeploymentRequest) =>
       request<ResolveDeploymentResponse>(fetchImpl, baseUrl, "POST", "/studio/deployment/resolve", body),
     getVisualAsset: async (assetId: string) =>
-      request<StudioVisualAsset>(fetchImpl, baseUrl, "GET", `/studio/assets/${encodeURIComponent(assetId)}`)
+      request<StudioVisualAsset>(
+        fetchImpl,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(defaultScope.tenantId)}/assets/${encodeURIComponent(assetId)}`
+      )
   };
 }
 
@@ -106,4 +140,14 @@ function normalizeBaseUrl(baseUrl: string): string {
     throw new Error("baseUrl is required");
   }
   return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+}
+
+function resolveScope(
+  defaults: { readonly tenantId: string; readonly assemblyId: string },
+  body: { readonly tenantId?: string; readonly assemblyId?: string }
+): { readonly tenantId: string; readonly assemblyId: string } {
+  return {
+    tenantId: body.tenantId ?? defaults.tenantId,
+    assemblyId: body.assemblyId ?? defaults.assemblyId
+  };
 }

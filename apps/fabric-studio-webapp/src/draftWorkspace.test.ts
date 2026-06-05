@@ -48,6 +48,8 @@ describe("draft workspace", () => {
     assert.equal(state.status === "READY" ? state.session.currentCandidateId : undefined, "cand-next");
     assert.equal(state.status === "READY" ? currentRevision(state.history) : undefined, 8);
     assert.deepEqual(calls[0], {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
       sessionId: "studio-session-123",
       baseRevision: 7,
       type: "CONNECT",
@@ -115,6 +117,8 @@ describe("draft workspace", () => {
     assert.equal(state.status === "READY" ? state.lastCompile?.status : undefined, "COMPILED");
     assert.deepEqual(calls[0], {
       sessionId: "studio-session-123",
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
       expectedRevision: 7,
       sign: true
     });
@@ -151,6 +155,8 @@ function connectCommand(): DraftIntentCommand {
 
 function session(overrides: { readonly sceneRevision: number; readonly currentCandidateId?: string }): StudioDraftSession {
   const base = {
+    tenantId: "tenant-local",
+    assemblyId: "assembly-demo",
     sessionId: "studio-session-123",
     baseCatalogHash: "sha256:catalog",
     sceneRevision: overrides.sceneRevision,

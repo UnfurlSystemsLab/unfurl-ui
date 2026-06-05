@@ -8,6 +8,8 @@ export function VisualDiffPanel() {
     exportBundleFromCompile(compiled("old")),
     exportBundleFromCompile(compiled("new")),
     appendValidatedIntent(createIntentHistory(7), {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
       sessionId: "studio-session-123",
       baseRevision: 7,
       type: "REPLACE_COMPONENT",

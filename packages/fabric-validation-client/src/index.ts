@@ -9,7 +9,14 @@ export type StudioIntent =
   | DisconnectIntent
   | ReplaceComponentIntent;
 
+export type StudioScope = {
+  readonly tenantId: string;
+  readonly assemblyId: string;
+};
+
 export type BaseIntent = {
+  readonly tenantId: string;
+  readonly assemblyId: string;
   readonly sessionId: string;
   readonly baseRevision: number;
 };
@@ -60,6 +67,10 @@ export type ListCatalogVisualsResponse = {
   readonly entries: readonly VisualCatalogEntry[];
 };
 
+export type ListCatalogVisualsRequest = {
+  readonly tenantId?: string;
+};
+
 export type LoadCompositionViewRequest = {
   readonly contractPath: string;
   readonly substrateProfilePath: string;
@@ -70,6 +81,8 @@ export type LoadCompositionViewResponse = {
 };
 
 export type CreateDraftCompositionRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
   readonly baseCatalogHash: string;
   readonly needsId?: string;
   readonly trustPolicyId?: string;
@@ -82,6 +95,8 @@ export type CreateDraftCompositionResponse = {
 };
 
 export type CompileDraftCandidateRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
   readonly sessionId: string;
   readonly expectedRevision: number;
   readonly sign?: boolean;
@@ -113,6 +128,8 @@ export type DeploymentPolicyDraft = {
 };
 
 export type ResolveDeploymentRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
   readonly sessionId?: string;
   readonly candidateId?: string;
   readonly baseCatalogHash?: string;
@@ -201,10 +218,14 @@ export type StudioScoreBreakdown = {
 };
 
 export interface StudioFabricClient {
-  readonly listCatalogVisuals: () => Promise<ListCatalogVisualsResponse>;
+  readonly listCatalogVisuals: (request?: ListCatalogVisualsRequest) => Promise<ListCatalogVisualsResponse>;
   readonly loadCompositionView: (request: LoadCompositionViewRequest) => Promise<LoadCompositionViewResponse>;
   readonly createDraftComposition: (request: CreateDraftCompositionRequest) => Promise<CreateDraftCompositionResponse>;
-  readonly getDraftSession: (sessionId: string) => Promise<StudioDraftSession>;
+  readonly getDraftSession: (request: string | ({
+    readonly tenantId?: string;
+    readonly assemblyId?: string;
+    readonly sessionId: string;
+  })) => Promise<StudioDraftSession>;
   readonly applyIntent: (intent: StudioIntent) => Promise<IntentResponse>;
   readonly compileCandidate: (request: CompileDraftCandidateRequest) => Promise<CompileDraftCandidateResponse>;
   readonly resolveDeployment?: (request: ResolveDeploymentRequest) => Promise<ResolveDeploymentResponse>;

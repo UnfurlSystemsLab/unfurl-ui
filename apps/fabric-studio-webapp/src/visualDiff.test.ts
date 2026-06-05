@@ -11,6 +11,8 @@ import {
 describe("visual diff", () => {
   it("shows artifact hash changes and validated intent path", () => {
     const history = appendValidatedIntent(createIntentHistory(7), {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
       sessionId: "studio-session-123",
       baseRevision: 7,
       type: "REPLACE_COMPONENT",

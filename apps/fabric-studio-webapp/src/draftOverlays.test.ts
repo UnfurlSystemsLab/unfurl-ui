@@ -12,6 +12,8 @@ describe("draft workspace overlays", () => {
     const overlay = buildDraftWorkspaceOverlay({
       status: "READY",
       session: {
+        tenantId: "tenant-local",
+        assemblyId: "assembly-demo",
         sessionId: "studio-session-123",
         baseCatalogHash: "sha256:catalog",
         currentCandidateId: "cand-abc123",
@@ -42,6 +44,8 @@ describe("draft workspace overlays", () => {
     const state: DraftWorkspaceState = {
       status: "READY",
       session: {
+        tenantId: "tenant-local",
+        assemblyId: "assembly-demo",
         sessionId: "studio-session-123",
         baseCatalogHash: "sha256:catalog",
         sceneRevision: 7,

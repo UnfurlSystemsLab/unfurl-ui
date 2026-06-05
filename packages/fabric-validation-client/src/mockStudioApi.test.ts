@@ -21,6 +21,8 @@ describe("mock Studio API contract", () => {
     const draft = await client.createDraftComposition({ baseCatalogHash: catalog.catalogHash });
     const session = await client.getDraftSession(draft.session.sessionId);
     const intent = await client.applyIntent({
+      tenantId: session.tenantId,
+      assemblyId: session.assemblyId,
       sessionId: session.sessionId,
       baseRevision: session.sceneRevision,
       type: "ADD_COMPONENT",

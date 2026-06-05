@@ -12,6 +12,7 @@ import type {
   ResolveDeploymentResponse,
   StudioVisualAsset
 } from "./index.js";
+import { DEFAULT_STUDIO_ASSEMBLY_ID, DEFAULT_STUDIO_TENANT_ID } from "./httpClient.js";
 
 export type MockStudioApiFixtures = {
   readonly catalog?: ListCatalogVisualsResponse;
@@ -57,6 +58,8 @@ export const studioApiExampleCatalog: ListCatalogVisualsResponse = {
 };
 
 export const studioApiExampleSession: StudioDraftSession = {
+  tenantId: DEFAULT_STUDIO_TENANT_ID,
+  assemblyId: DEFAULT_STUDIO_ASSEMBLY_ID,
   sessionId: "studio-session-123",
   baseCatalogHash: "sha256:catalog",
   currentCandidateId: "cand-abc123",
@@ -147,20 +150,20 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     const method = init?.method ?? "GET";
     const path = url.pathname;
 
-    if (method === "GET" && path === "/studio/catalog") {
+    if (method === "GET" && (path === "/studio/catalog" || path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog`)) {
       return ok(fixtures.catalog ?? studioApiExampleCatalog);
     }
     if (method === "POST" && path === "/studio/composition-view") {
       return ok(fixtures.compositionView ?? studioApiExampleCompositionView);
     }
-    if (method === "POST" && path === "/studio/sessions") {
+    if (method === "POST" && (path === "/studio/sessions" || path === sessionPath(session, ""))) {
       parseJson<CreateDraftCompositionRequest>(init?.body);
       return ok<CreateDraftCompositionResponse>({ session });
     }
-    if (method === "GET" && path === `/studio/sessions/${encodeURIComponent(session.sessionId)}`) {
+    if (method === "GET" && (path === `/studio/sessions/${encodeURIComponent(session.sessionId)}` || path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}`))) {
       return ok(session);
     }
-    if (method === "POST" && path === `/studio/sessions/${encodeURIComponent(session.sessionId)}/intents`) {
+    if (method === "POST" && (path === `/studio/sessions/${encodeURIComponent(session.sessionId)}/intents` || path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/intents`))) {
       return ok(fixtures.intentResponse ?? {
         status: "VALID",
         newRevision: session.sceneRevision + 1,
@@ -169,13 +172,13 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
         warnings: []
       });
     }
-    if (method === "POST" && path === `/studio/sessions/${encodeURIComponent(session.sessionId)}/compile`) {
+    if (method === "POST" && (path === `/studio/sessions/${encodeURIComponent(session.sessionId)}/compile` || path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/compile`))) {
       return ok(fixtures.compileResponse ?? studioApiExampleCompileResponse);
     }
     if (method === "POST" && path === "/studio/deployment/resolve") {
       return ok(fixtures.resolveDeploymentResponse ?? studioApiExampleResolveDeploymentResponse);
     }
-    if (method === "GET" && path.startsWith("/studio/assets/")) {
+    if (method === "GET" && (path.startsWith("/studio/assets/") || path.startsWith(`/studio/tenants/${encodeURIComponent(session.tenantId)}/assets/`))) {
       return ok(fixtures.asset ?? studioApiExampleAsset);
     }
     return {
@@ -185,6 +188,10 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
       json: async () => ({})
     };
   };
+}
+
+function sessionPath(session: StudioDraftSession, suffix: string): string {
+  return `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/sessions${suffix}`;
 }
 
 function ok<T>(body: T): FetchResponseLike {

@@ -24,6 +24,8 @@ export type VisualPort = {
 };
 
 export type StudioDraftSession = {
+  readonly tenantId: string;
+  readonly assemblyId: string;
   readonly sessionId: string;
   readonly baseCatalogHash: string;
   readonly needsId?: string;

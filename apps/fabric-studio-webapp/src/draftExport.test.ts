@@ -54,6 +54,8 @@ function readyState(lastCompile: CompileDraftCandidateResponse | undefined): Dra
   const base = {
     status: "READY" as const,
     session: {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
       sessionId: "studio-session-123",
       baseCatalogHash: "sha256:catalog",
       sceneRevision: 7,

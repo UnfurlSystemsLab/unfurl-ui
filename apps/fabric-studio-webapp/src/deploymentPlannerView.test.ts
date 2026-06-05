@@ -128,6 +128,8 @@ function fakeClient(calls: unknown[]): StudioFabricClient {
 
 function session(): StudioDraftSession {
   return {
+    tenantId: "tenant-local",
+    assemblyId: "assembly-demo",
     sessionId: "studio-session-123",
     baseCatalogHash: "sha256:catalog",
     currentCandidateId: "cand-abc123",

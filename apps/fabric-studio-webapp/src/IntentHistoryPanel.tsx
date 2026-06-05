@@ -19,6 +19,8 @@ export function IntentHistoryPanel({ initialRevision = 7 }: IntentHistoryPanelPr
       ? history.initialRevision
       : history.records[history.cursor - 1]?.toRevision ?? history.initialRevision;
     setHistory(current => appendValidatedIntent(current, {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
       sessionId: "studio-session-123",
       baseRevision,
       type: "REPLACE_COMPONENT",

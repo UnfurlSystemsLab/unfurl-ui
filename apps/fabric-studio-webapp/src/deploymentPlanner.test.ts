@@ -92,6 +92,8 @@ describe("deployment planner", () => {
     assert.equal(compiled.status, "READY");
     assert.deepEqual(calls[0], {
       sessionId: "studio-session-123",
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
       expectedRevision: 7,
       sign: true,
       deploymentPolicy: {
@@ -147,6 +149,8 @@ function fakeClient(calls: unknown[]): StudioFabricClient {
 
 function session(): StudioDraftSession {
   return {
+    tenantId: "tenant-local",
+    assemblyId: "assembly-demo",
     sessionId: "studio-session-123",
     baseCatalogHash: "sha256:catalog",
     sceneRevision: 7,

@@ -15,7 +15,7 @@ describe("HTTP Studio Fabric client", () => {
     assert.equal(response.catalogHash, "sha256:catalog");
     assert.deepEqual(calls, [
       {
-        input: "http://fabric.local/studio/catalog",
+        input: "http://fabric.local/studio/tenants/tenant-local/catalog",
         method: "GET",
         body: undefined
       }
@@ -70,6 +70,8 @@ describe("HTTP Studio Fabric client", () => {
     });
 
     const response = await client.applyIntent({
+      tenantId: "tenant-payments",
+      assemblyId: "assembly-checkout",
       sessionId: "studio-session-123",
       baseRevision: 7,
       type: "CONNECT",
@@ -80,9 +82,11 @@ describe("HTTP Studio Fabric client", () => {
     assert.equal(response.status, "VALID");
     assert.deepEqual(calls, [
       {
-        input: "http://fabric.local/studio/sessions/studio-session-123/intents",
+        input: "http://fabric.local/studio/tenants/tenant-payments/assemblies/assembly-checkout/sessions/studio-session-123/intents",
         method: "POST",
         body: JSON.stringify({
+          tenantId: "tenant-payments",
+          assemblyId: "assembly-checkout",
           sessionId: "studio-session-123",
           baseRevision: 7,
           type: "CONNECT",
@@ -110,18 +114,16 @@ describe("HTTP Studio Fabric client", () => {
     });
 
     assert.equal(response.session.sessionId, "studio-session-123");
-    assert.deepEqual(calls, [
-      {
-        input: "http://fabric.local/studio/sessions",
-        method: "POST",
-        body: JSON.stringify({
-          baseCatalogHash: "sha256:catalog",
-          needsId: "needs-docs",
-          trustPolicyId: "trust-prod",
-          initialCandidateId: "cand-abc123"
-        })
-      }
-    ]);
+    assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-local/assemblies/assembly-demo/sessions");
+    assert.equal(calls[0]?.method, "POST");
+    assert.deepEqual(JSON.parse(calls[0]?.body ?? "{}"), {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      baseCatalogHash: "sha256:catalog",
+      needsId: "needs-docs",
+      trustPolicyId: "trust-prod",
+      initialCandidateId: "cand-abc123"
+    });
   });
 
   it("loads a draft session by encoded session id", async () => {
@@ -136,7 +138,7 @@ describe("HTTP Studio Fabric client", () => {
     assert.equal(response.sceneRevision, 4);
     assert.deepEqual(calls, [
       {
-        input: "http://fabric.local/studio/sessions/studio%20session%2F123",
+        input: "http://fabric.local/studio/tenants/tenant-local/assemblies/assembly-demo/sessions/studio%20session%2F123",
         method: "GET",
         body: undefined
       }
@@ -163,17 +165,15 @@ describe("HTTP Studio Fabric client", () => {
     });
 
     assert.equal(response.status, "COMPILED");
-    assert.deepEqual(calls, [
-      {
-        input: "http://fabric.local/studio/sessions/studio-session-123/compile",
-        method: "POST",
-        body: JSON.stringify({
-          sessionId: "studio-session-123",
-          expectedRevision: 8,
-          sign: false
-        })
-      }
-    ]);
+    assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-local/assemblies/assembly-demo/sessions/studio-session-123/compile");
+    assert.equal(calls[0]?.method, "POST");
+    assert.deepEqual(JSON.parse(calls[0]?.body ?? "{}"), {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      sessionId: "studio-session-123",
+      expectedRevision: 8,
+      sign: false
+    });
   });
 
   it("resolves deployment through the deployment endpoint", async () => {
@@ -234,7 +234,7 @@ describe("HTTP Studio Fabric client", () => {
     assert.equal(response.sha256, "sha256:model");
     assert.deepEqual(calls, [
       {
-        input: "http://fabric.local/studio/assets/asset%2Fmodel%20glb",
+        input: "http://fabric.local/studio/tenants/tenant-local/assets/asset%2Fmodel%20glb",
         method: "GET",
         body: undefined
       }
@@ -254,7 +254,7 @@ describe("HTTP Studio Fabric client", () => {
 
     await assert.rejects(
       () => client.listCatalogVisuals(),
-      /Fabric Studio API failed: GET \/studio\/catalog HTTP 409 Conflict/
+      /Fabric Studio API failed: GET \/studio\/tenants\/tenant-local\/catalog HTTP 409 Conflict/
     );
   });
 });
@@ -283,6 +283,8 @@ function fakeFetch(calls: FetchCall[], json: unknown): FetchLike {
 
 function session(overrides: { readonly sessionId: string; readonly sceneRevision: number }) {
   return {
+    tenantId: "tenant-local",
+    assemblyId: "assembly-demo",
     sessionId: overrides.sessionId,
     baseCatalogHash: "sha256:catalog",
     currentCandidateId: "cand-abc123",

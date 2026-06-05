@@ -93,6 +93,8 @@ describe("governed intent history", () => {
 
 function connectIntent(baseRevision: number) {
   return {
+    tenantId: "tenant-local",
+    assemblyId: "assembly-demo",
     sessionId: "studio-session-123",
     baseRevision,
     type: "CONNECT" as const,
@@ -103,6 +105,8 @@ function connectIntent(baseRevision: number) {
 
 function disconnectIntent(baseRevision: number) {
   return {
+    tenantId: "tenant-local",
+    assemblyId: "assembly-demo",
     sessionId: "studio-session-123",
     baseRevision,
     type: "DISCONNECT" as const,
@@ -112,6 +116,8 @@ function disconnectIntent(baseRevision: number) {
 
 function replaceIntent(baseRevision: number) {
   return {
+    tenantId: "tenant-local",
+    assemblyId: "assembly-demo",
     sessionId: "studio-session-123",
     baseRevision,
     type: "REPLACE_COMPONENT" as const,
