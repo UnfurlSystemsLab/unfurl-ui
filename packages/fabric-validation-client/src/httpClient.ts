@@ -13,6 +13,7 @@ import type {
   SaveDraftRequest,
   SaveDraftResponse,
   StudioAssemblySummary,
+  DynamicDcpProjectionResponse,
   IntentResponse,
   ListCatalogVisualsResponse,
   LoadCompositionViewRequest,
@@ -109,6 +110,15 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/drafts/save`,
         { ...body, ...scope }
+      );
+    },
+    loadDynamicDcpProjection: async body => {
+      const scope = resolveScope(defaultScope, body ?? {});
+      return request<DynamicDcpProjectionResponse>(
+        fetchImpl,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/dynamic-dcp`
       );
     },
     loadCompositionView: async (body: LoadCompositionViewRequest) =>

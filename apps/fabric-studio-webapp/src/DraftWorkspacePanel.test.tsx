@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { renderToString } from "react-dom/server";
 import { createHttpStudioFabricClient, createMockStudioApiFetch } from "@unfurl/fabric-validation-client";
+import type { DynamicDcpProjectionResponse } from "@unfurl/fabric-validation-client";
 import { DraftWorkspacePanel } from "./DraftWorkspacePanel.js";
 
 describe("DraftWorkspacePanel", () => {
@@ -87,6 +88,19 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /Substrate Ports Used/);
     assert.match(html, /0 \/ 12/);
   });
+
+  it("renders Fabric-backed dynamic DCP projection levels", () => {
+    const html = renderToString(
+      <DraftWorkspacePanel client={client()} initialDynamicProjection={projection()} />
+    );
+
+    assert.match(html, /Dynamic DCP Projection/);
+    assert.match(html, /DYNAMIC/);
+    assert.match(html, /Commerce Platform/);
+    assert.match(html, /Checkout Assembly/);
+    assert.match(html, /Validation Service/);
+    assert.match(html, /COMPONENT.*replaceable/s);
+  });
 });
 
 function client() {
@@ -94,4 +108,49 @@ function client() {
     baseUrl: "http://fixture.unfurl.local",
     fetch: createMockStudioApiFetch()
   });
+}
+
+function projection(): DynamicDcpProjectionResponse {
+  return {
+    tenantId: "tenant-local",
+    assemblyId: "assembly-demo",
+    compositionMode: "DYNAMIC",
+    rootNodeId: "company:commerce",
+    focusNodeId: "assembly:checkout",
+    nodes: [
+      {
+        nodeId: "company:commerce",
+        label: "Commerce Platform",
+        dcpType: "COMPANY",
+        level: "PARENT",
+        capabilities: ["commerce.checkout"],
+        compatibleDescendants: ["assembly:checkout"],
+        replacementAllowed: false
+      },
+      {
+        nodeId: "assembly:checkout",
+        label: "Checkout Assembly",
+        dcpType: "MODULE",
+        level: "ASSEMBLY",
+        capabilities: ["order.create"],
+        compatibleDescendants: ["component.validation"],
+        replacementAllowed: false
+      },
+      {
+        nodeId: "component.validation",
+        label: "Validation Service",
+        dcpType: "COMPONENT",
+        level: "CHILD",
+        catalogEntryId: "com.unfurl:validation-service:1.1.0",
+        capabilities: ["validate.order"],
+        compatibleDescendants: ["component.customer-policy-validator"],
+        replacementAllowed: true
+      }
+    ],
+    edges: [
+      { fromNodeId: "company:commerce", toNodeId: "assembly:checkout", relationship: "CONTAINS" },
+      { fromNodeId: "assembly:checkout", toNodeId: "component.validation", relationship: "CONTAINS" }
+    ],
+    warnings: []
+  };
 }

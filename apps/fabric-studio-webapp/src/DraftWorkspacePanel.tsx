@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import {
   DEFAULT_STUDIO_ASSEMBLY_ID,
   DEFAULT_STUDIO_TENANT_ID,
+  type DynamicDcpProjectionResponse,
   type StudioFabricClient
 } from "@unfurl/fabric-validation-client";
 import type { VisualCatalogEntry } from "@unfurl/visual-manifest";
@@ -25,12 +26,14 @@ export type DraftWorkspacePanelProps = {
     StudioFabricClient,
     "extractNeeds" |
     "saveDraft" |
+    "loadDynamicDcpProjection" |
     "listCatalogVisuals" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate"
   >;
   readonly initialTenantId?: string | undefined;
   readonly initialAssemblyId?: string | undefined;
   readonly initialBaseCatalogHash?: string | undefined;
   readonly initialDraftComponentCount?: number | undefined;
+  readonly initialDynamicProjection?: DynamicDcpProjectionResponse | undefined;
 };
 
 type SelectedSurfaceId = ThreeAssemblySurfaceId;
@@ -76,7 +79,8 @@ export function DraftWorkspacePanel({
   initialTenantId = DEFAULT_STUDIO_TENANT_ID,
   initialAssemblyId = DEFAULT_STUDIO_ASSEMBLY_ID,
   initialBaseCatalogHash = "sha256:catalog",
-  initialDraftComponentCount
+  initialDraftComponentCount,
+  initialDynamicProjection
 }: DraftWorkspacePanelProps) {
   const [tenantId, setTenantId] = useState(initialTenantId);
   const [assemblyId, setAssemblyId] = useState(initialAssemblyId);
@@ -113,6 +117,8 @@ export function DraftWorkspacePanel({
   const [saveDraftStatus, setSaveDraftStatus] = useState<string | undefined>();
   const [draftComponentCount, setDraftComponentCount] = useState<number | undefined>(initialDraftComponentCount);
   const [semanticZoomLevel, setSemanticZoomLevel] = useState<SemanticZoomLevel>("ASSEMBLY_DCP");
+  const [dynamicProjection, setDynamicProjection] = useState<DynamicDcpProjectionResponse | undefined>(initialDynamicProjection);
+  const [dynamicProjectionError, setDynamicProjectionError] = useState<string | undefined>();
 
   useEffect(() => {
     let cancelled = false;
@@ -134,6 +140,29 @@ export function DraftWorkspacePanel({
       cancelled = true;
     };
   }, [client, tenantId]);
+
+  useEffect(() => {
+    if (!client.loadDynamicDcpProjection) {
+      return;
+    }
+    let cancelled = false;
+    void client.loadDynamicDcpProjection({
+      tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
+      assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID
+    }).then(response => {
+      if (!cancelled) {
+        setDynamicProjection(response);
+        setDynamicProjectionError(undefined);
+      }
+    }).catch(error => {
+      if (!cancelled) {
+        setDynamicProjectionError(error instanceof Error ? error.message : String(error));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, tenantId, assemblyId]);
 
   async function create() {
     setBusy(true);
@@ -703,6 +732,35 @@ export function DraftWorkspacePanel({
             {state?.status === "READY" && state.lastResponse?.status === "INVALID" && <p className="studio-error">{state.lastResponse.reason}: {state.lastResponse.details}</p>}
           </section>
           <section className="inspector-card">
+            <h2>Dynamic DCP Projection</h2>
+            {dynamicProjection ? (
+              <>
+                <dl>
+                  <dt>Mode</dt><dd>{dynamicProjection.compositionMode}</dd>
+                  <dt>Root</dt><dd>{nodeLabel(dynamicProjection, dynamicProjection.rootNodeId)}</dd>
+                  <dt>Focus</dt><dd>{nodeLabel(dynamicProjection, dynamicProjection.focusNodeId)}</dd>
+                </dl>
+                <div className="dynamic-dcp-levels">
+                  {(["PARENT", "ASSEMBLY", "CHILD"] as const).map(level => (
+                    <div key={level}>
+                      <strong>{level}</strong>
+                      <ul>
+                        {dynamicProjection.nodes.filter(node => node.level === level).map(node => (
+                          <li key={node.nodeId}>
+                            <span>{node.label}</span>
+                            <small>{node.dcpType}{node.replacementAllowed ? " / replaceable" : ""}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="live-data-notice">{dynamicProjectionError ?? "Loading dynamic DCP projection..."}</p>
+            )}
+          </section>
+          <section className="inspector-card">
             <h2>Component Details</h2>
             <dl>
               <dt>Type</dt><dd>{selected.type}</dd>
@@ -1170,6 +1228,10 @@ function semanticZoomDescription(level: SemanticZoomLevel): string {
     ASSEMBLY_DCP: "current validated assembly graph",
     CHILD_DCP: "zoomed in to descendant components and internal responsibilities"
   }[level];
+}
+
+function nodeLabel(projection: DynamicDcpProjectionResponse, nodeId: string): string {
+  return projection.nodes.find(node => node.nodeId === nodeId)?.label ?? nodeId;
 }
 
 const substrateCapabilities = [

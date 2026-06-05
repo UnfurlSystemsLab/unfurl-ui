@@ -160,6 +160,39 @@ export type SaveDraftResponse = {
   readonly warnings: readonly string[];
 };
 
+export type DynamicDcpProjectionRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+};
+
+export type DynamicDcpProjectionResponse = {
+  readonly tenantId: string;
+  readonly assemblyId: string;
+  readonly compositionMode: "STATIC" | "DYNAMIC" | string;
+  readonly rootNodeId: string;
+  readonly focusNodeId: string;
+  readonly nodes: readonly DynamicDcpNode[];
+  readonly edges: readonly DynamicDcpEdge[];
+  readonly warnings: readonly string[];
+};
+
+export type DynamicDcpNode = {
+  readonly nodeId: string;
+  readonly label: string;
+  readonly dcpType: "COMPANY" | "SUBSTRATE" | "MODULE" | "COMPONENT" | string;
+  readonly level: "PARENT" | "ASSEMBLY" | "CHILD";
+  readonly catalogEntryId?: string;
+  readonly capabilities: readonly string[];
+  readonly compatibleDescendants: readonly string[];
+  readonly replacementAllowed: boolean;
+};
+
+export type DynamicDcpEdge = {
+  readonly fromNodeId: string;
+  readonly toNodeId: string;
+  readonly relationship: "CONTAINS" | "REQUIRES" | "BINDS" | "REPLACES" | string;
+};
+
 export type LoadCompositionViewRequest = {
   readonly contractPath: string;
   readonly substrateProfilePath: string;
@@ -313,6 +346,7 @@ export interface StudioFabricClient {
   readonly listAssemblies?: (request?: ListAssembliesRequest) => Promise<ListAssembliesResponse>;
   readonly createAssembly?: (request: CreateAssemblyRequest) => Promise<StudioAssemblySummary>;
   readonly saveDraft?: (request: SaveDraftRequest) => Promise<SaveDraftResponse>;
+  readonly loadDynamicDcpProjection?: (request?: DynamicDcpProjectionRequest) => Promise<DynamicDcpProjectionResponse>;
   readonly loadCompositionView: (request: LoadCompositionViewRequest) => Promise<LoadCompositionViewResponse>;
   readonly createDraftComposition: (request: CreateDraftCompositionRequest) => Promise<CreateDraftCompositionResponse>;
   readonly getDraftSession: (request: string | ({

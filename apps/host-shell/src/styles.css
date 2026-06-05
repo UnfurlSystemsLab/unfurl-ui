@@ -765,6 +765,42 @@ th, td {
   line-height: 1.35;
 }
 
+.dynamic-dcp-levels {
+  display: grid;
+  gap: 8px;
+}
+
+.dynamic-dcp-levels > div {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px;
+  background: #f8fafc;
+}
+
+.dynamic-dcp-levels strong {
+  display: block;
+  color: #1d4ed8;
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.dynamic-dcp-levels ul {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dynamic-dcp-levels li {
+  display: grid;
+  gap: 2px;
+}
+
+.dynamic-dcp-levels small {
+  color: #64748b;
+}
+
 .assembly-cabinet {
   position: absolute;
   z-index: 1;

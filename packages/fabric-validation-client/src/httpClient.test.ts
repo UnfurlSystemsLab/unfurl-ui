@@ -148,6 +148,36 @@ describe("HTTP Studio Fabric client", () => {
     });
   });
 
+  it("loads the dynamic DCP projection for a tenant assembly", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      defaultTenantId: "tenant-payments",
+      defaultAssemblyId: "assembly-checkout",
+      fetch: fakeFetch(calls, {
+        tenantId: "tenant-payments",
+        assemblyId: "assembly-checkout",
+        compositionMode: "DYNAMIC",
+        rootNodeId: "company:payments",
+        focusNodeId: "assembly:checkout",
+        nodes: [],
+        edges: [],
+        warnings: []
+      })
+    });
+
+    const response = await client.loadDynamicDcpProjection?.();
+
+    assert.equal(response?.compositionMode, "DYNAMIC");
+    assert.deepEqual(calls, [
+      {
+        input: "http://fabric.local/studio/tenants/tenant-payments/assemblies/assembly-checkout/dynamic-dcp",
+        method: "GET",
+        body: undefined
+      }
+    ]);
+  });
+
   it("loads a read-only composition view by posting contract and profile paths", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

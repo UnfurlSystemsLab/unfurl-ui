@@ -5,6 +5,7 @@ import type {
   CreateDraftCompositionRequest,
   CreateDraftCompositionResponse,
   AdmitCatalogArtifactsResponse,
+  DynamicDcpProjectionResponse,
   ExtractNeedsResponse,
   ListAssembliesResponse,
   SaveDraftResponse,
@@ -24,6 +25,7 @@ export type MockStudioApiFixtures = {
   readonly compositionView?: LoadCompositionViewResponse;
   readonly session?: StudioDraftSession;
   readonly admissionResponse?: AdmitCatalogArtifactsResponse;
+  readonly dynamicDcpProjection?: DynamicDcpProjectionResponse;
   readonly needsResponse?: ExtractNeedsResponse;
   readonly assembliesResponse?: ListAssembliesResponse;
   readonly saveDraftResponse?: SaveDraftResponse;
@@ -94,6 +96,61 @@ export const studioApiExampleSession: StudioDraftSession = {
   compositionMode: "DYNAMIC",
   currentCandidateId: "cand-abc123",
   sceneRevision: 7,
+  warnings: []
+};
+
+export const studioApiExampleDynamicDcpProjection: DynamicDcpProjectionResponse = {
+  tenantId: DEFAULT_STUDIO_TENANT_ID,
+  assemblyId: DEFAULT_STUDIO_ASSEMBLY_ID,
+  compositionMode: "DYNAMIC",
+  rootNodeId: "company:e-commerce-platform",
+  focusNodeId: "assembly:e-commerce-platform",
+  nodes: [
+    {
+      nodeId: "company:e-commerce-platform",
+      label: "E-Commerce Platform",
+      dcpType: "COMPANY",
+      level: "PARENT",
+      capabilities: ["commerce.checkout", "commerce.fulfillment"],
+      compatibleDescendants: ["assembly:e-commerce-platform"],
+      replacementAllowed: false
+    },
+    {
+      nodeId: "assembly:e-commerce-platform",
+      label: "Checkout Assembly",
+      dcpType: "MODULE",
+      level: "ASSEMBLY",
+      capabilities: ["order.create", "validate.order", "payment.authorize"],
+      compatibleDescendants: ["component.validation-service", "component.storage-s3"],
+      replacementAllowed: false
+    },
+    {
+      nodeId: "component.validation-service",
+      label: "Validation Service",
+      dcpType: "COMPONENT",
+      level: "CHILD",
+      catalogEntryId: "com.unfurl:validation-service:1.1.0",
+      capabilities: ["validate.order", "validate.payment", "validate.inventory"],
+      compatibleDescendants: ["component.customer-policy-validator", "component.fraud-validator"],
+      replacementAllowed: true
+    },
+    {
+      nodeId: "component.storage-s3",
+      label: "S3 Storage",
+      dcpType: "COMPONENT",
+      level: "CHILD",
+      catalogEntryId: "com.unfurl:storage-s3:1.2.0",
+      capabilities: ["storage.put"],
+      compatibleDescendants: ["component.azure-blob", "component.minio-storage"],
+      replacementAllowed: true
+    }
+  ],
+  edges: [
+    { fromNodeId: "company:e-commerce-platform", toNodeId: "assembly:e-commerce-platform", relationship: "CONTAINS" },
+    { fromNodeId: "assembly:e-commerce-platform", toNodeId: "component.validation-service", relationship: "CONTAINS" },
+    { fromNodeId: "assembly:e-commerce-platform", toNodeId: "component.storage-s3", relationship: "CONTAINS" },
+    { fromNodeId: "component.validation-service", toNodeId: "component.storage-s3", relationship: "REQUIRES" }
+  ],
   warnings: []
 };
 
@@ -223,6 +280,9 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
         tenantId: session.tenantId,
         assemblies: [assembly(session)]
       });
+    }
+    if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/dynamic-dcp`) {
+      return ok(fixtures.dynamicDcpProjection ?? studioApiExampleDynamicDcpProjection);
     }
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies`) {
       const body = parseJson<{ readonly assemblyId: string; readonly targetApplicationName?: string; readonly defaultDeploymentTarget?: string }>(init?.body);
