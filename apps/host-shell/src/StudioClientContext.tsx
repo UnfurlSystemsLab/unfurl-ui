@@ -38,7 +38,7 @@ export function useStudioClient(): StudioFabricClient {
 
 export function studioMode(): "live" | "fixture" {
   const env = (import.meta as ImportMeta & { readonly env?: { readonly VITE_STUDIO_MODE?: string } }).env;
-  return env?.VITE_STUDIO_MODE === "fixture" ? "fixture" : "live";
+  return env?.VITE_STUDIO_MODE === "live" ? "live" : "fixture";
 }
 
 export function studioApiBaseUrl(): string {

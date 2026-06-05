@@ -127,6 +127,14 @@ Run the production bundle preview instead:
 .\scripts\launch-studio.ps1 -Mode preview
 ```
 
+Studio defaults to fixture mode for standalone manual testing, so it will not call `http://127.0.0.1:7878` unless live mode is explicitly requested. To test against a running Fabric Studio API:
+
+```powershell
+$env:VITE_STUDIO_MODE = "live"
+$env:VITE_STUDIO_API_BASE_URL = "http://127.0.0.1:7878"
+npm run dev:studio
+```
+
 Useful options:
 
 ```powershell

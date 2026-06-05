@@ -97,7 +97,7 @@ export function ThreeAssemblyScene({
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.setClearColor(0xf8fbff, 0);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     hostElement.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
