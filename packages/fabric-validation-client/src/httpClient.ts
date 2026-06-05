@@ -7,6 +7,12 @@ import type {
   AdmitCatalogArtifactsResponse,
   ExtractNeedsRequest,
   ExtractNeedsResponse,
+  CreateAssemblyRequest,
+  ListAssembliesRequest,
+  ListAssembliesResponse,
+  SaveDraftRequest,
+  SaveDraftResponse,
+  StudioAssemblySummary,
   IntentResponse,
   ListCatalogVisualsResponse,
   LoadCompositionViewRequest,
@@ -78,6 +84,30 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/needs/extract`,
+        { ...body, ...scope }
+      );
+    },
+    listAssemblies: async body => {
+      const tenantId = encodeURIComponent(body?.tenantId ?? defaultScope.tenantId);
+      return request<ListAssembliesResponse>(fetchImpl, baseUrl, "GET", `/studio/tenants/${tenantId}/assemblies`);
+    },
+    createAssembly: async body => {
+      const tenantId = body.tenantId ?? defaultScope.tenantId;
+      return request<StudioAssemblySummary>(
+        fetchImpl,
+        baseUrl,
+        "POST",
+        `/studio/tenants/${encodeURIComponent(tenantId)}/assemblies`,
+        { ...body, tenantId }
+      );
+    },
+    saveDraft: async body => {
+      const scope = resolveScope(defaultScope, body);
+      return request<SaveDraftResponse>(
+        fetchImpl,
+        baseUrl,
+        "POST",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/drafts/save`,
         { ...body, ...scope }
       );
     },

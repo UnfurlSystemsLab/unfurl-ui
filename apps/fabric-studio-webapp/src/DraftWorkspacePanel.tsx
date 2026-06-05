@@ -24,6 +24,7 @@ export type DraftWorkspacePanelProps = {
   readonly client: Pick<
     StudioFabricClient,
     "extractNeeds" |
+    "saveDraft" |
     "listCatalogVisuals" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate"
   >;
   readonly initialTenantId?: string | undefined;
@@ -172,8 +173,23 @@ export function DraftWorkspacePanel({
     setSaveDraftOpen(true);
   }
 
-  function saveDraft() {
-    setSaveDraftStatus(`Draft saved for ${saveDeploymentTarget} using ${saveDeploymentShape}.`);
+  async function saveDraft() {
+    if (client.saveDraft) {
+      const readySession = state?.status === "READY" ? state.session : undefined;
+      const response = await client.saveDraft({
+        tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
+        assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID,
+        targetApplicationName,
+        needsId,
+        deploymentTarget: saveDeploymentTarget,
+        deploymentShape: saveDeploymentShape,
+        ...(readySession?.currentCandidateId === undefined ? {} : { currentCandidateId: readySession.currentCandidateId }),
+        sceneRevision: readySession?.sceneRevision ?? 0
+      });
+      setSaveDraftStatus(`Draft ${response.status.toLowerCase()} for ${response.assembly.defaultDeploymentTarget} using ${response.assembly.deploymentShape}.`);
+    } else {
+      setSaveDraftStatus(`Draft saved for ${saveDeploymentTarget} using ${saveDeploymentShape}.`);
+    }
     setSaveDraftOpen(false);
   }
 
@@ -487,7 +503,7 @@ export function DraftWorkspacePanel({
                 </select>
               </label>
               <div className="button-row">
-                <button type="button" onClick={saveDraft}>Save With Deployment</button>
+                <button type="button" onClick={() => void saveDraft()}>Save With Deployment</button>
                 <button type="button" className="secondary" onClick={() => setSaveDraftOpen(false)}>Cancel</button>
               </div>
             </section>

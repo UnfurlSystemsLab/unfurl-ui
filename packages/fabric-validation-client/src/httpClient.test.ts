@@ -105,6 +105,49 @@ describe("HTTP Studio Fabric client", () => {
     });
   });
 
+  it("lists creates and saves tenant assemblies", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: fakeFetch(calls, {
+        status: "SAVED",
+        assembly: {
+          tenantId: "tenant-local",
+          assemblyId: "assembly-demo",
+          targetApplicationName: "Checkout Platform",
+          defaultDeploymentTarget: "kubernetes-prod",
+          needsId: "needs-checkout",
+          deploymentShape: "CONTAINERIZED_SERVICE",
+          currentCandidateId: "cand-abc123",
+          sceneRevision: 8
+        },
+        warnings: []
+      })
+    });
+
+    await client.saveDraft?.({
+      assemblyId: "assembly-demo",
+      targetApplicationName: "Checkout Platform",
+      needsId: "needs-checkout",
+      deploymentTarget: "kubernetes-prod",
+      deploymentShape: "CONTAINERIZED_SERVICE",
+      currentCandidateId: "cand-abc123",
+      sceneRevision: 8
+    });
+
+    assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-local/assemblies/assembly-demo/drafts/save");
+    assert.deepEqual(JSON.parse(calls[0]?.body ?? "{}"), {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      targetApplicationName: "Checkout Platform",
+      needsId: "needs-checkout",
+      deploymentTarget: "kubernetes-prod",
+      deploymentShape: "CONTAINERIZED_SERVICE",
+      currentCandidateId: "cand-abc123",
+      sceneRevision: 8
+    });
+  });
+
   it("loads a read-only composition view by posting contract and profile paths", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

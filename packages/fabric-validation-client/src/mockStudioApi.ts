@@ -6,6 +6,9 @@ import type {
   CreateDraftCompositionResponse,
   AdmitCatalogArtifactsResponse,
   ExtractNeedsResponse,
+  ListAssembliesResponse,
+  SaveDraftResponse,
+  StudioAssemblySummary,
   FetchLike,
   FetchResponseLike,
   IntentResponse,
@@ -22,6 +25,8 @@ export type MockStudioApiFixtures = {
   readonly session?: StudioDraftSession;
   readonly admissionResponse?: AdmitCatalogArtifactsResponse;
   readonly needsResponse?: ExtractNeedsResponse;
+  readonly assembliesResponse?: ListAssembliesResponse;
+  readonly saveDraftResponse?: SaveDraftResponse;
   readonly intentResponse?: IntentResponse;
   readonly compileResponse?: CompileDraftCandidateResponse;
   readonly resolveDeploymentResponse?: ResolveDeploymentResponse;
@@ -192,6 +197,39 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
         warnings: []
       });
     }
+    if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies`) {
+      return ok(fixtures.assembliesResponse ?? {
+        tenantId: session.tenantId,
+        assemblies: [assembly(session)]
+      });
+    }
+    if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies`) {
+      const body = parseJson<{ readonly assemblyId: string; readonly targetApplicationName?: string; readonly defaultDeploymentTarget?: string }>(init?.body);
+      return ok<StudioAssemblySummary>({
+        tenantId: session.tenantId,
+        assemblyId: body?.assemblyId ?? session.assemblyId,
+        targetApplicationName: body?.targetApplicationName ?? "E-Commerce Platform",
+        defaultDeploymentTarget: body?.defaultDeploymentTarget ?? "On-Prem Cluster",
+        needsId: "",
+        deploymentShape: "CONTAINERIZED_SERVICE",
+        currentCandidateId: "",
+        sceneRevision: 0
+      });
+    }
+    if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/drafts/save`) {
+      const body = parseJson<{ readonly targetApplicationName?: string; readonly deploymentTarget?: string; readonly deploymentShape?: string; readonly needsId?: string }>(init?.body);
+      return ok(fixtures.saveDraftResponse ?? {
+        status: "SAVED",
+        assembly: {
+          ...assembly(session),
+          targetApplicationName: body?.targetApplicationName ?? "E-Commerce Platform",
+          defaultDeploymentTarget: body?.deploymentTarget ?? "On-Prem Cluster",
+          needsId: body?.needsId ?? "",
+          deploymentShape: body?.deploymentShape ?? "CONTAINERIZED_SERVICE"
+        },
+        warnings: []
+      });
+    }
     if (method === "GET" && (path === `/studio/sessions/${encodeURIComponent(session.sessionId)}` || path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}`))) {
       return ok(session);
     }
@@ -241,6 +279,19 @@ function artifact(name: string) {
     mediaType: "application/yaml",
     sha256: `sha256:${name}`,
     url: `/studio/assets/${name}`
+  };
+}
+
+function assembly(session: StudioDraftSession): StudioAssemblySummary {
+  return {
+    tenantId: session.tenantId,
+    assemblyId: session.assemblyId,
+    targetApplicationName: "E-Commerce Platform",
+    defaultDeploymentTarget: "On-Prem Cluster",
+    needsId: "",
+    deploymentShape: "CONTAINERIZED_SERVICE",
+    currentCandidateId: session.currentCandidateId ?? "",
+    sceneRevision: session.sceneRevision
   };
 }
 
