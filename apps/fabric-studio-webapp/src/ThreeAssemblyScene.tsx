@@ -20,6 +20,7 @@ export type ThreeAssemblySceneProps = {
   readonly selectedPartId?: string | undefined;
   readonly extractedPartId?: string | undefined;
   readonly semanticProjection?: SemanticDcpSceneProjection | undefined;
+  readonly requestedSemanticZoomLevel?: SemanticZoomLevel | undefined;
   readonly onSelect: (surface: ThreeAssemblySurfaceId) => void;
   readonly onSelectPart?: (selection: ThreeAssemblySelection) => void;
   readonly onViewChange?: (view: string) => void;
@@ -93,6 +94,7 @@ export function ThreeAssemblyScene({
   selectedPartId,
   extractedPartId,
   semanticProjection,
+  requestedSemanticZoomLevel,
   onSelect,
   onSelectPart,
   onViewChange,
@@ -107,6 +109,7 @@ export function ThreeAssemblyScene({
   const selectedPartRef = useRef(selectedPartId);
   const extractedPartRef = useRef(extractedPartId);
   const viewRef = useRef(activeView);
+  const requestedSemanticZoomLevelRef = useRef(requestedSemanticZoomLevel);
 
   onSelectRef.current = onSelect;
   onSelectPartRef.current = onSelectPart;
@@ -116,6 +119,7 @@ export function ThreeAssemblyScene({
   selectedPartRef.current = selectedPartId;
   extractedPartRef.current = extractedPartId;
   viewRef.current = activeView;
+  requestedSemanticZoomLevelRef.current = requestedSemanticZoomLevel;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -178,6 +182,7 @@ export function ThreeAssemblyScene({
     const focusCameraPosition = new THREE.Vector3();
     let hasFocusAnimation = false;
     let semanticZoomLevel: SemanticZoomLevel = "ASSEMBLY_DCP";
+    let appliedRequestedSemanticZoomLevel: SemanticZoomLevel | undefined;
 
     function resize() {
       const rect = hostElement.getBoundingClientRect();
@@ -248,6 +253,18 @@ export function ThreeAssemblyScene({
       hasFocusAnimation = true;
     }
 
+    function focusSemanticLevel(level: SemanticZoomLevel) {
+      focusTarget.copy(initialCameraTarget);
+      const currentDirection = camera.position.clone().sub(controls.target).normalize();
+      const distance = {
+        PARENT_DCP: 16.9,
+        ASSEMBLY_DCP: 10.6,
+        CHILD_DCP: 5.5
+      }[level];
+      focusCameraPosition.copy(focusTarget).addScaledVector(currentDirection, distance);
+      hasFocusAnimation = true;
+    }
+
     function semanticLevelFromCamera(): SemanticZoomLevel {
       const distance = camera.position.distanceTo(controls.target);
       if (distance <= 6.2) {
@@ -296,6 +313,11 @@ export function ThreeAssemblyScene({
       root.rotation.y = -0.23 + Math.sin(frame * 0.8) * 0.01;
       root.rotation.x = -0.06 + Math.sin(frame * 0.55) * 0.006;
       handles.explodedGroup.position.y = -0.42 + Math.sin(frame * 1.4) * 0.018;
+      const requestedLevel = requestedSemanticZoomLevelRef.current;
+      if (requestedLevel && requestedLevel !== appliedRequestedSemanticZoomLevel) {
+        appliedRequestedSemanticZoomLevel = requestedLevel;
+        focusSemanticLevel(requestedLevel);
+      }
       if (hasFocusAnimation) {
         controls.target.lerp(focusTarget, 0.08);
         camera.position.lerp(focusCameraPosition, 0.08);

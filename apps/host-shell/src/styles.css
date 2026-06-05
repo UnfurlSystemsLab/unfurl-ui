@@ -765,6 +765,53 @@ th, td {
   line-height: 1.35;
 }
 
+.semantic-drill-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.semantic-drill-controls button {
+  min-height: 28px;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+
+.dynamic-dcp-table-panel {
+  display: grid;
+  gap: 10px;
+  margin: 12px 16px 0;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 12px;
+  color: #0f172a;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+}
+
+.dynamic-dcp-table-panel > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.dynamic-dcp-table-panel span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.dynamic-dcp-table-panel table {
+  font-size: 12px;
+}
+
+.dynamic-dcp-table-panel th,
+.dynamic-dcp-table-panel td {
+  vertical-align: top;
+}
+
 .dynamic-dcp-levels {
   display: grid;
   gap: 8px;

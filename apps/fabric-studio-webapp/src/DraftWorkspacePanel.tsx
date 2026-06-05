@@ -119,6 +119,7 @@ export function DraftWorkspacePanel({
   const [saveDraftStatus, setSaveDraftStatus] = useState<string | undefined>();
   const [draftComponentCount, setDraftComponentCount] = useState<number | undefined>(initialDraftComponentCount);
   const [semanticZoomLevel, setSemanticZoomLevel] = useState<SemanticZoomLevel>("ASSEMBLY_DCP");
+  const [requestedSemanticZoomLevel, setRequestedSemanticZoomLevel] = useState<SemanticZoomLevel>("ASSEMBLY_DCP");
   const [dynamicProjection, setDynamicProjection] = useState<DynamicDcpProjectionResponse | undefined>(initialDynamicProjection);
   const [dynamicProjectionError, setDynamicProjectionError] = useState<string | undefined>();
   const [fabricReplacementCandidates, setFabricReplacementCandidates] = useState<readonly FabricReplacementCandidate[] | undefined>();
@@ -167,6 +168,31 @@ export function DraftWorkspacePanel({
       cancelled = true;
     };
   }, [client, tenantId, assemblyId]);
+
+  useEffect(() => {
+    const saved = readLayoutState(tenantId, assemblyId);
+    if (!saved) {
+      return;
+    }
+    setActiveView(saved.activeView);
+    setRequestedSemanticZoomLevel(saved.semanticZoomLevel);
+    setSemanticZoomLevel(saved.semanticZoomLevel);
+    setSelectedComponent(saved.selectedSurface);
+    selectScenePart({
+      id: `component:${saved.selectedSurface}`,
+      kind: saved.selectedSurface === "substrate" ? "substrate" : "component",
+      surface: saved.selectedSurface,
+      label: inspectorDetails[saved.selectedSurface].name
+    });
+  }, [tenantId, assemblyId]);
+
+  useEffect(() => {
+    writeLayoutState(tenantId, assemblyId, {
+      activeView,
+      semanticZoomLevel,
+      selectedSurface: selectedComponent
+    });
+  }, [tenantId, assemblyId, activeView, semanticZoomLevel, selectedComponent]);
 
   useEffect(() => {
     const componentNodeId = dynamicProjection ? projectionNodeIdForSelection(selectedPart, dynamicProjection) : undefined;
@@ -304,6 +330,17 @@ export function DraftWorkspacePanel({
   function selectScenePart(selection: ThreeAssemblySelection) {
     setSelectedComponent(selection.surface);
     setSelectedPart(selection);
+  }
+
+  function drillTo(level: SemanticZoomLevel) {
+    setRequestedSemanticZoomLevel(level);
+    setSemanticZoomLevel(level);
+    if (level === "PARENT_DCP") {
+      setActiveView("Assembly");
+    }
+    if (level === "CHILD_DCP") {
+      setActiveView("Exploded");
+    }
   }
 
   function toggleTakeOut() {
@@ -605,6 +642,7 @@ export function DraftWorkspacePanel({
                   selectedPartId={selectedPart.id}
                   extractedPartId={extractedPartId}
                   semanticProjection={semanticSceneProjection}
+                  requestedSemanticZoomLevel={requestedSemanticZoomLevel}
                   onSelect={setSelectedComponent}
                   onSelectPart={selectScenePart}
                   onViewChange={setActiveView}
@@ -620,6 +658,11 @@ export function DraftWorkspacePanel({
               <strong>Semantic Zoom</strong>
               <span>{semanticZoomLabel(semanticZoomLevel)}</span>
               <small>{semanticZoomDescription(semanticZoomLevel)}</small>
+              <div className="semantic-drill-controls" aria-label="Semantic drill controls">
+                <button type="button" onClick={() => drillTo("PARENT_DCP")}>Parent</button>
+                <button type="button" onClick={() => drillTo("ASSEMBLY_DCP")}>Assembly</button>
+                <button type="button" onClick={() => drillTo("CHILD_DCP")}>Child</button>
+              </div>
             </div>
             {showEmptyAssembly && (
               <div className="empty-assembly-state" role="status">
@@ -703,6 +746,35 @@ export function DraftWorkspacePanel({
               </>
             )}
           </div>
+
+          {dynamicProjection && (
+            <section className="dynamic-dcp-table-panel" aria-label="Accessible dynamic DCP table view">
+              <div>
+                <strong>2D / Table View</strong>
+                <span>Keyboard-accessible projection synchronized with the 3D assembly.</span>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Level</th>
+                    <th scope="col">DCP</th>
+                    <th scope="col">Capabilities</th>
+                    <th scope="col">Replacement</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dynamicProjection.nodes.map(node => (
+                    <tr key={node.nodeId}>
+                      <td>{node.level}</td>
+                      <td>{node.label}</td>
+                      <td>{node.capabilities.join(", ") || "none declared"}</td>
+                      <td>{node.replacementAllowed ? "allowed by Fabric" : "parent-governed"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
 
           <div className="substrate-strip" aria-label="Substrate runtime layer">
             <div className="substrate-label">Substrate Runtime Layer</div>
@@ -1300,6 +1372,50 @@ function semanticZoomDescription(level: SemanticZoomLevel): string {
     ASSEMBLY_DCP: "current validated assembly graph",
     CHILD_DCP: "zoomed in to descendant components and internal responsibilities"
   }[level];
+}
+
+type LayoutState = {
+  readonly activeView: string;
+  readonly semanticZoomLevel: SemanticZoomLevel;
+  readonly selectedSurface: SelectedSurfaceId;
+};
+
+function readLayoutState(tenantId: string, assemblyId: string): LayoutState | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  try {
+    const raw = window.localStorage.getItem(layoutStateKey(tenantId, assemblyId));
+    if (!raw) {
+      return undefined;
+    }
+    const parsed = JSON.parse(raw) as Partial<LayoutState>;
+    if (!parsed.activeView || !parsed.semanticZoomLevel || !parsed.selectedSurface) {
+      return undefined;
+    }
+    return {
+      activeView: parsed.activeView,
+      semanticZoomLevel: parsed.semanticZoomLevel,
+      selectedSurface: parsed.selectedSurface
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function writeLayoutState(tenantId: string, assemblyId: string, state: LayoutState): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(layoutStateKey(tenantId, assemblyId), JSON.stringify(state));
+  } catch {
+    // Layout state is a convenience only; semantic composition state still comes from Fabric.
+  }
+}
+
+function layoutStateKey(tenantId: string, assemblyId: string): string {
+  return `unfurl-studio-layout:${tenantId.trim() || DEFAULT_STUDIO_TENANT_ID}:${assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID}`;
 }
 
 function nodeLabel(projection: DynamicDcpProjectionResponse, nodeId: string): string {

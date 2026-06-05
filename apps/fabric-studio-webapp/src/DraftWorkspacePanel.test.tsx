@@ -39,6 +39,8 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /Semantic Zoom/);
     assert.match(html, /Assembly DCP/);
     assert.match(html, /current validated assembly graph/);
+    assert.match(html, /Parent/);
+    assert.match(html, /Child/);
     assert.match(html, /Inspector/);
     assert.match(html, /Component Details/);
     assert.match(html, /Selected Scene Part/);
@@ -95,6 +97,8 @@ describe("DraftWorkspacePanel", () => {
     );
 
     assert.match(html, /Dynamic DCP Projection/);
+    assert.match(html, /2D \/ Table View/);
+    assert.match(html, /Keyboard-accessible projection synchronized with the 3D assembly/);
     assert.match(html, /DYNAMIC/);
     assert.match(html, /Commerce Platform/);
     assert.match(html, /Checkout Assembly/);
