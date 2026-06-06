@@ -379,6 +379,36 @@ describe("HTTP Studio Fabric client", () => {
     ]);
   });
 
+  it("sends collaborator heartbeat to the scoped session endpoint", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      defaultTenantId: "tenant-payments",
+      defaultAssemblyId: "assembly-checkout",
+      fetch: fakeFetch(calls, session({ sessionId: "studio-session-123", sceneRevision: 4 }))
+    });
+
+    const response = await client.heartbeatCollaborator?.({
+      sessionId: "studio-session-123",
+      collaboratorId: "alice",
+      displayName: "Alice",
+      selectedSurface: "validation"
+    });
+
+    assert.equal(response?.sceneRevision, 4);
+    assert.deepEqual(calls, [
+      {
+        input: "http://fabric.local/studio/tenants/tenant-payments/assemblies/assembly-checkout/sessions/studio-session-123/collaborators/heartbeat",
+        method: "POST",
+        body: JSON.stringify({
+          collaboratorId: "alice",
+          displayName: "Alice",
+          selectedSurface: "validation"
+        })
+      }
+    ]);
+  });
+
   it("compiles a draft session through the compile endpoint", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

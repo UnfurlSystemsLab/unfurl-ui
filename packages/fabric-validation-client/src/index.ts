@@ -19,6 +19,8 @@ export type BaseIntent = {
   readonly assemblyId: string;
   readonly sessionId: string;
   readonly baseRevision: number;
+  readonly collaboratorId?: string;
+  readonly collaboratorName?: string;
 };
 
 export type AddComponentIntent = BaseIntent & {
@@ -50,6 +52,7 @@ export type IntentResponse =
       readonly updatedCandidateId?: string;
       readonly requiredSubstratePorts: readonly string[];
       readonly warnings: readonly string[];
+      readonly session?: StudioDraftSession;
     }
   | {
       readonly status: "INVALID";
@@ -60,6 +63,7 @@ export type IntentResponse =
       readonly status: "STALE_REVISION";
       readonly expectedRevision: number;
       readonly receivedRevision: number;
+      readonly session?: StudioDraftSession;
     };
 
 export type ListCatalogVisualsResponse = {
@@ -257,11 +261,22 @@ export type CreateDraftCompositionRequest = {
   readonly needsId?: string;
   readonly trustPolicyId?: string;
   readonly initialCandidateId?: string;
+  readonly collaboratorId?: string;
+  readonly collaboratorName?: string;
   readonly deploymentPolicy?: DeploymentPolicyDraft;
 };
 
 export type CreateDraftCompositionResponse = {
   readonly session: StudioDraftSession;
+};
+
+export type HeartbeatCollaboratorRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly sessionId: string;
+  readonly collaboratorId: string;
+  readonly displayName?: string;
+  readonly selectedSurface?: string;
 };
 
 export type CompileDraftCandidateRequest = {
@@ -405,6 +420,7 @@ export interface StudioFabricClient {
     readonly assemblyId?: string;
     readonly sessionId: string;
   })) => Promise<StudioDraftSession>;
+  readonly heartbeatCollaborator?: (request: HeartbeatCollaboratorRequest) => Promise<StudioDraftSession>;
   readonly applyIntent: (intent: StudioIntent) => Promise<IntentResponse>;
   readonly compileCandidate: (request: CompileDraftCandidateRequest) => Promise<CompileDraftCandidateResponse>;
   readonly resolveDeployment?: (request: ResolveDeploymentRequest) => Promise<ResolveDeploymentResponse>;

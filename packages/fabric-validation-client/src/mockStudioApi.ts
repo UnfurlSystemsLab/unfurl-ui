@@ -100,7 +100,16 @@ export const studioApiExampleSession: StudioDraftSession = {
   compositionMode: "DYNAMIC",
   currentCandidateId: "cand-abc123",
   sceneRevision: 7,
-  warnings: []
+  warnings: [],
+  collaborators: [
+    {
+      collaboratorId: "local-operator",
+      displayName: "Local Operator",
+      selectedSurface: "validation",
+      lastSeenAt: "2026-06-06T00:00:00.000Z"
+    }
+  ],
+  intentLog: []
 };
 
 export const studioApiExampleDynamicDcpProjection: DynamicDcpProjectionResponse = {
@@ -371,13 +380,32 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     if (method === "GET" && (path === `/studio/sessions/${encodeURIComponent(session.sessionId)}` || path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}`))) {
       return ok(session);
     }
+    if (method === "POST" && path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/collaborators/heartbeat`)) {
+      const body = parseJson<{ readonly collaboratorId?: string; readonly displayName?: string; readonly selectedSurface?: string }>(init?.body);
+      return ok({
+        ...session,
+        collaborators: [
+          ...(session.collaborators ?? []).filter(collaborator => collaborator.collaboratorId !== body?.collaboratorId),
+          {
+            collaboratorId: body?.collaboratorId ?? "anonymous",
+            displayName: body?.displayName ?? body?.collaboratorId ?? "anonymous",
+            selectedSurface: body?.selectedSurface ?? "",
+            lastSeenAt: "2026-06-06T00:00:00.000Z"
+          }
+        ]
+      });
+    }
     if (method === "POST" && (path === `/studio/sessions/${encodeURIComponent(session.sessionId)}/intents` || path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/intents`))) {
       return ok(fixtures.intentResponse ?? {
         status: "VALID",
         newRevision: session.sceneRevision + 1,
         updatedCandidateId: session.currentCandidateId,
         requiredSubstratePorts: ["secrets.provider"],
-        warnings: []
+        warnings: [],
+        session: {
+          ...session,
+          sceneRevision: session.sceneRevision + 1
+        }
       });
     }
     if (method === "POST" && (path === `/studio/sessions/${encodeURIComponent(session.sessionId)}/compile` || path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/compile`))) {

@@ -17,6 +17,7 @@ import type {
   StudioLayoutState,
   StudioAssemblySummary,
   DynamicDcpProjectionResponse,
+  HeartbeatCollaboratorRequest,
   ReplacementCandidatesRequest,
   ReplacementCandidatesResponse,
   IntentResponse,
@@ -202,6 +203,21 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(sessionRef.sessionId)}`,
         undefined,
+        tenantHeaders(scope.tenantId)
+      );
+    },
+    heartbeatCollaborator: async (body: HeartbeatCollaboratorRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      return request<StudioDraftSession>(
+        fetchImpl,
+        baseUrl,
+        "POST",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/collaborators/heartbeat`,
+        {
+          collaboratorId: body.collaboratorId,
+          displayName: body.displayName ?? body.collaboratorId,
+          selectedSurface: body.selectedSurface ?? ""
+        },
         tenantHeaders(scope.tenantId)
       );
     },

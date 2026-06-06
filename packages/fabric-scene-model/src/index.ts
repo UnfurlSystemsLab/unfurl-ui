@@ -34,11 +34,28 @@ export type StudioDraftSession = {
   readonly currentCandidateId?: string;
   readonly sceneRevision: number;
   readonly warnings: readonly PlanningWarning[];
+  readonly collaborators?: readonly StudioCollaborator[];
+  readonly intentLog?: readonly StudioIntentRecord[];
 };
 
 export type PlanningWarning = {
   readonly code: string;
   readonly message: string;
+};
+
+export type StudioCollaborator = {
+  readonly collaboratorId: string;
+  readonly displayName: string;
+  readonly selectedSurface: string;
+  readonly lastSeenAt: string;
+};
+
+export type StudioIntentRecord = {
+  readonly revision: number;
+  readonly collaboratorId: string;
+  readonly type: string;
+  readonly payload: Record<string, unknown>;
+  readonly acceptedAt: string;
 };
 
 export type ReadOnlyCompositionInput = {

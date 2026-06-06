@@ -33,6 +33,7 @@ export type DraftWorkspacePanelProps = {
     "loadDynamicDcpProjection" |
     "loadReplacementCandidates" |
     "listCatalogVisuals" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate"
+    | "heartbeatCollaborator"
   >;
   readonly initialTenantId?: string | undefined;
   readonly initialAssemblyId?: string | undefined;
@@ -224,6 +225,37 @@ export function DraftWorkspacePanel({
       window.clearTimeout(handle);
     };
   }, [client, tenantId, assemblyId, activeView, semanticZoomLevel, selectedComponent]);
+
+  const readySession = state?.status === "READY" ? state.session : undefined;
+
+  useEffect(() => {
+    if (!readySession || !client.heartbeatCollaborator) {
+      return;
+    }
+    let cancelled = false;
+    const heartbeat = () => {
+      void client.heartbeatCollaborator?.({
+        tenantId: readySession.tenantId,
+        assemblyId: readySession.assemblyId,
+        sessionId: readySession.sessionId,
+        collaboratorId: "local-operator",
+        displayName: "Local Operator",
+        selectedSurface: selectedComponent
+      }).then(session => {
+        if (!cancelled) {
+          setState(current => current?.status === "READY" ? { ...current, session } : current);
+        }
+      }).catch(() => {
+        // Presence is advisory; revisioned Fabric intents remain authoritative.
+      });
+    };
+    heartbeat();
+    const handle = window.setInterval(heartbeat, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(handle);
+    };
+  }, [client, readySession?.tenantId, readySession?.assemblyId, readySession?.sessionId, selectedComponent]);
 
   function applyLayoutState(layout: LayoutState) {
     setActiveView(layout.activeView);
@@ -987,6 +1019,10 @@ export function DraftWorkspacePanel({
           <span>{state?.status === "READY" ? state.session.sessionId : "not created"}</span>
         </div>
         <div>
+          <strong>Collaborators</strong>
+          <span>{state?.status === "READY" ? collaboratorLabel(state.session.collaborators?.length ?? 0) : "waiting for draft"}</span>
+        </div>
+        <div>
           <strong>Components</strong>
           <span>{draftComponentCount ?? 10}</span>
         </div>
@@ -1522,6 +1558,13 @@ function semanticSceneProjectionKey(projection: SemanticDcpSceneProjection | und
 
 function normalizeLabel(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function collaboratorLabel(count: number): string {
+  if (count <= 0) {
+    return "solo";
+  }
+  return count === 1 ? "1 active" : `${count} active`;
 }
 
 const projectionSurfaceNodeIds: Partial<Record<ThreeAssemblySurfaceId, string>> = {
