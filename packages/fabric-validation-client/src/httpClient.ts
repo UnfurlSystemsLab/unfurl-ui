@@ -12,6 +12,7 @@ import type {
   ListAssembliesResponse,
   SaveDraftRequest,
   SaveDraftResponse,
+  SessionEventsRequest,
   LoadLayoutStateRequest,
   SaveLayoutStateRequest,
   StudioLayoutState,
@@ -220,6 +221,10 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         },
         tenantHeaders(scope.tenantId)
       );
+    },
+    sessionEventsUrl: (body: SessionEventsRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      return `${baseUrl}/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/events`;
     },
     applyIntent: async (body: StudioIntent) =>
       request<IntentResponse>(

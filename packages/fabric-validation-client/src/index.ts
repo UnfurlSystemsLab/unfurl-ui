@@ -279,6 +279,19 @@ export type HeartbeatCollaboratorRequest = {
   readonly selectedSurface?: string;
 };
 
+export type SessionEventsRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly sessionId: string;
+};
+
+export type StudioSessionEvent = {
+  readonly eventId: string;
+  readonly type: "session" | string;
+  readonly session: StudioDraftSession;
+  readonly emittedAt: string;
+};
+
 export type CompileDraftCandidateRequest = {
   readonly tenantId?: string;
   readonly assemblyId?: string;
@@ -421,6 +434,7 @@ export interface StudioFabricClient {
     readonly sessionId: string;
   })) => Promise<StudioDraftSession>;
   readonly heartbeatCollaborator?: (request: HeartbeatCollaboratorRequest) => Promise<StudioDraftSession>;
+  readonly sessionEventsUrl?: (request: SessionEventsRequest) => string;
   readonly applyIntent: (intent: StudioIntent) => Promise<IntentResponse>;
   readonly compileCandidate: (request: CompileDraftCandidateRequest) => Promise<CompileDraftCandidateResponse>;
   readonly resolveDeployment?: (request: ResolveDeploymentRequest) => Promise<ResolveDeploymentResponse>;

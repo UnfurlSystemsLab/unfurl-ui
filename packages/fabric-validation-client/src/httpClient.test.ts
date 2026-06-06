@@ -409,6 +409,24 @@ describe("HTTP Studio Fabric client", () => {
     ]);
   });
 
+  it("builds the server-sent events URL for a scoped draft session", () => {
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local/",
+      defaultTenantId: "tenant-payments",
+      defaultAssemblyId: "assembly-checkout",
+      fetch: fakeFetch([], {})
+    });
+
+    const url = client.sessionEventsUrl?.({
+      sessionId: "studio session/123"
+    });
+
+    assert.equal(
+      url,
+      "http://fabric.local/studio/tenants/tenant-payments/assemblies/assembly-checkout/sessions/studio%20session%2F123/events"
+    );
+  });
+
   it("compiles a draft session through the compile endpoint", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

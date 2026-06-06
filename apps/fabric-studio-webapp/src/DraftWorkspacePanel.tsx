@@ -4,6 +4,7 @@ import {
   DEFAULT_STUDIO_ASSEMBLY_ID,
   DEFAULT_STUDIO_TENANT_ID,
   type DynamicDcpProjectionResponse,
+  type StudioSessionEvent,
   type StudioReplacementCandidate as FabricReplacementCandidate,
   type StudioLayoutState,
   type StudioFabricClient
@@ -33,7 +34,7 @@ export type DraftWorkspacePanelProps = {
     "loadDynamicDcpProjection" |
     "loadReplacementCandidates" |
     "listCatalogVisuals" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate"
-    | "heartbeatCollaborator"
+    | "heartbeatCollaborator" | "sessionEventsUrl"
   >;
   readonly initialTenantId?: string | undefined;
   readonly initialAssemblyId?: string | undefined;
@@ -227,6 +228,29 @@ export function DraftWorkspacePanel({
   }, [client, tenantId, assemblyId, activeView, semanticZoomLevel, selectedComponent]);
 
   const readySession = state?.status === "READY" ? state.session : undefined;
+
+  useEffect(() => {
+    if (!readySession || !client.sessionEventsUrl || typeof EventSource === "undefined") {
+      return;
+    }
+    const source = new EventSource(client.sessionEventsUrl({
+      tenantId: readySession.tenantId,
+      assemblyId: readySession.assemblyId,
+      sessionId: readySession.sessionId
+    }));
+    const updateFromEvent = (event: MessageEvent<string>) => {
+      const payload = JSON.parse(event.data) as StudioSessionEvent;
+      setState(current => current?.status === "READY" ? { ...current, session: payload.session } : current);
+    };
+    source.addEventListener("session", updateFromEvent);
+    source.onerror = () => {
+      source.close();
+    };
+    return () => {
+      source.removeEventListener("session", updateFromEvent);
+      source.close();
+    };
+  }, [client, readySession?.tenantId, readySession?.assemblyId, readySession?.sessionId]);
 
   useEffect(() => {
     if (!readySession || !client.heartbeatCollaborator) {
