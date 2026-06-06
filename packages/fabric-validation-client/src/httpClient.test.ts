@@ -45,6 +45,35 @@ describe("HTTP Studio Fabric client", () => {
     });
   });
 
+  it("sends Studio identity and tenant membership headers when configured", async () => {
+    const calls: HeaderFetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      defaultTenantId: "tenant-payments",
+      userId: "user-1",
+      tenantMemberships: ["tenant-payments", "tenant-risk"],
+      fetch: async (input, init) => {
+        calls.push({ input, headers: init?.headers });
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({ catalogHash: "sha256:catalog", entries: [] })
+        };
+      }
+    });
+
+    await client.listCatalogVisuals();
+
+    assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-payments/catalog");
+    assert.deepEqual(calls[0]?.headers, {
+      "Content-Type": "application/json",
+      "X-Unfurl-Tenant": "tenant-payments",
+      "X-Unfurl-User": "user-1",
+      "X-Unfurl-Tenant-Memberships": "tenant-payments,tenant-risk"
+    });
+  });
+
   it("admits component artifacts through the tenant catalog admission endpoint", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({
@@ -545,6 +574,11 @@ type FetchCall = {
   readonly input: string;
   readonly method: string | undefined;
   readonly body: string | undefined;
+};
+
+type HeaderFetchCall = {
+  readonly input: string;
+  readonly headers: Record<string, string> | undefined;
 };
 
 function fakeFetch(calls: FetchCall[], json: unknown): FetchLike {

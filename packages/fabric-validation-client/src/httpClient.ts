@@ -57,6 +57,13 @@ export type HttpStudioFabricClientOptions = {
   readonly fetch?: FetchLike;
   readonly defaultTenantId?: string;
   readonly defaultAssemblyId?: string;
+  readonly userId?: string;
+  readonly tenantMemberships?: readonly string[];
+};
+
+type HttpStudioAuthContext = {
+  readonly userId?: string;
+  readonly tenantMemberships?: readonly string[];
 };
 
 export function createHttpStudioFabricClient(options: HttpStudioFabricClientOptions): StudioFabricClient {
@@ -69,6 +76,10 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     tenantId: options.defaultTenantId ?? DEFAULT_STUDIO_TENANT_ID,
     assemblyId: options.defaultAssemblyId ?? DEFAULT_STUDIO_ASSEMBLY_ID
   };
+  const authContext: HttpStudioAuthContext = {
+    ...(options.userId ? { userId: options.userId } : {}),
+    ...(options.tenantMemberships?.length ? { tenantMemberships: options.tenantMemberships } : {})
+  };
 
   return {
     listCatalogVisuals: async body => {
@@ -79,7 +90,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "GET",
         `/studio/tenants/${encodeURIComponent(tenantId)}/catalog`,
         undefined,
-        tenantHeaders(tenantId)
+        tenantHeaders(tenantId, authContext)
       );
     },
     admitCatalogArtifacts: async body => {
@@ -90,7 +101,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/catalog/admissions`,
         { ...body, ...scope },
-        tenantHeaders(scope.tenantId)
+        tenantHeaders(scope.tenantId, authContext)
       );
     },
     extractNeeds: async body => {
@@ -101,7 +112,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/needs/extract`,
         { ...body, ...scope },
-        tenantHeaders(scope.tenantId)
+        tenantHeaders(scope.tenantId, authContext)
       );
     },
     listAssemblies: async body => {
@@ -112,7 +123,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "GET",
         `/studio/tenants/${encodeURIComponent(tenantId)}/assemblies`,
         undefined,
-        tenantHeaders(tenantId)
+        tenantHeaders(tenantId, authContext)
       );
     },
     createAssembly: async body => {
@@ -123,7 +134,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "POST",
         `/studio/tenants/${encodeURIComponent(tenantId)}/assemblies`,
         { ...body, tenantId },
-        tenantHeaders(tenantId)
+        tenantHeaders(tenantId, authContext)
       );
     },
     saveDraft: async body => {
@@ -134,7 +145,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/drafts/save`,
         { ...body, ...scope },
-        tenantHeaders(scope.tenantId)
+        tenantHeaders(scope.tenantId, authContext)
       );
     },
     loadLayoutState: async (body?: LoadLayoutStateRequest) => {
@@ -145,7 +156,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/layout`,
         undefined,
-        tenantHeaders(scope.tenantId)
+        tenantHeaders(scope.tenantId, authContext)
       );
     },
     saveLayoutState: async (body: SaveLayoutStateRequest) => {
@@ -156,7 +167,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/layout`,
         { ...body, ...scope },
-        tenantHeaders(scope.tenantId)
+        tenantHeaders(scope.tenantId, authContext)
       );
     },
     loadDynamicDcpProjection: async body => {
@@ -167,7 +178,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/dynamic-dcp`,
         undefined,
-        tenantHeaders(scope.tenantId)
+        tenantHeaders(scope.tenantId, authContext)
       );
     },
     loadReplacementCandidates: async (body: ReplacementCandidatesRequest) => {
@@ -179,7 +190,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/dynamic-dcp/replacements?componentNodeId=${componentNodeId}`,
         undefined,
-        tenantHeaders(scope.tenantId)
+        tenantHeaders(scope.tenantId, authContext)
       );
     },
     loadCompositionView: async (body: LoadCompositionViewRequest) =>
@@ -192,7 +203,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions`,
         { ...body, ...scope },
-        tenantHeaders(scope.tenantId)
+        tenantHeaders(scope.tenantId, authContext)
       );
     },
     getDraftSession: async body => {
@@ -204,7 +215,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(sessionRef.sessionId)}`,
         undefined,
-        tenantHeaders(scope.tenantId)
+        tenantHeaders(scope.tenantId, authContext)
       );
     },
     heartbeatCollaborator: async (body: HeartbeatCollaboratorRequest) => {
@@ -219,7 +230,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
           displayName: body.displayName ?? body.collaboratorId,
           selectedSurface: body.selectedSurface ?? ""
         },
-        tenantHeaders(scope.tenantId)
+        tenantHeaders(scope.tenantId, authContext)
       );
     },
     sessionEventsUrl: (body: SessionEventsRequest) => {
@@ -233,7 +244,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "POST",
         `/studio/tenants/${encodeURIComponent(body.tenantId)}/assemblies/${encodeURIComponent(body.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/intents`,
         body,
-        tenantHeaders(body.tenantId)
+        tenantHeaders(body.tenantId, authContext)
       ),
     compileCandidate: async (body: CompileDraftCandidateRequest) => {
       const scope = resolveScope(defaultScope, body);
@@ -243,7 +254,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/compile`,
         { ...body, ...scope },
-        tenantHeaders(scope.tenantId)
+        tenantHeaders(scope.tenantId, authContext)
       );
     },
     resolveDeployment: async (body: ResolveDeploymentRequest) =>
@@ -255,7 +266,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "GET",
         `/studio/tenants/${encodeURIComponent(defaultScope.tenantId)}/assets/${encodeURIComponent(assetId)}`,
         undefined,
-        tenantHeaders(defaultScope.tenantId)
+        tenantHeaders(defaultScope.tenantId, authContext)
       )
   };
 }
@@ -287,8 +298,17 @@ async function request<T>(
   return response.json() as Promise<T>;
 }
 
-function tenantHeaders(tenantId: string): Record<string, string> {
-  return { "X-Unfurl-Tenant": tenantId };
+function tenantHeaders(
+  tenantId: string,
+  authContext?: HttpStudioAuthContext
+): Record<string, string> {
+  return {
+    "X-Unfurl-Tenant": tenantId,
+    ...(authContext?.userId ? { "X-Unfurl-User": authContext.userId } : {}),
+    ...(authContext?.tenantMemberships?.length
+      ? { "X-Unfurl-Tenant-Memberships": authContext.tenantMemberships.join(",") }
+      : {})
+  };
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
