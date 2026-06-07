@@ -16,6 +16,18 @@ describe("DeploymentPlannerPanel", () => {
     assert.match(html, /Required Substrate Ports/);
     assert.match(html, /Containerized service/);
   });
+
+  it("accepts a sample needs YAML path as planner input", () => {
+    const html = renderToString(
+      <DeploymentPlannerPanel
+        client={fakeClient()}
+        initialNeedsPath="samples/fabric-studio/checkout-needs.yaml"
+      />
+    );
+
+    assert.match(html, /Needs YAML path/);
+    assert.match(html, /value="samples\/fabric-studio\/checkout-needs.yaml"/);
+  });
 });
 
 function fakeClient(): Pick<StudioFabricClient, "resolveDeployment"> {
