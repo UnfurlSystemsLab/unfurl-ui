@@ -1,0 +1,47 @@
+id: needs-checkout-retail
+name: Checkout Retail Needs
+description: Governed checkout composition requirements for a retail commerce target application.
+targetApplication:
+  name: E-Commerce Platform
+  defaultDeploymentTarget: On-Prem Cluster
+requiredCapabilities:
+  - capability: order.create
+    version: ^1
+    required: true
+    reason: Accept checkout submissions from web and mobile clients.
+  - capability: validate.order
+    version: ^1
+    required: true
+    reason: Validate cart, payment, customer, and inventory constraints before fulfillment.
+  - capability: workflow.storage.required
+    version: ^1
+    required: true
+    reason: Persist checkout workflow state with an approved storage adapter.
+  - capability: audit.event.write
+    version: ^1
+    required: true
+    reason: Emit immutable audit events for regulated payment flows.
+preferredCapabilities:
+  - capability: notify.customer
+    version: ^1
+    required: false
+    reason: Send customer confirmation events when a notification adapter is available.
+  - capability: fraud.score
+    version: ^1
+    required: false
+    reason: Prefer a fraud scoring component for high-risk checkout sessions.
+constraints:
+  deploymentTarget: On-Prem Cluster
+  allowedDeploymentShapes:
+    - CONTAINERIZED_SERVICE
+    - SPRING_BOOT_SERVICE
+    - REMOTE_MICROSERVICE
+  requireIsolationForCapabilityPatterns:
+    - payment.*
+    - fraud.*
+  runtime:
+    javaVersion: "21"
+    springBoot: true
+    kubernetes: true
+    serviceMesh: true
+    maxServices: 12
