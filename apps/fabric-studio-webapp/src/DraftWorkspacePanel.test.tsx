@@ -80,12 +80,19 @@ describe("DraftWorkspacePanel", () => {
 
   it("renders a blank assembly for a new draft", () => {
     const html = renderToString(
-      <DraftWorkspacePanel client={client()} initialDraftComponentCount={0} />
+      <DraftWorkspacePanel client={client()} initialDraftComponentCount={0} initialDynamicProjection={projection()} />
     );
 
     assert.match(html, /Empty Assembly/);
     assert.match(html, /Import or add verified catalog components/);
     assert.match(html, /empty governed draft/);
+    assert.match(html, /Draft Inventory/);
+    assert.match(html, /No components added/);
+    assert.match(html, /No substrate ports used/);
+    assert.doesNotMatch(html, /Keyboard-accessible projection synchronized with the 3D assembly/);
+    assert.doesNotMatch(html, /Validation Service.*allowed by Fabric/s);
+    assert.doesNotMatch(html, /Dynamic DCP Projection/);
+    assert.doesNotMatch(html, /Checkout Assembly/);
     assert.match(html, /Components/);
     assert.match(html, /Substrate Ports Used/);
     assert.match(html, /0 \/ 12/);

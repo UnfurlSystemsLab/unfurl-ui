@@ -79,6 +79,12 @@ type TutorialStep = {
   readonly action?: () => void;
 };
 
+type DraftComponentItem = {
+  readonly catalogEntryId: string;
+  readonly label: string;
+  readonly status: "ADDED" | "VALIDATED";
+};
+
 const tutorialStorageKey = "unfurl-studio-workbench-tutorial-dismissed";
 
 export function DraftWorkspacePanel({
@@ -122,7 +128,9 @@ export function DraftWorkspacePanel({
   const [saveDeploymentTarget, setSaveDeploymentTarget] = useState(targetDeploymentTarget);
   const [saveDeploymentShape, setSaveDeploymentShape] = useState("CONTAINERIZED_SERVICE");
   const [saveDraftStatus, setSaveDraftStatus] = useState<string | undefined>();
-  const [draftComponentCount, setDraftComponentCount] = useState<number | undefined>(initialDraftComponentCount);
+  const [draftComponents, setDraftComponents] = useState<readonly DraftComponentItem[] | undefined>(
+    initialDraftComponentCount === 0 ? [] : undefined
+  );
   const [semanticZoomLevel, setSemanticZoomLevel] = useState<SemanticZoomLevel>("ASSEMBLY_DCP");
   const [requestedSemanticZoomLevel, setRequestedSemanticZoomLevel] = useState<SemanticZoomLevel>("ASSEMBLY_DCP");
   const [dynamicProjection, setDynamicProjection] = useState<DynamicDcpProjectionResponse | undefined>(initialDynamicProjection);
@@ -331,7 +339,7 @@ export function DraftWorkspacePanel({
         baseCatalogHash,
         ...(needsId.trim() === "" ? {} : { needsId: needsId.trim() })
       }));
-      setDraftComponentCount(0);
+      setDraftComponents([]);
       setExtractedPartId(undefined);
       selectScenePart({ id: "substrate:base", kind: "substrate", surface: "substrate", label: "Empty assembly base plate" });
     } finally {
@@ -395,8 +403,15 @@ export function DraftWorkspacePanel({
     try {
       setCatalogEntryId(entryId);
       setState(await applyDraftIntent(client, state, { type: "ADD_COMPONENT", catalogEntryId: entryId }));
-      setDraftComponentCount(current => current === undefined ? 1 : current + 1);
-      selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Validation Service" });
+      setDraftComponents(current => [
+        ...(current ?? []),
+        {
+          catalogEntryId: entryId,
+          label: labelForCatalogEntry(entryId),
+          status: "ADDED"
+        }
+      ]);
+      selectScenePart({ id: `component:${slugFromCatalogEntry(entryId)}`, kind: "component", surface: "validation", label: labelForCatalogEntry(entryId) });
     } finally {
       setBusy(false);
     }
@@ -482,8 +497,10 @@ export function DraftWorkspacePanel({
   const selected = inspectorDetails[selectedComponent];
   const ports = useMemo(() => activePorts(catalog[0]), [catalog]);
   const paletteEntries = catalog.length === 0 ? fallbackCatalog() : catalog;
-  const showFallbackAssembly = draftComponentCount === undefined || draftComponentCount > 0;
-  const showEmptyAssembly = draftComponentCount === 0;
+  const draftComponentCount = draftComponents?.length ?? initialDraftComponentCount;
+  const showFallbackAssembly = draftComponents === undefined && (draftComponentCount === undefined || draftComponentCount > 0);
+  const showEmptyAssembly = draftComponents !== undefined && draftComponents.length === 0;
+  const showDraftInventory = draftComponents !== undefined;
   const semanticSceneProjection = useMemo(
     () => dynamicProjection ? toSemanticSceneProjection(dynamicProjection) : undefined,
     [dynamicProjection]
@@ -847,7 +864,51 @@ export function DraftWorkspacePanel({
             )}
           </div>
 
-          {dynamicProjection && (
+          {showDraftInventory ? (
+            <section className="dynamic-dcp-table-panel" aria-label="Draft inventory table view">
+              <div>
+                <strong>Draft Inventory</strong>
+                <span>Components and substrate usage added to this draft session.</span>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Kind</th>
+                    <th scope="col">Name</th>
+                    <th scope="col">Catalog / Port</th>
+                    <th scope="col">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {draftComponents.length === 0 ? (
+                    <>
+                      <tr>
+                        <td>Component</td>
+                        <td>No components added</td>
+                        <td>select a catalog entry and add it to the draft</td>
+                        <td>empty</td>
+                      </tr>
+                      <tr>
+                        <td>Substrate</td>
+                        <td>No substrate ports used</td>
+                        <td>validated connections will appear here</td>
+                        <td>empty</td>
+                      </tr>
+                    </>
+                  ) : (
+                    draftComponents.map(component => (
+                      <tr key={component.catalogEntryId}>
+                        <td>Component</td>
+                        <td>{component.label}</td>
+                        <td>{component.catalogEntryId}</td>
+                        <td>{component.status.toLowerCase()}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </section>
+          ) : dynamicProjection && (
             <section className="dynamic-dcp-table-panel" aria-label="Accessible dynamic DCP table view">
               <div>
                 <strong>2D / Table View</strong>
@@ -878,13 +939,20 @@ export function DraftWorkspacePanel({
 
           <div className="substrate-strip" aria-label="Substrate runtime layer">
             <div className="substrate-label">Substrate Runtime Layer</div>
-            {substrateCapabilities.map(capability => (
-              <button type="button" className={selectedComponent === "substrate" ? "substrate-tile selected" : "substrate-tile"} key={capability.name} onClick={() => selectScenePart({ id: "substrate:base", kind: "substrate", surface: "substrate", label: "Substrate base plate" })}>
-                <span className={`substrate-logo ${capability.status}`}>{capability.short}</span>
-                <strong>{capability.name}</strong>
-                <span className="health-dot" />
-              </button>
-            ))}
+            {showDraftInventory && draftComponents.length === 0 ? (
+              <div className="substrate-empty-state">
+                <strong>No substrate selected</strong>
+                <span>Substrate ports appear after validated component connections.</span>
+              </div>
+            ) : (
+              substrateCapabilities.map(capability => (
+                <button type="button" className={selectedComponent === "substrate" ? "substrate-tile selected" : "substrate-tile"} key={capability.name} onClick={() => selectScenePart({ id: "substrate:base", kind: "substrate", surface: "substrate", label: "Substrate base plate" })}>
+                  <span className={`substrate-logo ${capability.status}`}>{capability.short}</span>
+                  <strong>{capability.name}</strong>
+                  <span className="health-dot" />
+                </button>
+              ))
+            )}
           </div>
         </main>
 
@@ -950,8 +1018,31 @@ export function DraftWorkspacePanel({
             {state?.status === "READY" && state.lastResponse?.status === "INVALID" && <p className="studio-error">{state.lastResponse.reason}: {state.lastResponse.details}</p>}
           </section>
           <section className="inspector-card">
-            <h2>Dynamic DCP Projection</h2>
-            {dynamicProjection ? (
+            <h2>{showDraftInventory ? "Draft Inventory" : "Dynamic DCP Projection"}</h2>
+            {showDraftInventory ? (
+              <>
+                <dl>
+                  <dt>Components</dt><dd>{draftComponents.length}</dd>
+                  <dt>Substrate Ports</dt><dd>0</dd>
+                  <dt>Mode</dt><dd>{draftComponents.length === 0 ? "EMPTY_DRAFT" : "DRAFT_EDIT"}</dd>
+                </dl>
+                <ul>
+                  {draftComponents.length === 0 ? (
+                    <>
+                      <li>No components added</li>
+                      <li>No substrate ports used</li>
+                    </>
+                  ) : (
+                    draftComponents.map(component => (
+                      <li key={component.catalogEntryId}>
+                        <span>{component.label}</span>
+                        <small>{component.catalogEntryId}</small>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </>
+            ) : dynamicProjection ? (
               <>
                 <dl>
                   <dt>Mode</dt><dd>{dynamicProjection.compositionMode}</dd>
@@ -1171,6 +1262,20 @@ function paletteLabel(entry: VisualCatalogEntry | undefined): string {
     return "";
   }
   return entry.catalogEntryId.split(":").slice(1).join(":") || entry.catalogEntryId;
+}
+
+function labelForCatalogEntry(catalogEntryId: string): string {
+  const raw = catalogEntryId.split(":").filter(Boolean).at(-1) ?? catalogEntryId;
+  return raw
+    .replace(/\.[^.]+$/, "")
+    .split(/[-_.]+/)
+    .filter(Boolean)
+    .map(part => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function slugFromCatalogEntry(catalogEntryId: string): string {
+  return catalogEntryId.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "component";
 }
 
 function activePorts(entry: VisualCatalogEntry | undefined): readonly string[] {
