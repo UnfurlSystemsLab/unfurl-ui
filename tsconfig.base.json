@@ -16,6 +16,7 @@
       "@unfurl/fabric-studio-webapp": ["./apps/fabric-studio-webapp/src/index.ts"]
     },
     "strict": true,
+    "types": ["node"],
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
