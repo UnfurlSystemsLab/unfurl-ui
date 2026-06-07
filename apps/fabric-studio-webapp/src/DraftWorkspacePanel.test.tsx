@@ -98,6 +98,53 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /0 \/ 12/);
   });
 
+  it("keeps added draft components isolated from the default assembly projection", () => {
+    const html = renderToString(
+      <DraftWorkspacePanel
+        client={client()}
+        initialDraftComponentCatalogEntryIds={["com.unfurl:storage-s3:1.2.0"]}
+        initialDynamicProjection={projection()}
+      />
+    );
+
+    assert.match(html, /Draft Assembly/);
+    assert.match(html, /Storage S3/);
+    assert.match(html, /com.unfurl:storage-s3:1.2.0/);
+    assert.match(html, /Draft Inventory/);
+    assert.match(html, /No substrate selected/);
+    assert.doesNotMatch(html, /Empty Assembly/);
+    assert.doesNotMatch(html, /API Gateway/);
+    assert.doesNotMatch(html, /Keyboard-accessible projection synchronized with the 3D assembly/);
+    assert.doesNotMatch(html, /Checkout Assembly/);
+    assert.doesNotMatch(html, /Dynamic DCP Projection/);
+    assert.doesNotMatch(html, /Java 21/);
+  });
+
+  it("restores draft inventory after the workspace route remounts", () => {
+    const html = withBrowserStorage(
+      {
+        "unfurl-studio-draft-inventory:tenant-local:assembly-demo": JSON.stringify({
+          components: [
+            {
+              catalogEntryId: "com.unfurl:storage-s3:1.2.0",
+              label: "Storage S3",
+              status: "ADDED"
+            }
+          ]
+        })
+      },
+      () => renderToString(<DraftWorkspacePanel client={client()} initialDynamicProjection={projection()} />)
+    );
+
+    assert.match(html, /Draft Assembly/);
+    assert.match(html, /Storage S3/);
+    assert.match(html, /Draft Inventory/);
+    assert.match(html, /No substrate selected/);
+    assert.doesNotMatch(html, /API Gateway/);
+    assert.doesNotMatch(html, /Checkout Assembly/);
+    assert.doesNotMatch(html, /Dynamic DCP Projection/);
+  });
+
   it("renders Fabric-backed dynamic DCP projection levels", () => {
     const html = renderToString(
       <DraftWorkspacePanel client={client()} initialDynamicProjection={projection()} />
@@ -164,4 +211,28 @@ function projection(): DynamicDcpProjectionResponse {
     ],
     warnings: []
   };
+}
+
+function withBrowserStorage<T>(items: Record<string, string>, render: () => T): T {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      localStorage: {
+        getItem: (key: string) => items[key] ?? null,
+        setItem: (key: string, value: string) => {
+          items[key] = value;
+        }
+      }
+    }
+  });
+  try {
+    return render();
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(globalThis, "window", descriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, "window");
+    }
+  }
 }

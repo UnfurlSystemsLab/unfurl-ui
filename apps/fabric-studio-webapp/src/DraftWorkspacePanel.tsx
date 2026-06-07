@@ -40,6 +40,7 @@ export type DraftWorkspacePanelProps = {
   readonly initialAssemblyId?: string | undefined;
   readonly initialBaseCatalogHash?: string | undefined;
   readonly initialDraftComponentCount?: number | undefined;
+  readonly initialDraftComponentCatalogEntryIds?: readonly string[] | undefined;
   readonly initialDynamicProjection?: DynamicDcpProjectionResponse | undefined;
 };
 
@@ -93,6 +94,7 @@ export function DraftWorkspacePanel({
   initialAssemblyId = DEFAULT_STUDIO_ASSEMBLY_ID,
   initialBaseCatalogHash = "sha256:catalog",
   initialDraftComponentCount,
+  initialDraftComponentCatalogEntryIds,
   initialDynamicProjection
 }: DraftWorkspacePanelProps) {
   const [tenantId, setTenantId] = useState(initialTenantId);
@@ -128,9 +130,20 @@ export function DraftWorkspacePanel({
   const [saveDeploymentTarget, setSaveDeploymentTarget] = useState(targetDeploymentTarget);
   const [saveDeploymentShape, setSaveDeploymentShape] = useState("CONTAINERIZED_SERVICE");
   const [saveDraftStatus, setSaveDraftStatus] = useState<string | undefined>();
-  const [draftComponents, setDraftComponents] = useState<readonly DraftComponentItem[] | undefined>(
-    initialDraftComponentCount === 0 ? [] : undefined
-  );
+  const [draftComponents, setDraftComponents] = useState<readonly DraftComponentItem[] | undefined>(() => {
+    if (initialDraftComponentCatalogEntryIds !== undefined) {
+      return initialDraftComponentCatalogEntryIds.map(catalogEntryId => ({
+        catalogEntryId,
+        label: labelForCatalogEntry(catalogEntryId),
+        status: "ADDED" as const
+      }));
+    }
+    const persistedDraft = readDraftInventoryState(initialTenantId, initialAssemblyId);
+    if (persistedDraft) {
+      return persistedDraft.components;
+    }
+    return initialDraftComponentCount === 0 ? [] : undefined;
+  });
   const [semanticZoomLevel, setSemanticZoomLevel] = useState<SemanticZoomLevel>("ASSEMBLY_DCP");
   const [requestedSemanticZoomLevel, setRequestedSemanticZoomLevel] = useState<SemanticZoomLevel>("ASSEMBLY_DCP");
   const [dynamicProjection, setDynamicProjection] = useState<DynamicDcpProjectionResponse | undefined>(initialDynamicProjection);
@@ -329,6 +342,13 @@ export function DraftWorkspacePanel({
       cancelled = true;
     };
   }, [client, tenantId, assemblyId, selectedPart, dynamicProjection]);
+
+  useEffect(() => {
+    if (draftComponents === undefined) {
+      return;
+    }
+    writeDraftInventoryState(tenantId, assemblyId, { components: draftComponents });
+  }, [tenantId, assemblyId, draftComponents]);
 
   async function create() {
     setBusy(true);
@@ -787,6 +807,31 @@ export function DraftWorkspacePanel({
                 <span>Import or add verified catalog components to begin this draft.</span>
               </div>
             )}
+            {showDraftInventory && draftComponents.length > 0 && (
+              <div className="draft-assembly-surface" aria-label="Draft assembly components">
+                <strong>Draft Assembly</strong>
+                <span>{draftComponents.length} component{draftComponents.length === 1 ? "" : "s"} added to this governed draft.</span>
+                <div className="draft-component-list">
+                  {draftComponents.map(component => (
+                    <button
+                      type="button"
+                      className="draft-component-chip"
+                      key={component.catalogEntryId}
+                      onClick={() => selectScenePart({
+                        id: `component:${slugFromCatalogEntry(component.catalogEntryId)}`,
+                        kind: "component",
+                        surface: "validation",
+                        label: component.label
+                      })}
+                    >
+                      <span className="module-icon purple">{component.label.slice(0, 1) || "C"}</span>
+                      <strong>{component.label}</strong>
+                      <small>{component.catalogEntryId}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {showFallbackAssembly && (
               <>
                 <div className="assembly-cabinet" aria-hidden="true">
@@ -939,7 +984,7 @@ export function DraftWorkspacePanel({
 
           <div className="substrate-strip" aria-label="Substrate runtime layer">
             <div className="substrate-label">Substrate Runtime Layer</div>
-            {showDraftInventory && draftComponents.length === 0 ? (
+            {showDraftInventory ? (
               <div className="substrate-empty-state">
                 <strong>No substrate selected</strong>
                 <span>Substrate ports appear after validated component connections.</span>
@@ -1265,7 +1310,8 @@ function paletteLabel(entry: VisualCatalogEntry | undefined): string {
 }
 
 function labelForCatalogEntry(catalogEntryId: string): string {
-  const raw = catalogEntryId.split(":").filter(Boolean).at(-1) ?? catalogEntryId;
+  const parts = catalogEntryId.split(":").filter(Boolean);
+  const raw = (parts.length >= 3 ? parts.at(-2) : parts.at(-1)) ?? catalogEntryId;
   return raw
     .replace(/\.[^.]+$/, "")
     .split(/[-_.]+/)
@@ -1588,6 +1634,60 @@ type LayoutState = {
   readonly semanticZoomLevel: SemanticZoomLevel;
   readonly selectedSurface: SelectedSurfaceId;
 };
+
+type DraftInventoryState = {
+  readonly components: readonly DraftComponentItem[];
+};
+
+function readDraftInventoryState(tenantId: string, assemblyId: string): DraftInventoryState | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  try {
+    const raw = window.localStorage.getItem(draftInventoryStateKey(tenantId, assemblyId));
+    if (!raw) {
+      return undefined;
+    }
+    const parsed = JSON.parse(raw) as Partial<DraftInventoryState>;
+    if (!Array.isArray(parsed.components)) {
+      return undefined;
+    }
+    const components = parsed.components.flatMap(component => {
+      if (!isDraftComponentItem(component)) {
+        return [];
+      }
+      return [component];
+    });
+    return { components };
+  } catch {
+    return undefined;
+  }
+}
+
+function writeDraftInventoryState(tenantId: string, assemblyId: string, state: DraftInventoryState): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(draftInventoryStateKey(tenantId, assemblyId), JSON.stringify(state));
+  } catch {
+    // Draft inventory persistence is a browser convenience; Fabric remains the source of truth.
+  }
+}
+
+function draftInventoryStateKey(tenantId: string, assemblyId: string): string {
+  return `unfurl-studio-draft-inventory:${tenantId.trim() || DEFAULT_STUDIO_TENANT_ID}:${assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID}`;
+}
+
+function isDraftComponentItem(value: unknown): value is DraftComponentItem {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<DraftComponentItem>;
+  return typeof candidate.catalogEntryId === "string"
+    && typeof candidate.label === "string"
+    && (candidate.status === "ADDED" || candidate.status === "VALIDATED");
+}
 
 function readLayoutState(tenantId: string, assemblyId: string): LayoutState | undefined {
   if (typeof window === "undefined") {

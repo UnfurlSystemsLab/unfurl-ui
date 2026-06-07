@@ -700,6 +700,81 @@ th, td {
   color: #475569;
 }
 
+.draft-assembly-surface {
+  position: absolute;
+  inset: 124px 40px 56px;
+  z-index: 4;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.08) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.08) 1px, transparent 1px),
+    rgba(255, 255, 255, 0.86);
+  background-size: 36px 36px, 36px 36px, auto;
+  padding: 24px;
+  color: #0f172a;
+  box-shadow: 0 22px 54px rgba(15, 23, 42, 0.1);
+}
+
+.draft-assembly-surface > strong {
+  font-size: 18px;
+}
+
+.draft-assembly-surface > span {
+  color: #475569;
+}
+
+.draft-component-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 240px));
+  align-content: start;
+  gap: 12px;
+}
+
+.draft-component-chip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "icon name"
+    "icon catalog";
+  align-items: center;
+  gap: 3px 10px;
+  min-height: 76px;
+  border-color: #bfdbfe;
+  background: rgba(255, 255, 255, 0.9);
+  color: #0f172a;
+  text-align: left;
+}
+
+.draft-component-chip:hover,
+.draft-component-chip:focus-visible {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.draft-component-chip .module-icon {
+  grid-area: icon;
+}
+
+.draft-component-chip strong {
+  grid-area: name;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draft-component-chip small {
+  grid-area: catalog;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .three-assembly-scene {
   position: absolute;
   inset: 0;
@@ -1142,6 +1217,22 @@ th, td {
 .substrate-logo.active { background: #dcfce7; color: #15803d; }
 .substrate-logo.available { background: #dbeafe; color: #1d4ed8; }
 .substrate-logo.missing { background: #fee2e2; color: #b91c1c; }
+
+.substrate-empty-state {
+  display: grid;
+  gap: 4px;
+  min-width: 260px;
+  border: 1px dashed #bfdbfe;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 14px 16px;
+  color: #0f172a;
+}
+
+.substrate-empty-state span {
+  color: #64748b;
+  font-size: 12px;
+}
 
 .health-dot {
   width: 7px;
