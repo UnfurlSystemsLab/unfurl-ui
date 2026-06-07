@@ -12,7 +12,7 @@ export type VisualModel = {
 
 export type FallbackShape = {
   readonly kind: "CUBE" | "SPHERE" | "CYLINDER" | "SHIELD" | "GEAR";
-  readonly category: "STORAGE" | "AUTH" | "AI" | "AUDIT" | "WORKFLOW" | "SUBSTRATE";
+  readonly category: "STORAGE" | "AUTH" | "AI" | "AUDIT" | "WORKFLOW" | "SUBSTRATE" | "COMPONENT";
 };
 
 export type VisualManifestPort = {
@@ -112,7 +112,7 @@ export function validateVisualManifest(value: unknown): VisualManifestValidation
   const fallbackShape = readRecord(value, "fallbackShape", errors);
   if (fallbackShape) {
     requireOneOf(fallbackShape, "kind", ["CUBE", "SPHERE", "CYLINDER", "SHIELD", "GEAR"], "fallbackShape.kind", errors);
-    requireOneOf(fallbackShape, "category", ["STORAGE", "AUTH", "AI", "AUDIT", "WORKFLOW", "SUBSTRATE"], "fallbackShape.category", errors);
+    requireOneOf(fallbackShape, "category", ["STORAGE", "AUTH", "AI", "AUDIT", "WORKFLOW", "SUBSTRATE", "COMPONENT"], "fallbackShape.category", errors);
   }
 
   if (!Array.isArray(value.ports)) {

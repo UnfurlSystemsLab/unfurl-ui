@@ -25,7 +25,7 @@ export function CatalogPalettePanel({ client, tenantId = "tenant-local", assembl
     return () => {
       cancelled = true;
     };
-  }, [client, query, warningsOnly]);
+  }, [client, tenantId, assemblyId, query, warningsOnly]);
 
   function selectArtifacts(files: FileList | null) {
     const names = files ? Array.from(files).map(file => file.name) : [];

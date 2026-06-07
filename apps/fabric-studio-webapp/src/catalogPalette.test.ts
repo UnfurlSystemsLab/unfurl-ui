@@ -68,7 +68,7 @@ describe("catalog palette", () => {
 
 function entry(
   catalogEntryId: string,
-  category: "STORAGE" | "AUTH" | "AI" | "AUDIT" | "WORKFLOW" | "SUBSTRATE",
+  category: "STORAGE" | "AUTH" | "AI" | "AUDIT" | "WORKFLOW" | "SUBSTRATE" | "COMPONENT",
   kind: "CUBE" | "SPHERE" | "CYLINDER" | "SHIELD" | "GEAR",
   warnings: VisualCatalogEntry["warnings"]
 ): VisualCatalogEntry {

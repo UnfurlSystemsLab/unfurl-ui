@@ -278,13 +278,14 @@ export const studioApiExampleAsset: StudioVisualAsset = {
 
 export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): FetchLike {
   const session = fixtures.session ?? studioApiExampleSession;
+  let catalog = fixtures.catalog ?? studioApiExampleCatalog;
   return async (input, init) => {
     const url = new URL(input);
     const method = init?.method ?? "GET";
     const path = url.pathname;
 
     if (method === "GET" && (path === "/studio/catalog" || path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog`)) {
-      return ok(fixtures.catalog ?? studioApiExampleCatalog);
+      return ok(catalog);
     }
     if (method === "POST" && path === "/studio/composition-view") {
       return ok(fixtures.compositionView ?? studioApiExampleCompositionView);
@@ -295,18 +296,26 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     }
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog/admissions`) {
       const body = parseJson<{ readonly assemblyId?: string; readonly artifacts?: readonly { readonly fileName: string }[] }>(init?.body);
+      const results = (body?.artifacts ?? []).map(artifact => ({
+        fileName: artifact.fileName,
+        status: "VERIFIED",
+        catalogEntryId: `uploaded:${artifact.fileName}`,
+        claimHash: `sha256:claim-${artifact.fileName}`,
+        warnings: []
+      }));
+      catalog = {
+        catalogHash: `sha256:catalog-${[...catalog.entries.map(entry => entry.catalogEntryId), ...results.map(result => result.catalogEntryId)].sort().join("|")}`,
+        entries: [
+          ...catalog.entries.filter(entry => !results.some(result => result.catalogEntryId === entry.catalogEntryId)),
+          ...results.map(result => uploadedCatalogEntry(result.catalogEntryId, result.claimHash))
+        ].sort((left, right) => left.catalogEntryId.localeCompare(right.catalogEntryId))
+      };
       return ok(fixtures.admissionResponse ?? {
         tenantId: session.tenantId,
         assemblyId: body?.assemblyId ?? session.assemblyId,
         status: "VERIFIED",
-        results: (body?.artifacts ?? []).map(artifact => ({
-          fileName: artifact.fileName,
-          status: "VERIFIED",
-          catalogEntryId: `uploaded:${artifact.fileName}`,
-          claimHash: `sha256:claim-${artifact.fileName}`,
-          warnings: []
-        })),
-        catalog: fixtures.catalog ?? studioApiExampleCatalog
+        results,
+        catalog
       });
     }
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/needs/extract`) {
@@ -470,6 +479,41 @@ function layout(session: StudioDraftSession): StudioLayoutState {
     selectedSurface: "validation",
     camera: {},
     annotations: []
+  };
+}
+
+function uploadedCatalogEntry(catalogEntryId: string, claimHash: string): VisualCatalogEntry {
+  return {
+    catalogEntryId,
+    claimHash,
+    artifactSha256: `sha256:artifact-${catalogEntryId}`,
+    visualManifest: {
+      fallbackShape: { kind: "CUBE", category: "COMPONENT" },
+      ports: [],
+      interactions: {
+        draggable: true,
+        connectable: true,
+        inspectable: true
+      }
+    },
+    dynamicComposition: {
+      compositionMode: "DYNAMIC",
+      dcpType: "COMPONENT",
+      compatibleDescendants: [],
+      selectionPolicy: {
+        strategy: "POLICY_DRIVEN",
+        rules: []
+      },
+      binding: {
+        mode: "LATE_BOUND",
+        validation: "REQUIRED_BEFORE_ACTIVATION"
+      }
+    },
+    visualIntegrity: {
+      visualManifestHash: `sha256:visual-${catalogEntryId}`,
+      assets: []
+    },
+    warnings: []
   };
 }
 

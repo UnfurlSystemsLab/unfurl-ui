@@ -45,4 +45,20 @@ describe("mock Studio API contract", () => {
     assert.equal(deployment?.status, "RESOLVED");
     assert.equal(asset.sha256, "sha256:storage-s3-model");
   });
+
+  it("adds admitted artifacts to the mock catalog", async () => {
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: createMockStudioApiFetch()
+    });
+
+    const admission = await client.admitCatalogArtifacts?.({
+      artifacts: [{ fileName: "payment.jar" }]
+    });
+    const catalog = await client.listCatalogVisuals();
+
+    assert.equal(admission?.status, "VERIFIED");
+    assert.ok(admission?.catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.jar"));
+    assert.ok(catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.jar"));
+  });
 });
