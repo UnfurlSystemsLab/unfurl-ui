@@ -27,7 +27,6 @@ const ThreeAssemblyScene = lazy(async () => {
 export type DraftWorkspacePanelProps = {
   readonly client: Pick<
     StudioFabricClient,
-    "extractNeeds" |
     "saveDraft" |
     "loadLayoutState" |
     "saveLayoutState" |
@@ -100,14 +99,11 @@ export function DraftWorkspacePanel({
   const [tenantId, setTenantId] = useState(initialTenantId);
   const [assemblyId, setAssemblyId] = useState(initialAssemblyId);
   const [baseCatalogHash, setBaseCatalogHash] = useState(initialBaseCatalogHash);
-  const [needsId, setNeedsId] = useState("");
-  const [targetApplicationName, setTargetApplicationName] = useState("E-Commerce Platform");
-  const [targetDeploymentTarget, setTargetDeploymentTarget] = useState("On-Prem Cluster");
-  const [targetApplicationFiles, setTargetApplicationFiles] = useState<readonly string[]>([]);
-  const [needsExtractionStatus, setNeedsExtractionStatus] = useState<"IDLE" | "READY" | "EXTRACTED">("IDLE");
-  const [catalogEntryId, setCatalogEntryId] = useState("com.unfurl:storage-s3:1.2.0");
-  const [fromPort, setFromPort] = useState("workflow.storage.required");
-  const [toPort, setToPort] = useState("storage-s3.storage.put");
+  const [targetApplicationName, setTargetApplicationName] = useState("unfurl-flow");
+  const [targetDeploymentTarget, setTargetDeploymentTarget] = useState("Customer Runtime Substrate");
+  const [catalogEntryId, setCatalogEntryId] = useState("com.unfurl.flow:orchestrator:0.1.0");
+  const [fromPort, setFromPort] = useState("state-store");
+  const [toPort, setToPort] = useState("postgres-state-store.claim");
   const [sign, setSign] = useState(false);
   const [busy, setBusy] = useState(false);
   const [state, setState] = useState<DraftWorkspaceState | undefined>();
@@ -118,7 +114,7 @@ export function DraftWorkspacePanel({
     id: "component:validation",
     kind: "component",
     surface: "validation",
-    label: "Validation Service"
+    label: "Flow Orchestrator"
   });
   const [extractedPartId, setExtractedPartId] = useState<string | undefined>();
   const [replacementEntryId, setReplacementEntryId] = useState("com.unfurl:validation-service:1.1.0");
@@ -158,8 +154,8 @@ export function DraftWorkspacePanel({
         if (!cancelled) {
           setBaseCatalogHash(current => current === "sha256:catalog" ? response.catalogHash : current);
           setCatalog(response.entries);
-          setCatalogEntryId(response.entries[0]?.catalogEntryId ?? "com.unfurl:storage-s3:1.2.0");
-          setReplacementEntryId(response.entries[0]?.catalogEntryId ?? "com.unfurl:validation-service:1.1.0");
+          setCatalogEntryId(response.entries[0]?.catalogEntryId ?? "com.unfurl.flow:orchestrator:0.1.0");
+          setReplacementEntryId(response.entries[0]?.catalogEntryId ?? "com.unfurl.flow:orchestrator:0.1.0");
         }
       })
       .catch(error => {
@@ -357,7 +353,6 @@ export function DraftWorkspacePanel({
         tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
         assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID,
         baseCatalogHash,
-        ...(needsId.trim() === "" ? {} : { needsId: needsId.trim() })
       }));
       setDraftComponents([]);
       setExtractedPartId(undefined);
@@ -365,29 +360,6 @@ export function DraftWorkspacePanel({
     } finally {
       setBusy(false);
     }
-  }
-
-  function loadTargetApplication(files: FileList | null) {
-    const names = files ? Array.from(files).map(file => file.name) : [];
-    setTargetApplicationFiles(names);
-    setNeedsExtractionStatus(names.length === 0 ? "IDLE" : "READY");
-  }
-
-  async function extractNeeds() {
-    const normalizedAssembly = assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID;
-    if (client.extractNeeds) {
-      const response = await client.extractNeeds({
-        tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
-        assemblyId: normalizedAssembly,
-        targetApplicationName,
-        fileNames: targetApplicationFiles,
-        defaultDeploymentTarget: targetDeploymentTarget
-      });
-      setNeedsId(response.needsId);
-    } else {
-      setNeedsId(`${normalizedAssembly}-extracted-needs`);
-    }
-    setNeedsExtractionStatus("EXTRACTED");
   }
 
   function openSaveDraft() {
@@ -402,7 +374,7 @@ export function DraftWorkspacePanel({
         tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
         assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID,
         targetApplicationName,
-        needsId,
+        needsId: "",
         deploymentTarget: saveDeploymentTarget,
         deploymentShape: saveDeploymentShape,
         ...(readySession?.currentCandidateId === undefined ? {} : { currentCandidateId: readySession.currentCandidateId }),
@@ -417,6 +389,12 @@ export function DraftWorkspacePanel({
 
   async function addComponent(entryId = catalogEntryId) {
     if (!state) {
+      return;
+    }
+    if (!knownCatalogEntryIds.has(entryId)) {
+      // Component not in live catalog — UI buttons should already be disabled
+      // for these ids; this guard catches programmatic / replay callers.
+      setCatalogError(`Component '${entryId}' is not in the catalog`);
       return;
     }
     setBusy(true);
@@ -499,6 +477,10 @@ export function DraftWorkspacePanel({
     if (state?.status !== "READY" || selectedPart.kind !== "component" || selectedReplacement?.status !== "ALLOWED") {
       return;
     }
+    if (!knownCatalogEntryIds.has(replacementEntryId)) {
+      setCatalogError(`Replacement '${replacementEntryId}' is not in the catalog`);
+      return;
+    }
     setBusy(true);
     try {
       setState(await applyDraftIntent(client, state, {
@@ -517,6 +499,15 @@ export function DraftWorkspacePanel({
   const selected = inspectorDetails[selectedComponent];
   const ports = useMemo(() => activePorts(catalog[0]), [catalog]);
   const paletteEntries = catalog.length === 0 ? fallbackCatalog() : catalog;
+  // Defence-in-depth: only catalog-registered entries are assemblable. Buttons
+  // outside this set are disabled in the UI; the backend rejects the same
+  // intents with CATALOG_ENTRY_NOT_FOUND. Derived from the LIVE catalog (not
+  // paletteEntries) — when the live catalog is empty we render fallback
+  // entries for orientation but they cannot be added.
+  const knownCatalogEntryIds = useMemo(
+    () => new Set(catalog.map(entry => entry.catalogEntryId)),
+    [catalog]
+  );
   const draftComponentCount = draftComponents?.length ?? initialDraftComponentCount;
   const showFallbackAssembly = draftComponents === undefined && (draftComponentCount === undefined || draftComponentCount > 0);
   const showEmptyAssembly = draftComponents !== undefined && draftComponents.length === 0;
@@ -542,7 +533,7 @@ export function DraftWorkspacePanel({
           Before you compile, set up a{" "}
           <a href="/components/fabric-studio/help#scanned-catalog">scanned catalog</a>,{" "}
           <a href="/components/fabric-studio/help#component-claims">component claims</a>,{" "}
-          <a href="/components/fabric-studio/help#needs">needs</a>,{" "}
+          <a href="/components/fabric-studio/help#substrate-profile">substrate profile</a>,{" "}
           <a href="/components/fabric-studio/help#trust-policy">trust policy</a>, and{" "}
           <a href="/components/fabric-studio/help#deployment-policy">deployment policy</a>.
         </>
@@ -566,7 +557,7 @@ export function DraftWorkspacePanel({
       title: "Select real scene parts",
       body: "Components, pipes, connectors, and the substrate base are selectable. The inspector changes based on the selected part.",
       target: "inspector",
-      action: () => selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Validation Service" })
+      action: () => selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Flow Orchestrator" })
     },
     {
       id: "takeout",
@@ -574,7 +565,7 @@ export function DraftWorkspacePanel({
       body: "Take Out is visual-only: it helps inspection without changing the CompositionContract or SubstrateProfile.",
       target: "inspector",
       action: () => {
-        selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Validation Service" });
+        selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Flow Orchestrator" });
         setExtractedPartId("component:validation");
       }
     },
@@ -584,7 +575,7 @@ export function DraftWorkspacePanel({
       body: "Allowed and blocked replacements are explained here. Validate & Replace sends a Fabric intent; Studio never swaps blindly.",
       target: "replacement",
       action: () => {
-        selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Validation Service" });
+        selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Flow Orchestrator" });
         setActiveInspectorTab("Properties");
       }
     },
@@ -648,7 +639,7 @@ export function DraftWorkspacePanel({
         <div className="workbench-breadcrumbs">
           <span>Studio</span>
           <span>Compositions</span>
-          <strong>E-Commerce Platform</strong>
+          <strong>unfurl-flow</strong>
         </div>
         <div className="workbench-view-tabs" aria-label="Workbench views">
           {["Assembly", "Exploded", "Ports", "Substrate", "Validation"].map(view => (
@@ -689,46 +680,29 @@ export function DraftWorkspacePanel({
           </label>
           <div className="target-app-loader">
             <label>
-              Target application
+              Target runtime
               <input value={targetApplicationName} onChange={event => setTargetApplicationName(event.target.value)} />
             </label>
             <label>
-              Default deployment
+              Substrate target
               <input value={targetDeploymentTarget} onChange={event => setTargetDeploymentTarget(event.target.value)} />
             </label>
-            <label>
-              Load target app
-              <input
-                type="file"
-                multiple
-                accept=".yaml,.yml,.json"
-                onChange={event => loadTargetApplication(event.currentTarget.files)}
-              />
-            </label>
             <div className="summary-row">
-              <span>target: {targetApplicationName}</span>
-              <span>deployment: {targetDeploymentTarget}</span>
-              <span>files: {targetApplicationFiles.length}</span>
-              <span>needs: {needsExtractionText(needsExtractionStatus)}</span>
+              <span>runtime: {targetApplicationName}</span>
+              <span>substrate: {targetDeploymentTarget}</span>
+              <span>profile mode: STRICT</span>
             </div>
-            <button type="button" className="secondary" disabled={targetApplicationFiles.length === 0} onClick={() => void extractNeeds()}>
-              Extract Needs
-            </button>
           </div>
-          <label>
-            Needs ID
-            <input value={needsId} onChange={event => setNeedsId(event.target.value)} />
-          </label>
           <label>
             Catalog hash
             <input value={baseCatalogHash} onChange={event => setBaseCatalogHash(event.target.value)} />
           </label>
           {catalogError && <p className="live-data-notice">Live catalog unavailable; showing generated fallback.</p>}
           <div className="palette-list grouped">
-            <CatalogGroup title="Application Services" entries={paletteEntries} busy={busy} ready={state?.status === "READY"} onSelect={entryId => void addComponent(entryId)} />
-            <StaticCatalogGroup title="Adapters" names={["Stripe Adapter", "SendGrid Adapter", "Twilio Adapter", "Salesforce Adapter"]} />
-            <StaticCatalogGroup title="Infrastructure Services" names={["PostgreSQL Database", "Redis Cache", "Kafka Broker", "Object Storage"]} />
-            <StaticCatalogGroup title="Libraries" names={["Common Library", "Security Library", "ML Inference Library"]} />
+            <CatalogGroup title="Flow Components" entries={paletteEntries} busy={busy} ready={state?.status === "READY"} knownCatalogEntryIds={knownCatalogEntryIds} onSelect={entryId => void addComponent(entryId)} />
+            <StaticCatalogGroup title="Adapters" names={["Postgres State Store", "Kafka Event Sink", "HTTP Connector", "Foundry Agent Runtime"]} />
+            <StaticCatalogGroup title="Substrate Ports" names={["Java Runtime", "Secrets Provider", "Telemetry OTEL", "Container Scheduler"]} />
+            <StaticCatalogGroup title="Libraries" names={["Substrate Engine", "DCP Contracts", "Definition Registry"]} />
           </div>
           <div className="drop-target">Drag component here to add to composition</div>
         </aside>
@@ -770,16 +744,25 @@ export function DraftWorkspacePanel({
           </div>
 
             <div className={`composition-plane ${viewClassName(activeView)} ${showEmptyAssembly ? "empty-assembly-plane" : ""}`}>
-              {showFallbackAssembly && (
+              {(showFallbackAssembly || draftComponents !== undefined) && (
                 <Suspense fallback={<div className="three-assembly-scene" aria-label="3D assembly scene" />}>
                 <ThreeAssemblyScene
-                  key={semanticSceneProjectionKey(semanticSceneProjection)}
+                  // No `key` prop here: ThreeAssemblyScene's effect is
+                  // mount-once now and swaps the DCP sub-groups in place
+                  // when semanticProjection changes. Forcing a remount on
+                  // every projection change rebuilt the entire WebGL
+                  // scene + textures — exactly what we were eliminating.
                   activeView={activeView}
                   selectedSurface={selectedComponent}
                   selectedPartId={selectedPart.id}
                   extractedPartId={extractedPartId}
                   semanticProjection={semanticSceneProjection}
                   requestedSemanticZoomLevel={requestedSemanticZoomLevel}
+                  // draftComponents being defined means the scene is now
+                  // mirroring real assembly state: slot N is visible iff
+                  // index N < draftComponentCount. `undefined` (initial
+                  // demo state) preserves the original all-slots view.
+                  draftComponentCount={draftComponents === undefined ? undefined : draftComponents.length}
                   onSelect={setSelectedComponent}
                   onSelectPart={selectScenePart}
                   onViewChange={setActiveView}
@@ -848,60 +831,60 @@ export function DraftWorkspacePanel({
                   <path className="pipe pipe-pending" d="M312 382 C410 450 510 464 610 542" />
                 </svg>
 
-                <button type="button" className={moduleClass("component-module gateway-module", selectedComponent, "gateway")} onClick={() => selectScenePart({ id: "component:gateway", kind: "component", surface: "gateway", label: "API Gateway" })}>
+                <button type="button" className={moduleClass("component-module gateway-module", selectedComponent, "gateway")} onClick={() => selectScenePart({ id: "component:gateway", kind: "component", surface: "gateway", label: "Flow API" })}>
                   <span className="module-icon green">N</span>
-                  <strong>API Gateway</strong>
+                  <strong>Flow API</strong>
                   <span className="module-status">Included</span>
                 </button>
-                <button type="button" className={moduleClass("component-module order-module", selectedComponent, "order")} onClick={() => selectScenePart({ id: "component:order", kind: "component", surface: "order", label: "Order Service" })}>
+                <button type="button" className={moduleClass("component-module order-module", selectedComponent, "order")} onClick={() => selectScenePart({ id: "component:order", kind: "component", surface: "order", label: "Trigger Ingress" })}>
                   <span className="module-icon leaf">S</span>
-                  <strong>Order Service</strong>
+                  <strong>Trigger Ingress</strong>
                   <span className="port-dot right" />
                   <span className="port-dot bottom" />
                 </button>
-                <button type="button" className={moduleClass("component-module inventory-module", selectedComponent, "inventory")} onClick={() => selectScenePart({ id: "component:inventory", kind: "component", surface: "inventory", label: "Inventory Service" })}>
+                <button type="button" className={moduleClass("component-module inventory-module", selectedComponent, "inventory")} onClick={() => selectScenePart({ id: "component:inventory", kind: "component", surface: "inventory", label: "Definition Registry" })}>
                   <span className="module-icon leaf">S</span>
-                  <strong>Inventory Service</strong>
+                  <strong>Definition Registry</strong>
                   <span className="port-dot left" />
                   <span className="port-dot right" />
                 </button>
-                <button type="button" className={moduleClass("component-module validation-module", selectedComponent, "validation")} onClick={() => selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Validation Service" })}>
+                <button type="button" className={moduleClass("component-module validation-module", selectedComponent, "validation")} onClick={() => selectScenePart({ id: "component:validation", kind: "component", surface: "validation", label: "Flow Orchestrator" })}>
                   <span className="module-icon purple">V</span>
-                  <strong>Validation Service</strong>
-                  <span className="port-handle offer-port">{ports[0] ?? "validate.order"}</span>
+                  <strong>Flow Orchestrator</strong>
+                  <span className="port-handle offer-port">{ports[0] ?? "workflow.execute"}</span>
                   <span className="port-handle dependency-port">{fromPort}</span>
                   <span className="port-dot left" />
                   <span className="port-dot right" />
                   <span className="port-dot bottom" />
                 </button>
-                <button type="button" className={moduleClass("component-module payment-module", selectedComponent, "payment")} onClick={() => selectScenePart({ id: "component:payment", kind: "component", surface: "payment", label: "Payment Service" })}>
+                <button type="button" className={moduleClass("component-module payment-module", selectedComponent, "payment")} onClick={() => selectScenePart({ id: "component:payment", kind: "component", surface: "payment", label: "Distributed Worker" })}>
                   <span className="module-icon leaf">P</span>
-                  <strong>Payment Service</strong>
+                  <strong>Distributed Worker</strong>
                   <span className="port-dot left" />
                 </button>
-                <button type="button" className={moduleClass("component-module audit-module", selectedComponent, "audit")} onClick={() => selectScenePart({ id: "component:audit", kind: "component", surface: "audit", label: "Audit Service" })}>
+                <button type="button" className={moduleClass("component-module audit-module", selectedComponent, "audit")} onClick={() => selectScenePart({ id: "component:audit", kind: "component", surface: "audit", label: "Audit Sink" })}>
                   <span className="module-icon blue">A</span>
-                  <strong>Audit Service</strong>
+                  <strong>Audit Sink</strong>
                   <span className="port-dot right" />
                 </button>
-                <button type="button" className={moduleClass("component-module notification-module", selectedComponent, "notification")} onClick={() => selectScenePart({ id: "component:notification", kind: "component", surface: "notification", label: "Notification Service" })}>
+                <button type="button" className={moduleClass("component-module notification-module", selectedComponent, "notification")} onClick={() => selectScenePart({ id: "component:notification", kind: "component", surface: "notification", label: "Event Sink" })}>
                   <span className="module-icon orange">F</span>
-                  <strong>Notification Service</strong>
+                  <strong>Event Sink</strong>
                   <span className="port-dot right" />
                 </button>
-                <button type="button" className={moduleClass("component-module workflow-module", selectedComponent, "workflow")} onClick={() => selectScenePart({ id: "component:workflow", kind: "component", surface: "workflow", label: "Workflow Service" })}>
+                <button type="button" className={moduleClass("component-module workflow-module", selectedComponent, "workflow")} onClick={() => selectScenePart({ id: "component:workflow", kind: "component", surface: "workflow", label: "Reference Resolver" })}>
                   <span className="module-icon blue">W</span>
-                  <strong>Workflow Service</strong>
+                  <strong>Reference Resolver</strong>
                   <span className="port-dot bottom" />
                 </button>
-                <button type="button" className={moduleClass("component-module adapter-module", selectedComponent, "adapter")} onClick={() => selectScenePart({ id: "component:adapter", kind: "component", surface: "adapter", label: "Storage Adapter" })}>
+                <button type="button" className={moduleClass("component-module adapter-module", selectedComponent, "adapter")} onClick={() => selectScenePart({ id: "component:adapter", kind: "component", surface: "adapter", label: "State Store Adapter" })}>
                   <span className="module-icon red">S</span>
-                  <strong>Storage Adapter</strong>
+                  <strong>State Store Adapter</strong>
                   <span className="port-dot bottom" />
                 </button>
-                <button type="button" className={moduleClass("exploded-module", selectedComponent, "validation")} onClick={() => selectScenePart({ id: "component:validation:exploded", kind: "component", surface: "validation", label: "Validation Service exploded inspection" })}>
+                <button type="button" className={moduleClass("exploded-module", selectedComponent, "validation")} onClick={() => selectScenePart({ id: "component:validation:exploded", kind: "component", surface: "validation", label: "Flow Orchestrator exploded inspection" })}>
                   <span className="module-icon purple">V</span>
-                  <strong>Validation Service</strong>
+                  <strong>Flow Orchestrator</strong>
                   <span>Exploded inspection</span>
                   <span className="port-rack" />
                 </button>
@@ -1054,9 +1037,12 @@ export function DraftWorkspacePanel({
                 </button>
               ))}
             </div>
-            <button type="button" disabled={busy || state?.status !== "READY" || selectedPart.kind !== "component" || selectedReplacement?.status !== "ALLOWED"} onClick={replaceSelectedComponent}>
+            <button type="button" disabled={busy || state?.status !== "READY" || selectedPart.kind !== "component" || selectedReplacement?.status !== "ALLOWED" || !knownCatalogEntryIds.has(replacementEntryId)} onClick={replaceSelectedComponent}>
               Validate & Replace
             </button>
+            {state?.status === "READY" && replacementEntryId !== "" && !knownCatalogEntryIds.has(replacementEntryId) && (
+              <p className="studio-error">Replacement candidate '{replacementEntryId}' is not in the live catalog and cannot be applied.</p>
+            )}
             {selectedReplacement?.status === "BLOCKED" && <p className="studio-error">{selectedReplacement.reason}</p>}
             {replacementCandidateError && <p className="studio-error">{replacementCandidateError}</p>}
             {state?.status !== "READY" && <p className="live-data-notice">Create a draft before governed replacements are allowed.</p>}
@@ -1237,29 +1223,35 @@ function CatalogGroup({
   entries,
   ready,
   busy,
+  knownCatalogEntryIds,
   onSelect
 }: {
   readonly title: string;
   readonly entries: readonly VisualCatalogEntry[];
   readonly ready: boolean;
   readonly busy: boolean;
+  readonly knownCatalogEntryIds: ReadonlySet<string>;
   readonly onSelect: (entryId: string) => void;
 }) {
   return (
     <section className="catalog-group">
       <h3>{title}</h3>
-      {entries.map((entry, index) => (
-        <button
-          type="button"
-          className={index === 0 ? "catalog-row active" : "catalog-row"}
-          key={entry.catalogEntryId}
-          onClick={() => onSelect(entry.catalogEntryId)}
-          disabled={!ready || busy}
-        >
-          <span className="catalog-glyph purple">{entry.visualManifest?.fallbackShape.kind.slice(0, 1) ?? "C"}</span>
-          {paletteLabel(entry)}
-        </button>
-      ))}
+      {entries.map((entry, index) => {
+        const inCatalog = knownCatalogEntryIds.has(entry.catalogEntryId);
+        return (
+          <button
+            type="button"
+            className={index === 0 ? "catalog-row active" : "catalog-row"}
+            key={entry.catalogEntryId}
+            onClick={() => onSelect(entry.catalogEntryId)}
+            disabled={!ready || busy || !inCatalog}
+            title={inCatalog ? undefined : "Not in the live catalog; admit it before assembly"}
+          >
+            <span className="catalog-glyph purple">{entry.visualManifest?.fallbackShape.kind.slice(0, 1) ?? "C"}</span>
+            {paletteLabel(entry)}
+          </button>
+        );
+      })}
     </section>
   );
 }
@@ -1395,15 +1387,15 @@ function moduleClass(baseClass: string, selected: SelectedSurfaceId, surface: Se
 function fallbackCatalog(): readonly VisualCatalogEntry[] {
   return [
     {
-      catalogEntryId: "com.unfurl:validation-service:1.1.0",
-      claimHash: "sha256:claim-validation-service",
-      artifactSha256: "sha256:artifact-validation-service",
+      catalogEntryId: "com.unfurl.flow:orchestrator:0.1.0",
+      claimHash: "sha256:claim-flow-orchestrator",
+      artifactSha256: "sha256:artifact-flow-orchestrator",
       visualManifest: {
         fallbackShape: { kind: "CUBE", category: "WORKFLOW" },
         ports: [],
         interactions: { draggable: true, connectable: true, inspectable: true }
       },
-      visualIntegrity: { visualManifestHash: "sha256:visual-validation-service", assets: [] },
+      visualIntegrity: { visualManifestHash: "sha256:visual-flow-orchestrator", assets: [] },
       warnings: []
     }
   ];
@@ -1411,148 +1403,148 @@ function fallbackCatalog(): readonly VisualCatalogEntry[] {
 
 const inspectorDetails: Record<SelectedSurfaceId, InspectorDetails> = {
   gateway: {
-    name: "API Gateway",
+    name: "Flow API",
     icon: "N",
     iconClass: "green",
-    type: "Application Edge",
+    type: "Runtime API",
     version: "1.4.0",
     owner: "platform-team",
     status: "Included",
-    description: "Routes external commerce traffic into the governed service composition.",
+    description: "Exposes workflow.execute and workflow.resolve for governed runtime invocation.",
     bindingMode: "SERVICE",
     deploymentShape: "CONTAINER",
-    substrateTarget: "On-Prem Cluster",
+    substrateTarget: "Customer Runtime Substrate",
     isolationPattern: "STRICT",
-    providedPorts: ["http.route", "auth.forward"],
-    requiredPorts: ["validation.order", "payment.authorize"]
+    providedPorts: ["workflow.execute", "workflow.resolve"],
+    requiredPorts: ["identity-context", "event-sink"]
   },
   order: {
-    name: "Order Service",
+    name: "Trigger Ingress",
     icon: "S",
     iconClass: "leaf",
-    type: "Application Service",
+    type: "Flow Component",
     version: "2.0.0",
-    owner: "orders-team",
+    owner: "flow-team",
     status: "Included",
-    description: "Owns order intake and coordinates validation, inventory, and payment steps.",
+    description: "Creates workflow executions from webhook, poll, and schedule triggers.",
     bindingMode: "SERVICE",
     deploymentShape: "CONTAINER",
-    substrateTarget: "On-Prem Cluster",
+    substrateTarget: "Customer Runtime Substrate",
     isolationPattern: "STRICT",
-    providedPorts: ["order.create", "order.query"],
-    requiredPorts: ["validate.order", "inventory.reserve", "payment.authorize"]
+    providedPorts: ["trigger.fire", "workflow.start"],
+    requiredPorts: ["state-store", "connector-call", "identity-context"]
   },
   inventory: {
-    name: "Inventory Service",
+    name: "Definition Registry",
     icon: "S",
     iconClass: "leaf",
-    type: "Application Service",
+    type: "Flow Component",
     version: "1.8.2",
-    owner: "inventory-team",
+    owner: "flow-team",
     status: "Included",
-    description: "Checks item availability and reserves stock for validated orders.",
+    description: "Provides workflow, prompt, tool, agent, and subgraph definitions to the resolver.",
     bindingMode: "SERVICE",
     deploymentShape: "CONTAINER",
-    substrateTarget: "On-Prem Cluster",
+    substrateTarget: "Customer Runtime Substrate",
     isolationPattern: "STRICT",
-    providedPorts: ["inventory.reserve", "inventory.release"],
-    requiredPorts: ["db.query", "event.publish"]
+    providedPorts: ["definition.lookup", "definition.version"],
+    requiredPorts: ["state-store", "secrets.provider"]
   },
   validation: {
-    name: "Validation Service",
+    name: "Flow Orchestrator",
     icon: "V",
     iconClass: "purple",
-    type: "Application Service",
+    type: "Orchestration Component",
     version: "1.1.0",
-    owner: "payments-team",
+    owner: "flow-team",
     status: "Valid",
-    description: "Validates orders, inventory, and payment requests using business rules and customer policies.",
+    description: "Owns deterministic DAG scheduling, readiness, retries, async wait/resume, and run envelopes.",
     bindingMode: "SERVICE",
     deploymentShape: "CONTAINER",
-    substrateTarget: "On-Prem Cluster",
+    substrateTarget: "Customer Runtime Substrate",
     isolationPattern: "STRICT",
-    providedPorts: ["validate.order", "validate.payment", "validate.inventory"],
-    requiredPorts: ["customer.query", "policy.evaluate", "rules.fetch"]
+    providedPorts: ["node.dispatch", "workflow.state.transition", "workflow.status"],
+    requiredPorts: ["state-store", "event-sink", "capability-registry"]
   },
   payment: {
-    name: "Payment Service",
+    name: "Distributed Worker",
     icon: "P",
     iconClass: "leaf",
-    type: "Application Service",
+    type: "Flow Component",
     version: "1.6.0",
-    owner: "payments-team",
+    owner: "flow-team",
     status: "Included",
-    description: "Authorizes and captures payments after validation and order checks pass.",
+    description: "Claims leased nodes from the durable floor and invokes the bound component adapters.",
     bindingMode: "SERVICE",
     deploymentShape: "CONTAINER",
-    substrateTarget: "On-Prem Cluster",
+    substrateTarget: "Customer Runtime Substrate",
     isolationPattern: "STRICT",
-    providedPorts: ["payment.authorize", "payment.capture"],
-    requiredPorts: ["validate.payment", "vault.secret"]
+    providedPorts: ["node.execute", "node.complete"],
+    requiredPorts: ["state-store", "event-sink", "connector-call"]
   },
   audit: {
-    name: "Audit Service",
+    name: "Audit Sink",
     icon: "A",
     iconClass: "blue",
     type: "Compliance Service",
     version: "1.2.3",
     owner: "risk-team",
     status: "Included",
-    description: "Records signed decision and runtime events for compliance review.",
+    description: "Receives append-only workflow and node events for compliance review.",
     bindingMode: "EVENT",
     deploymentShape: "CONTAINER",
-    substrateTarget: "On-Prem Cluster",
+    substrateTarget: "Customer Runtime Substrate",
     isolationPattern: "STRICT",
-    providedPorts: ["audit.write", "audit.query"],
-    requiredPorts: ["event.publish"]
+    providedPorts: ["audit-sink.write", "audit-sink.query"],
+    requiredPorts: ["event-sink"]
   },
   notification: {
-    name: "Notification Service",
+    name: "Event Sink",
     icon: "F",
     iconClass: "orange",
-    type: "Application Service",
+    type: "Substrate Adapter",
     version: "1.0.5",
-    owner: "customer-exp-team",
+    owner: "platform-team",
     status: "Included",
-    description: "Sends order lifecycle notifications after workflow checkpoints complete.",
+    description: "Persists ordered workflow events through the selected substrate adapter.",
     bindingMode: "EVENT",
     deploymentShape: "CONTAINER",
-    substrateTarget: "On-Prem Cluster",
+    substrateTarget: "Customer Runtime Substrate",
     isolationPattern: "STRICT",
-    providedPorts: ["notify.email", "notify.sms"],
-    requiredPorts: ["event.consume"]
+    providedPorts: ["event-sink.append", "event-sink.replay"],
+    requiredPorts: ["kafka.producer", "telemetry.otel"]
   },
   workflow: {
-    name: "Workflow Service",
+    name: "Reference Resolver",
     icon: "W",
     iconClass: "blue",
     type: "Orchestration Service",
     version: "2.3.0",
     owner: "platform-team",
     status: "Included",
-    description: "Coordinates the e-commerce composition and enforces ordered execution.",
+    description: "Resolves agentRef, toolRef, promptRef, and subgraphRef nodes into provenance-preserving workflow YAML.",
     bindingMode: "SERVICE",
     deploymentShape: "CONTAINER",
-    substrateTarget: "On-Prem Cluster",
+    substrateTarget: "Customer Runtime Substrate",
     isolationPattern: "STRICT",
-    providedPorts: ["workflow.start", "workflow.status"],
-    requiredPorts: ["order.create", "audit.write", "event.publish"]
+    providedPorts: ["workflow.resolve", "reference.provenance"],
+    requiredPorts: ["definition-registry", "foundry-agent-runtime", "tool-registry"]
   },
   adapter: {
-    name: "Storage Adapter",
+    name: "State Store Adapter",
     icon: "S",
     iconClass: "red",
     type: "Adapter",
     version: "1.3.1",
     owner: "platform-team",
     status: "Warning",
-    description: "Binds object storage operations to the substrate target selected by policy.",
+    description: "Binds Flow's durable state store to a closed-world substrate port.",
     bindingMode: "SERVICE",
     deploymentShape: "SIDECAR",
-    substrateTarget: "On-Prem Cluster",
+    substrateTarget: "Customer Runtime Substrate",
     isolationPattern: "STRICT",
-    providedPorts: ["storage.put", "storage.get"],
-    requiredPorts: ["vault.secret", "storage.blob"]
+    providedPorts: ["state-store.claim", "state-store.checkpoint"],
+    requiredPorts: ["postgres.jdbc", "secrets.provider"]
   },
   substrate: {
     name: "Substrate Base Plate",
@@ -1565,7 +1557,7 @@ const inspectorDetails: Record<SelectedSurfaceId, InspectorDetails> = {
     description: "Closed-world runtime layer containing only the substrate capabilities required by the derived profile.",
     bindingMode: "SUBSTRATE",
     deploymentShape: "RUNTIME",
-    substrateTarget: "On-Prem Cluster",
+    substrateTarget: "Customer Runtime Substrate",
     isolationPattern: "STRICT",
     providedPorts: ["db.query", "event.publish", "vault.secret", "telemetry.otel", "container.schedule"],
     requiredPorts: []
@@ -1586,17 +1578,6 @@ function toolGlyph(tool: string): string {
     Measure: "MEA",
     "Reset View": "RST"
   }[tool] ?? "DOT";
-}
-
-function needsExtractionText(status: "IDLE" | "READY" | "EXTRACTED"): string {
-  switch (status) {
-    case "IDLE":
-      return "load target app first";
-    case "READY":
-      return "ready to extract";
-    case "EXTRACTED":
-      return "extracted";
-  }
 }
 
 function viewClassName(view: string): string {
@@ -1797,8 +1778,8 @@ function collaboratorLabel(count: number): string {
 }
 
 const projectionSurfaceNodeIds: Partial<Record<ThreeAssemblySurfaceId, string>> = {
-  validation: "component.validation-service",
-  adapter: "component.storage-s3"
+  validation: "component.flow-orchestrator",
+  adapter: "component.state-store"
 };
 
 const substrateCapabilities = [
@@ -1817,41 +1798,41 @@ const substrateCapabilities = [
 
 const replacementMatrix: Partial<Record<Exclude<ThreeAssemblySurfaceId, "substrate">, readonly ReplacementCandidate[]>> = {
   gateway: [
-    { catalogEntryId: "com.unfurl:nginx-api-gateway:1.4.0", label: "Nginx API Gateway", owner: "platform-team", shape: "CONTAINER", status: "ALLOWED", reason: "offers http.route and auth.forward" },
-    { catalogEntryId: "com.unfurl:edge-router-lite:0.9.0", label: "Edge Router Lite", owner: "edge-team", shape: "SIDECAR", status: "BLOCKED", reason: "missing auth.forward capability" }
+    { catalogEntryId: "com.unfurl.flow:flow-api:0.1.0", label: "Flow API", owner: "flow-team", shape: "CONTAINER", status: "ALLOWED", reason: "offers workflow.execute and workflow.resolve" },
+    { catalogEntryId: "com.unfurl.flow:read-only-api:0.1.0", label: "Read-only Flow API", owner: "flow-team", shape: "SIDECAR", status: "BLOCKED", reason: "missing workflow.execute capability" }
   ],
   order: [
-    { catalogEntryId: "com.unfurl:order-service:2.0.1", label: "Order Service 2.0.1", owner: "orders-team", shape: "CONTAINER", status: "ALLOWED", reason: "same required/provided port contract" },
-    { catalogEntryId: "com.unfurl:legacy-order-service:1.0.0", label: "Legacy Order Service", owner: "orders-team", shape: "REMOTE", status: "BLOCKED", reason: "requires storage.put@^1 instead of current storage.put@^2" }
+    { catalogEntryId: "com.unfurl.flow:trigger-ingress:0.1.0", label: "Trigger Ingress", owner: "flow-team", shape: "CONTAINER", status: "ALLOWED", reason: "supports webhook, poll, and schedule trigger fires" },
+    { catalogEntryId: "com.unfurl.flow:schedule-only-trigger:0.1.0", label: "Schedule-only Trigger", owner: "flow-team", shape: "REMOTE", status: "BLOCKED", reason: "missing webhook and poll trigger ingress" }
   ],
   inventory: [
-    { catalogEntryId: "com.unfurl:inventory-service:1.9.0", label: "Inventory Service 1.9", owner: "inventory-team", shape: "CONTAINER", status: "ALLOWED", reason: "satisfies inventory.reserve and inventory.release" },
-    { catalogEntryId: "com.unfurl:warehouse-adapter:1.0.0", label: "Warehouse Adapter", owner: "supply-team", shape: "ADAPTER", status: "BLOCKED", reason: "refuses direct payment validation responsibility" }
+    { catalogEntryId: "com.unfurl.flow:definition-registry:0.1.0", label: "Definition Registry", owner: "flow-team", shape: "CONTAINER", status: "ALLOWED", reason: "resolves workflow, prompt, tool, agent, and subgraph definitions" },
+    { catalogEntryId: "com.unfurl.flow:workflow-only-registry:0.1.0", label: "Workflow-only Registry", owner: "flow-team", shape: "ADAPTER", status: "BLOCKED", reason: "missing prompt/tool/agent definition lookup" }
   ],
   validation: [
-    { catalogEntryId: "com.unfurl:validation-service:1.1.0", label: "Validation Service", owner: "payments-team", shape: "CONTAINER", status: "ALLOWED", reason: "current selected component" },
-    { catalogEntryId: "com.unfurl:customer-policy-validator:1.2.0", label: "Customer Policy Validator", owner: "risk-team", shape: "CONTAINER", status: "ALLOWED", reason: "offers validate.order, validate.payment, and validate.inventory" },
-    { catalogEntryId: "com.unfurl:fraud-only-validator:1.0.0", label: "Fraud-only Validator", owner: "risk-team", shape: "SERVICE", status: "BLOCKED", reason: "does not offer validate.inventory" }
+    { catalogEntryId: "com.unfurl.flow:orchestrator:0.1.0", label: "Flow Orchestrator", owner: "flow-team", shape: "CONTAINER", status: "ALLOWED", reason: "current selected component" },
+    { catalogEntryId: "com.unfurl.flow:distributed-orchestrator:0.1.0", label: "Distributed Orchestrator", owner: "flow-team", shape: "CONTAINER", status: "ALLOWED", reason: "offers node dispatch and durable workflow state transitions" },
+    { catalogEntryId: "com.unfurl.flow:trigger-ingress:0.1.0", label: "Trigger Ingress", owner: "flow-team", shape: "SERVICE", status: "BLOCKED", reason: "does not own deterministic scheduling" }
   ],
   payment: [
-    { catalogEntryId: "com.unfurl:payment-service:1.6.1", label: "Payment Service 1.6.1", owner: "payments-team", shape: "CONTAINER", status: "ALLOWED", reason: "same payment authorize/capture contract" },
-    { catalogEntryId: "com.unfurl:stripe-adapter:1.0.0", label: "Stripe Adapter", owner: "payments-team", shape: "MANAGED_EXTERNAL_ADAPTER", status: "BLOCKED", reason: "external adapter cannot own payment orchestration" }
+    { catalogEntryId: "com.unfurl.flow:distributed-worker:0.1.0", label: "Distributed Worker", owner: "flow-team", shape: "CONTAINER", status: "ALLOWED", reason: "claims and completes leased nodes" },
+    { catalogEntryId: "com.unfurl.flow:batch-runner:0.1.0", label: "Batch Runner", owner: "flow-team", shape: "JOB", status: "BLOCKED", reason: "does not support durable node leasing" }
   ],
   audit: [
     { catalogEntryId: "com.unfurl:audit-service:1.3.0", label: "Audit Service 1.3", owner: "risk-team", shape: "CONTAINER", status: "ALLOWED", reason: "offers audit.write and audit.query" },
     { catalogEntryId: "com.unfurl:log-sink:1.0.0", label: "Log Sink", owner: "observability-team", shape: "SIDECAR", status: "BLOCKED", reason: "logs events but does not provide signed audit.write" }
   ],
   notification: [
-    { catalogEntryId: "com.unfurl:notification-service:1.1.0", label: "Notification Service 1.1", owner: "customer-exp-team", shape: "CONTAINER", status: "ALLOWED", reason: "satisfies email and sms notification ports" },
-    { catalogEntryId: "com.unfurl:email-only-notifier:1.0.0", label: "Email-only Notifier", owner: "customer-exp-team", shape: "SERVICE", status: "BLOCKED", reason: "missing notify.sms" }
+    { catalogEntryId: "com.unfurl.flow.adapter:kafka-event-sink:0.1.0", label: "Kafka Event Sink", owner: "platform-team", shape: "SIDECAR", status: "ALLOWED", reason: "offers ordered event append and replay" },
+    { catalogEntryId: "com.unfurl.flow.adapter:stdout-event-sink:0.1.0", label: "Stdout Event Sink", owner: "platform-team", shape: "SERVICE", status: "BLOCKED", reason: "not durable enough for STRICT profile mode" }
   ],
   workflow: [
-    { catalogEntryId: "com.unfurl:workflow-service:2.4.0", label: "Workflow Service 2.4", owner: "platform-team", shape: "CONTAINER", status: "ALLOWED", reason: "same orchestration interface contract" },
-    { catalogEntryId: "com.unfurl:batch-runner:1.0.0", label: "Batch Runner", owner: "platform-team", shape: "JOB", status: "BLOCKED", reason: "does not offer workflow.start" }
+    { catalogEntryId: "com.unfurl.flow:reference-resolver:0.1.0", label: "Reference Resolver", owner: "flow-team", shape: "CONTAINER", status: "ALLOWED", reason: "resolves refs with provenance" },
+    { catalogEntryId: "com.unfurl.flow:plain-yaml-loader:0.1.0", label: "Plain YAML Loader", owner: "flow-team", shape: "JOB", status: "BLOCKED", reason: "does not resolve agentRef, toolRef, or promptRef" }
   ],
   adapter: [
-    { catalogEntryId: "com.unfurl:storage-adapter-s3:1.3.1", label: "S3 Storage Adapter", owner: "platform-team", shape: "SIDECAR", status: "ALLOWED", reason: "offers storage.put and storage.get" },
-    { catalogEntryId: "com.unfurl:storage-adapter-blob:1.2.0", label: "Azure Blob Adapter", owner: "platform-team", shape: "SIDECAR", status: "ALLOWED", reason: "compatible object storage capability range" },
-    { catalogEntryId: "com.unfurl:read-only-storage-adapter:1.0.0", label: "Read-only Storage Adapter", owner: "platform-team", shape: "ADAPTER", status: "BLOCKED", reason: "missing storage.put" }
+    { catalogEntryId: "com.unfurl.flow.adapter:postgres-state-store:0.1.0", label: "Postgres State Store", owner: "platform-team", shape: "SIDECAR", status: "ALLOWED", reason: "offers atomic claim and durable checkpoint guarantees" },
+    { catalogEntryId: "com.unfurl.flow.adapter:file-state-store:0.1.0", label: "File State Store", owner: "platform-team", shape: "SIDECAR", status: "ALLOWED", reason: "compatible for local single-node profiles" },
+    { catalogEntryId: "com.unfurl.flow.adapter:in-memory-state-store:0.1.0", label: "In-memory State Store", owner: "platform-team", shape: "ADAPTER", status: "BLOCKED", reason: "not durable for STRICT profile mode" }
   ]
 };

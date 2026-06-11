@@ -4,11 +4,31 @@ import { buildCatalogPalette, loadCatalogPalette, type CatalogPaletteState } fro
 
 export type CatalogPalettePanelProps = {
   readonly client: Pick<StudioFabricClient, "listCatalogVisuals" | "admitCatalogArtifacts">;
+  /**
+   * Initial tenant id. Hydrated from the URL search param at route level;
+   * the panel manages its own state thereafter and notifies the parent
+   * (if any) via {@link onTenantIdChange} so the URL stays in sync.
+   */
   readonly tenantId?: string | undefined;
   readonly assemblyId?: string | undefined;
+  /**
+   * Called when the operator edits the tenant input. Lets the route layer
+   * round-trip the value into the URL search params so the tenant is
+   * bookmarkable / shareable and the multitenant flow is testable
+   * directly from the URL bar.
+   */
+  readonly onTenantIdChange?: (tenantId: string) => void;
 };
 
-export function CatalogPalettePanel({ client, tenantId = "tenant-local", assemblyId = "assembly-demo" }: CatalogPalettePanelProps) {
+export function CatalogPalettePanel({
+  client,
+  tenantId: initialTenantId = "tenant-local",
+  assemblyId = "assembly-demo",
+  onTenantIdChange
+}: CatalogPalettePanelProps) {
+  // Tenant is a panel-owned state so the operator can switch it; route
+  // layer round-trips it through ?tenantId=... search params.
+  const [tenantId, setTenantId] = useState(initialTenantId);
   const [query, setQuery] = useState("");
   const [warningsOnly, setWarningsOnly] = useState(false);
   const [selectedArtifactNames, setSelectedArtifactNames] = useState<readonly string[]>([]);
@@ -64,6 +84,20 @@ export function CatalogPalettePanel({ client, tenantId = "tenant-local", assembl
       </header>
 
       <section className="studio-panel compact-controls">
+        <label>
+          Tenant
+          <input
+            value={tenantId}
+            onChange={event => {
+              const next = event.target.value;
+              setTenantId(next);
+              onTenantIdChange?.(next);
+            }}
+            placeholder="tenant-local"
+            spellCheck={false}
+            aria-label="Tenant ID for catalog queries"
+          />
+        </label>
         <label>
           Search catalog
           <input value={query} onChange={event => setQuery(event.target.value)} />

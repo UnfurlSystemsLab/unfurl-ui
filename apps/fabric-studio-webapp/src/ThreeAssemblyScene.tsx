@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 export type ThreeAssemblySurfaceId =
   | "gateway"
@@ -21,6 +21,15 @@ export type ThreeAssemblySceneProps = {
   readonly extractedPartId?: string | undefined;
   readonly semanticProjection?: SemanticDcpSceneProjection | undefined;
   readonly requestedSemanticZoomLevel?: SemanticZoomLevel | undefined;
+  /**
+   * Number of draft components currently in the assembly. The scene shows
+   * one of its hardcoded 9 module slots per draft component (slot 0 for
+   * the first component, slot 1 for the second, etc.). Slots beyond the
+   * count are hidden. {@code undefined} preserves the pre-data demo view
+   * (all 9 modules visible) — used during the brief window before the
+   * backend draft state has loaded.
+   */
+  readonly draftComponentCount?: number | undefined;
   readonly onSelect: (surface: ThreeAssemblySurfaceId) => void;
   readonly onSelectPart?: (selection: ThreeAssemblySelection) => void;
   readonly onViewChange?: (view: string) => void;
@@ -65,8 +74,11 @@ type SceneHandles = {
   readonly explodedGroup: THREE.Group;
   readonly substrateGroup: THREE.Group;
   readonly substratePlate: THREE.Mesh;
-  readonly parentDcpGroup: THREE.Group;
-  readonly childDcpGroup: THREE.Group;
+  // parentDcpGroup / childDcpGroup are swappable so a semanticProjection
+  // change can replace them in place without tearing down the whole scene.
+  // See rebuildDcpGroups() inside the mount effect.
+  parentDcpGroup: THREE.Group;
+  childDcpGroup: THREE.Group;
   readonly validationLines: readonly THREE.Line[];
   readonly selectableParts: Map<string, THREE.Object3D>;
   readonly modeGroups: {
@@ -79,12 +91,12 @@ const initialCameraPosition = new THREE.Vector3(7.9, 5.0, 10.2);
 const initialCameraTarget = new THREE.Vector3(0.2, -0.7, 0.12);
 const viewShortcuts = ["Assembly", "Exploded", "Ports", "Substrate", "Validation"] as const;
 const defaultSemanticProjection: SemanticDcpSceneProjection = {
-  parentLabel: "E-Commerce Platform",
-  assemblyLabel: "Checkout Assembly",
+  parentLabel: "Unfurl Runtime",
+  assemblyLabel: "Flow Runtime Assembly",
   childNodes: [
-    { nodeId: "component.rules", label: "Rules DCP", dcpType: "COMPONENT", replacementAllowed: true },
-    { nodeId: "component.policy", label: "Policy DCP", dcpType: "COMPONENT", replacementAllowed: true },
-    { nodeId: "component.customer", label: "Customer DCP", dcpType: "COMPONENT", replacementAllowed: false }
+    { nodeId: "component.orchestrator", label: "Flow Orchestrator", dcpType: "COMPONENT", replacementAllowed: true },
+    { nodeId: "component.worker", label: "Distributed Worker", dcpType: "COMPONENT", replacementAllowed: true },
+    { nodeId: "component.state-store", label: "State Store Adapter", dcpType: "ADAPTER", replacementAllowed: true }
   ]
 };
 
@@ -95,6 +107,7 @@ export function ThreeAssemblyScene({
   extractedPartId,
   semanticProjection,
   requestedSemanticZoomLevel,
+  draftComponentCount,
   onSelect,
   onSelectPart,
   onViewChange,
@@ -110,6 +123,15 @@ export function ThreeAssemblyScene({
   const extractedPartRef = useRef(extractedPartId);
   const viewRef = useRef(activeView);
   const requestedSemanticZoomLevelRef = useRef(requestedSemanticZoomLevel);
+  // semanticProjection changes used to be in the effect dep array, which
+  // tore down and rebuilt the entire scene (and every CanvasTexture) on
+  // every change. It now lives in a ref; the animate loop diffs against
+  // the last applied projection and swaps only the parent + child DCP
+  // sub-groups in place.
+  const semanticProjectionRef = useRef(semanticProjection);
+  // draftComponentCount drives module-slot visibility (each hardcoded
+  // module slot 0..8 shows only when its index is below the count).
+  const draftComponentCountRef = useRef(draftComponentCount);
 
   onSelectRef.current = onSelect;
   onSelectPartRef.current = onSelectPart;
@@ -120,6 +142,8 @@ export function ThreeAssemblyScene({
   extractedPartRef.current = extractedPartId;
   viewRef.current = activeView;
   requestedSemanticZoomLevelRef.current = requestedSemanticZoomLevel;
+  semanticProjectionRef.current = semanticProjection;
+  draftComponentCountRef.current = draftComponentCount;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -173,7 +197,47 @@ export function ThreeAssemblyScene({
     root.position.set(-0.34, 0.0, -0.05);
     scene.add(root);
 
-    const handles = buildAssembly(root, clickable, semanticProjection ?? defaultSemanticProjection);
+    let appliedProjection: SemanticDcpSceneProjection = semanticProjectionRef.current ?? defaultSemanticProjection;
+    const handles = buildAssembly(root, clickable, appliedProjection);
+    // The DCP entries createChildDcpConstructs pushes onto `clickable` and
+    // into `handles.selectableParts` come at the end of construction, so
+    // we track the count of clickable entries it added and the exact keys
+    // it wrote — both so rebuildDcpGroups can remove them cleanly on swap.
+    let appliedChildClickableCount = sceneChildNodes(appliedProjection).length;
+    let appliedChildSelectableKeys: string[] =
+        sceneChildNodes(appliedProjection).map(node => `component:validation:${node.nodeId.replaceAll(":", "-")}`);
+
+    // Swap parentDcp + childDcp sub-groups in place when the
+    // semanticProjection ref points at a different object than what we
+    // last rendered. Disposes the old sub-groups, removes the entries
+    // they pushed onto clickable + selectableParts, then runs the same
+    // build functions with the new projection.
+    function rebuildDcpGroups(next: SemanticDcpSceneProjection) {
+      root.remove(handles.parentDcpGroup);
+      root.remove(handles.childDcpGroup);
+      disposeObject(handles.parentDcpGroup);
+      disposeObject(handles.childDcpGroup);
+
+      // createChildDcpConstructs pushed `appliedChildClickableCount` entries
+      // onto the END of clickable. They are still at the end (nothing else
+      // appends to clickable after the initial build).
+      if (appliedChildClickableCount > 0) {
+        clickable.splice(clickable.length - appliedChildClickableCount, appliedChildClickableCount);
+      }
+      for (const key of appliedChildSelectableKeys) {
+        handles.selectableParts.delete(key);
+      }
+
+      handles.parentDcpGroup = createParentDcpContext(next);
+      handles.childDcpGroup = createChildDcpConstructs(clickable, handles.selectableParts, next);
+      root.add(handles.parentDcpGroup);
+      root.add(handles.childDcpGroup);
+
+      appliedProjection = next;
+      appliedChildClickableCount = sceneChildNodes(next).length;
+      appliedChildSelectableKeys =
+          sceneChildNodes(next).map(node => `component:validation:${node.nodeId.replaceAll(":", "-")}`);
+    }
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -310,6 +374,12 @@ export function ThreeAssemblyScene({
     let raf = 0;
     function animate() {
       frame += 0.01;
+      // Diff the projection ref against what we built the DCP groups from;
+      // swap them in place if the parent passed a new projection object.
+      const currentProjection = semanticProjectionRef.current ?? defaultSemanticProjection;
+      if (currentProjection !== appliedProjection) {
+        rebuildDcpGroups(currentProjection);
+      }
       root.rotation.y = -0.23 + Math.sin(frame * 0.8) * 0.01;
       root.rotation.x = -0.06 + Math.sin(frame * 0.55) * 0.006;
       handles.explodedGroup.position.y = -0.42 + Math.sin(frame * 1.4) * 0.018;
@@ -333,7 +403,7 @@ export function ThreeAssemblyScene({
         semanticZoomLevel = nextSemanticZoomLevel;
         onSemanticZoomChangeRef.current?.(semanticZoomLevel);
       }
-      applySceneState(handles, selectedRef.current, selectedPartRef.current, extractedPartRef.current, viewRef.current, semanticZoomLevel, frame);
+      applySceneState(handles, selectedRef.current, selectedPartRef.current, extractedPartRef.current, viewRef.current, semanticZoomLevel, frame, draftComponentCountRef.current);
       renderer.render(scene, camera);
       raf = window.requestAnimationFrame(animate);
     }
@@ -353,7 +423,11 @@ export function ThreeAssemblyScene({
       renderer.dispose();
       disposeObject(scene);
     };
-  }, [semanticProjection]);
+    // Mount-once. semanticProjection updates flow in via semanticProjectionRef
+    // and the in-place rebuildDcpGroups() above. Other prop changes (selected
+    // surface, view, etc.) were already on the ref pattern.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return <div className="three-assembly-scene" aria-label="3D assembly scene" ref={hostRef} />;
 }
@@ -553,7 +627,10 @@ function addWorkbenchBase(root: THREE.Group) {
   bevel.receiveShadow = true;
   root.add(bevel);
 
-  const screwMaterial = new THREE.MeshStandardMaterial({ color: 0x5f7188, roughness: 0.18, metalness: 0.86 });
+  // Template + per-mesh clone so setObjectOpacity() can dim individual screws
+  // without dimming all six. Sharing one MeshStandardMaterial across meshes
+  // means mutating .opacity / .emissive on any one cascades to all.
+  const screwTemplate = new THREE.MeshStandardMaterial({ color: 0x5f7188, roughness: 0.18, metalness: 0.86 });
   for (const [x, z] of [
     [-4.25, -2.45],
     [4.25, -2.45],
@@ -562,7 +639,7 @@ function addWorkbenchBase(root: THREE.Group) {
     [-3.2, 2.45],
     [3.2, 2.45]
   ] as const) {
-    const screw = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.035, 28), screwMaterial);
+    const screw = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.035, 28), screwTemplate.clone());
     screw.rotation.x = Math.PI / 2;
     screw.position.set(x, -2.37, z);
     root.add(screw);
@@ -595,7 +672,9 @@ function addGlassEnclosure(root: THREE.Group) {
   edge.position.copy(glass.position);
   root.add(edge);
 
-  const railMaterial = new THREE.MeshStandardMaterial({ color: 0x9caaba, roughness: 0.18, metalness: 0.72 });
+  // Template + per-mesh clone so each bolt / rail has its own material instance
+  // (12 meshes total — without clones, dimming any one cascades to all).
+  const railTemplate = new THREE.MeshStandardMaterial({ color: 0x9caaba, roughness: 0.18, metalness: 0.72 });
   const cornerPositions = [
     [-4.76, -2.45, -2.52],
     [4.08, -2.45, -2.52],
@@ -607,16 +686,16 @@ function addGlassEnclosure(root: THREE.Group) {
     [4.08, 1.28, 2.58]
   ] as const;
   for (const position of cornerPositions) {
-    const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.1, 24, 16), railMaterial);
+    const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.1, 24, 16), railTemplate.clone());
     bolt.position.set(position[0], position[1], position[2]);
     bolt.castShadow = true;
     root.add(bolt);
   }
 
-  addRail(root, [-4.76, 1.28, -2.52], [4.08, 1.28, -2.52], railMaterial);
-  addRail(root, [-4.76, 1.28, 2.58], [4.08, 1.28, 2.58], railMaterial);
-  addRail(root, [-4.76, -2.45, -2.52], [4.08, -2.45, -2.52], railMaterial);
-  addRail(root, [-4.76, -2.45, 2.58], [4.08, -2.45, 2.58], railMaterial);
+  addRail(root, [-4.76, 1.28, -2.52], [4.08, 1.28, -2.52], railTemplate.clone());
+  addRail(root, [-4.76, 1.28, 2.58], [4.08, 1.28, 2.58], railTemplate.clone());
+  addRail(root, [-4.76, -2.45, -2.52], [4.08, -2.45, -2.52], railTemplate.clone());
+  addRail(root, [-4.76, -2.45, 2.58], [4.08, -2.45, 2.58], railTemplate.clone());
 }
 
 function addRail(root: THREE.Group, from: readonly [number, number, number], to: readonly [number, number, number], material: THREE.Material) {
@@ -753,14 +832,18 @@ function addModulePorts(
   clickable: THREE.Object3D[],
   selectableParts: Map<string, THREE.Object3D>
 ) {
-  const material = new THREE.MeshStandardMaterial({
+  // Templates + per-mesh clone so each socket / ring has its own material.
+  // applyPartState() mutates emissive + emissiveIntensity per selectable part;
+  // sharing one material across 3 sockets meant "select one port → all three
+  // light up". Same fix for the rings.
+  const socketTemplate = new THREE.MeshStandardMaterial({
     color: module.portColor,
     roughness: 0.14,
     metalness: 0.72,
     emissive: module.portColor,
     emissiveIntensity: 0.08
   });
-  const ringMaterial = new THREE.MeshStandardMaterial({ color: 0xdbeafe, roughness: 0.16, metalness: 0.62 });
+  const ringTemplate = new THREE.MeshStandardMaterial({ color: 0xdbeafe, roughness: 0.16, metalness: 0.62 });
   const sideX = module.scale[0] / 2 + 0.05;
   const bottomY = -(module.scale[1] / 2 + 0.06);
   const frontZ = module.scale[2] / 2 + 0.06;
@@ -777,7 +860,7 @@ function addModulePorts(
       surface: module.id,
       label: `${module.label} connector ${index + 1}`
     };
-    const socket = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.08, 20), material);
+    const socket = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.08, 20), socketTemplate.clone());
     socket.rotation.x = Math.PI / 2;
     socket.position.set(module.position[0] + x, module.position[1] + y, module.position[2] + z);
     socket.userData.surface = module.id;
@@ -786,7 +869,7 @@ function addModulePorts(
     selectableParts.set(selection.id, socket);
     root.add(socket);
 
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.088, 0.014, 10, 24), ringMaterial);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.088, 0.014, 10, 24), ringTemplate.clone());
     ring.position.copy(socket.position);
     ring.rotation.x = Math.PI / 2;
     ring.userData.surface = module.id;
@@ -798,12 +881,12 @@ function addModulePorts(
 
 function addServicePipes(root: THREE.Group, clickable: THREE.Object3D[], selectableParts: Map<string, THREE.Object3D>) {
   const metal = 0x778899;
-  addSelectablePipe(root, clickable, selectableParts, "pipe:gateway-order", "Gateway to order pipe", "gateway", [-3.2, 0.45, 1.22], [-1.72, 0.45, 1.12], metal, 0.045, true);
-  addSelectablePipe(root, clickable, selectableParts, "pipe:inventory-validation", "Inventory to validation pipe", "inventory", [-1.74, 0.45, 1.12], [-0.4, 0.48, 1.06], metal, 0.045, true);
-  addSelectablePipe(root, clickable, selectableParts, "pipe:validation-payment", "Validation to payment pipe", "validation", [0.4, 0.48, 1.06], [1.76, 0.43, 1.15], metal, 0.045, true);
-  addSelectablePipe(root, clickable, selectableParts, "pipe:validation-workflow", "Validation substrate pipe", "validation", [0.25, -0.45, 1.1], [0.45, -1.45, 1.0], 0x2563eb, 0.042, false);
-  addSelectablePipe(root, clickable, selectableParts, "pipe:audit-workflow", "Audit to workflow pipe", "audit", [-2.05, -1.55, 1.05], [0.45, -1.45, 1.0], 0x64748b, 0.035, true);
-  addSelectablePipe(root, clickable, selectableParts, "pipe:notification-adapter", "Notification to adapter pipe", "notification", [-0.74, -1.55, 0.98], [1.88, -1.55, 1.03], 0x64748b, 0.035, true);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:api-trigger", "Flow API to trigger ingress pipe", "gateway", [-3.2, 0.45, 1.22], [-1.72, 0.45, 1.12], metal, 0.045, true);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:registry-orchestrator", "Definition registry to orchestrator pipe", "inventory", [-1.74, 0.45, 1.12], [-0.4, 0.48, 1.06], metal, 0.045, true);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:orchestrator-worker", "Orchestrator to worker pipe", "validation", [0.4, 0.48, 1.06], [1.76, 0.43, 1.15], metal, 0.045, true);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:orchestrator-substrate", "Orchestrator substrate pipe", "validation", [0.25, -0.45, 1.1], [0.45, -1.45, 1.0], 0x2563eb, 0.042, false);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:audit-resolver", "Audit sink to resolver pipe", "audit", [-2.05, -1.55, 1.05], [0.45, -1.45, 1.0], 0x64748b, 0.035, true);
+  addSelectablePipe(root, clickable, selectableParts, "pipe:event-adapter", "Event sink to state adapter pipe", "notification", [-0.74, -1.55, 0.98], [1.88, -1.55, 1.03], 0x64748b, 0.035, true);
   addSelectablePipe(root, clickable, selectableParts, "pipe:adapter-substrate", "Adapter substrate pipe", "adapter", [2.08, -1.45, 1.03], [2.5, -2.08, 0.8], 0x2563eb, 0.035, false);
 }
 
@@ -951,7 +1034,7 @@ function createSubstrateLinks(): THREE.Group {
 function createExplodedModule(): { explodedGroup: THREE.Group; validationLines: readonly THREE.Line[] } {
   const exploded = createModule({
     id: "validation",
-    label: "Validation Service",
+    label: "Flow Orchestrator",
     badge: "V",
     accent: 0x7c3aed,
     portColor: 0x7c3aed,
@@ -972,9 +1055,11 @@ function createExplodedModule(): { explodedGroup: THREE.Group; validationLines: 
   exploded.add(glow);
 
   const sockets = new THREE.Group();
-  const socketMaterial = new THREE.MeshStandardMaterial({ color: 0x7c3aed, roughness: 0.12, metalness: 0.76, emissive: 0x7c3aed, emissiveIntensity: 0.14 });
+  // Template + per-mesh clone — exploded view animates emissive on these
+  // every frame; sharing one material would tie all 5 sockets together.
+  const socketTemplate = new THREE.MeshStandardMaterial({ color: 0x7c3aed, roughness: 0.12, metalness: 0.76, emissive: 0x7c3aed, emissiveIntensity: 0.14 });
   for (let index = 0; index < 5; index += 1) {
-    const socket = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.018, 10, 24), socketMaterial);
+    const socket = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.018, 10, 24), socketTemplate.clone());
     socket.rotation.x = Math.PI / 2;
     socket.position.set(-0.44 + index * 0.22, -0.72, 0.6);
     sockets.add(socket);
@@ -1028,11 +1113,23 @@ function applySceneState(
   extractedPartId: string | undefined,
   activeView: string,
   semanticZoomLevel: SemanticZoomLevel,
-  frame: number
+  frame: number,
+  draftComponentCount: number | undefined
 ) {
   for (const [id, group] of handles.moduleGroups) {
     const body = handles.moduleBodies.get(id);
     if (!body) {
+      continue;
+    }
+    // Module-slot visibility gate. Substrate is always visible; the 9
+    // hardcoded module slots are revealed in order as draft components
+    // are added. `undefined` means pre-data demo state — show everything.
+    const slotIndex = moduleSlotIndex(id);
+    const slotVisible = draftComponentCount === undefined
+        || id === "substrate"
+        || (slotIndex >= 0 && slotIndex < draftComponentCount);
+    group.visible = slotVisible;
+    if (!slotVisible) {
       continue;
     }
     const selectedThis = id === selected;
@@ -1067,9 +1164,14 @@ function applySceneState(
     substrateMaterial.emissiveIntensity = substrateActive ? 0.12 : 0;
   }
 
-  handles.explodedGroup.visible = true;
-  setObjectOpacity(handles.explodedGroup, activeView === "Substrate" ? 0.58 : 1);
-  handles.explodedGroup.scale.setScalar(selected === "validation" ? 1.03 : 0.96);
+  // Exploded view represents the validation slot — hide if its slot is hidden.
+  const explodedVisible = draftComponentCount === undefined
+      || moduleSlotIndex("validation") < draftComponentCount;
+  handles.explodedGroup.visible = explodedVisible;
+  if (explodedVisible) {
+    setObjectOpacity(handles.explodedGroup, activeView === "Substrate" ? 0.58 : 1);
+    handles.explodedGroup.scale.setScalar(selected === "validation" ? 1.03 : 0.96);
+  }
 
   for (const line of handles.validationLines) {
     line.visible = activeView !== "Substrate";
@@ -1175,15 +1277,29 @@ function disposeObject(object: THREE.Object3D) {
 }
 
 const modules = [
-  { id: "gateway", label: "API Gateway", badge: "N", accent: 0x16a34a, portColor: 0x16a34a, position: [0, 0.96, 0.48], scale: [1.72, 0.68, 0.78] },
-  { id: "order", label: "Order Service", badge: "O", accent: 0x65a30d, portColor: 0x16a34a, position: [-2.55, -0.38, 0.74], scale: [1.16, 0.9, 0.94] },
-  { id: "inventory", label: "Inventory Service", badge: "I", accent: 0x65a30d, portColor: 0x16a34a, position: [-1.12, -0.42, 0.68], scale: [1.16, 0.9, 0.94] },
-  { id: "validation", label: "Validation Service", badge: "V", accent: 0x7c3aed, portColor: 0x7c3aed, position: [0.32, -0.42, 0.62], scale: [1.24, 1.08, 1.02] },
-  { id: "payment", label: "Payment Service", badge: "P", accent: 0x65a30d, portColor: 0x16a34a, position: [1.78, -0.46, 0.72], scale: [1.16, 0.9, 0.94] },
-  { id: "audit", label: "Audit Service", badge: "A", accent: 0x2563eb, portColor: 0x2563eb, position: [-2.08, -1.54, 0.52], scale: [1.1, 0.88, 0.86] },
-  { id: "notification", label: "Notification Service", badge: "F", accent: 0xea580c, portColor: 0xf59e0b, position: [-0.72, -1.62, 0.5], scale: [1.1, 0.88, 0.86] },
-  { id: "workflow", label: "Workflow Service", badge: "W", accent: 0x0ea5e9, portColor: 0x0ea5e9, position: [0.64, -1.52, 0.5], scale: [1.1, 0.88, 0.86] },
-  { id: "adapter", label: "Storage Adapter", badge: "S", accent: 0xdc2626, portColor: 0x2563eb, position: [2.12, -1.58, 0.48], scale: [1.1, 0.88, 0.86] }
+  { id: "gateway", label: "Flow API", badge: "N", accent: 0x16a34a, portColor: 0x16a34a, position: [0, 0.96, 0.48], scale: [1.72, 0.68, 0.78] },
+  { id: "order", label: "Trigger Ingress", badge: "T", accent: 0x65a30d, portColor: 0x16a34a, position: [-2.55, -0.38, 0.74], scale: [1.16, 0.9, 0.94] },
+  { id: "inventory", label: "Definition Registry", badge: "D", accent: 0x65a30d, portColor: 0x16a34a, position: [-1.12, -0.42, 0.68], scale: [1.16, 0.9, 0.94] },
+  { id: "validation", label: "Flow Orchestrator", badge: "O", accent: 0x7c3aed, portColor: 0x7c3aed, position: [0.32, -0.42, 0.62], scale: [1.24, 1.08, 1.02] },
+  { id: "payment", label: "Distributed Worker", badge: "W", accent: 0x65a30d, portColor: 0x16a34a, position: [1.78, -0.46, 0.72], scale: [1.16, 0.9, 0.94] },
+  { id: "audit", label: "Audit Sink", badge: "A", accent: 0x2563eb, portColor: 0x2563eb, position: [-2.08, -1.54, 0.52], scale: [1.1, 0.88, 0.86] },
+  { id: "notification", label: "Event Sink", badge: "E", accent: 0xea580c, portColor: 0xf59e0b, position: [-0.72, -1.62, 0.5], scale: [1.1, 0.88, 0.86] },
+  { id: "workflow", label: "Reference Resolver", badge: "R", accent: 0x0ea5e9, portColor: 0x0ea5e9, position: [0.64, -1.52, 0.5], scale: [1.1, 0.88, 0.86] },
+  { id: "adapter", label: "State Store Adapter", badge: "S", accent: 0xdc2626, portColor: 0x2563eb, position: [2.12, -1.58, 0.48], scale: [1.1, 0.88, 0.86] }
 ] as const satisfies readonly ModulePlacement[];
 
 const modulePlacementsById = Object.fromEntries(modules.map(module => [module.id, module])) as Record<ModulePlacement["id"], ModulePlacement>;
+
+const MODULE_SLOT_INDEX: ReadonlyMap<ThreeAssemblySurfaceId, number> = new Map(
+  modules.map((module, index) => [module.id, index])
+);
+
+/**
+ * Slot index for a surface, used to gate visibility against the live
+ * draft-component count. Returns -1 for surfaces that are not in the
+ * 9-slot module array (e.g. {@code "substrate"} which is always
+ * visible regardless of count).
+ */
+function moduleSlotIndex(id: ThreeAssemblySurfaceId): number {
+  return MODULE_SLOT_INDEX.get(id) ?? -1;
+}

@@ -50,8 +50,15 @@ export function useStudioClient(): StudioFabricClient {
 }
 
 export function studioMode(): "live" | "fixture" {
+  // Default is "live" — the React app talks to the real Studio backend
+  // (StudioCatalogService via HTTP). Fixture mode is a deliberate opt-in
+  // for offline development, demos, or screenshot generation; set
+  // VITE_STUDIO_MODE=fixture to enable it. Silent default to fixture
+  // previously hid the real backend behind a mock that only knew the
+  // example tenant — multitenant, real catalogs, and backend changes
+  // were all invisible from the UI.
   const env = (import.meta as ImportMeta & { readonly env?: { readonly VITE_STUDIO_MODE?: string } }).env;
-  return env?.VITE_STUDIO_MODE === "live" ? "live" : "fixture";
+  return env?.VITE_STUDIO_MODE === "fixture" ? "fixture" : "live";
 }
 
 export function studioApiBaseUrl(): string {

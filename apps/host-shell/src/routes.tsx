@@ -35,12 +35,26 @@ export function AppRoutes() {
 
 function CatalogRoute() {
   const client = useStudioClient();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   return (
     <CatalogPalettePanel
       client={client}
       tenantId={searchParams.get("tenantId") ?? undefined}
       assemblyId={searchParams.get("assemblyId") ?? undefined}
+      // Round-trip the panel's tenant edits into the URL so the tenant is
+      // bookmarkable / shareable and the multitenant flow is exercised
+      // end-to-end from the URL bar.
+      onTenantIdChange={(next) => {
+        setSearchParams(prev => {
+          const out = new URLSearchParams(prev);
+          if (next === "" || next === "tenant-local") {
+            out.delete("tenantId");
+          } else {
+            out.set("tenantId", next);
+          }
+          return out;
+        });
+      }}
     />
   );
 }
@@ -125,11 +139,16 @@ function DeploymentPlannerRoute() {
   const initialPlannerState = searchParams.get("policy") === "all-shapes"
     ? createAllShapesDeploymentPlannerState()
     : undefined;
+  // Accept the canonical `needsPath` param (what launchers actually emit) while
+  // keeping `assemblyPath` as a backward-compat alias for old bookmarks. The
+  // previous hardcoded `samples/...` placeholder was dropped — defaulting to
+  // an empty string is consistent with `initialCatalogPath` and produces a
+  // friendly empty field instead of a misleading file-not-found error.
   return (
     <DeploymentPlannerPanel
       client={client}
       initialCatalogPath={searchParams.get("catalogPath") ?? ""}
-      initialNeedsPath={searchParams.get("needsPath") ?? ""}
+      initialAssemblyPath={searchParams.get("needsPath") ?? searchParams.get("assemblyPath") ?? ""}
       initialPlannerState={initialPlannerState}
     />
   );
