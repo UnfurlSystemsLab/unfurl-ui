@@ -10,7 +10,7 @@ describe("StudioHelpPanel", () => {
     assert.match(html, /Studio Setup Help/);
     assert.match(html, /id="scanned-catalog"/);
     assert.match(html, /id="component-claims"/);
-    assert.match(html, /id="needs"/);
+    assert.match(html, /id="substrate-profile"/);
     assert.match(html, /id="trust-policy"/);
     assert.match(html, /id="deployment-policy"/);
     assert.match(html, /fabric scan --catalog/);

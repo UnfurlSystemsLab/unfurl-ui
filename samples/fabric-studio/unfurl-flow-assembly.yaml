@@ -1,0 +1,75 @@
+id: assembly-unfurl-flow
+name: Unfurl Flow Runtime Assembly
+description: Governed Studio example for unfurl-flow with runtime components, substrate capabilities, and adapters.
+targetApplication:
+  name: unfurl-flow
+  defaultDeploymentTarget: Customer Runtime Substrate
+components:
+  - id: flow-api
+    catalogEntryId: com.unfurl.flow:flow-api:0.1.0
+    role: trigger ingress and workflow execution API
+    offers:
+      - workflow.execute@v1
+      - workflow.resolve@v1
+    requires:
+      - identity-context@v1
+      - event-sink@v1
+  - id: flow-orchestrator
+    catalogEntryId: com.unfurl.flow:orchestrator:0.1.0
+    role: deterministic DAG scheduling and node readiness
+    offers:
+      - node.dispatch@v1
+      - workflow.state.transition@v1
+    requires:
+      - state-store@v1
+      - capability-registry@v1
+  - id: distributed-worker
+    catalogEntryId: com.unfurl.flow:distributed-worker:0.1.0
+    role: leased node execution over the durable floor
+    offers:
+      - node.execute@v1
+    requires:
+      - state-store@v1
+      - event-sink@v1
+      - definition-registry@v1
+  - id: reference-resolver
+    catalogEntryId: com.unfurl.flow:reference-resolver:0.1.0
+    role: resolve agentRef, toolRef, promptRef, and subgraphRef nodes
+    offers:
+      - workflow.resolve@v1
+    requires:
+      - definition-registry@v1
+      - foundry-agent-runtime@v1
+adapters:
+  - id: postgres-state-store
+    catalogEntryId: com.unfurl.flow.adapter:postgres-state-store:0.1.0
+    binds: state-store@v1
+    substratePort: postgres.jdbc
+  - id: kafka-event-sink
+    catalogEntryId: com.unfurl.flow.adapter:kafka-event-sink:0.1.0
+    binds: event-sink@v1
+    substratePort: kafka.producer
+  - id: http-connector-adapter
+    catalogEntryId: com.unfurl.flow.adapter:http-connector:0.1.0
+    binds: connector-call@v1
+    substratePort: network.egress
+substrate:
+  profileMode: STRICT
+  ports:
+    - java.runtime
+    - state-store
+    - event-sink
+    - identity-context
+    - audit-sink
+    - secrets.provider
+    - telemetry.otel
+    - container.schedule
+deploymentPolicy:
+  preferredShapes:
+    - CONTAINERIZED_SERVICE
+    - SIDECAR
+    - IN_PROCESS_LIBRARY
+  runtime:
+    javaVersion: "21"
+    kubernetes: true
+    maxServices: 8

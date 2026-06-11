@@ -17,16 +17,16 @@ describe("DeploymentPlannerPanel", () => {
     assert.match(html, /Containerized service/);
   });
 
-  it("accepts a sample needs YAML path as planner input", () => {
+  it("accepts a sample Flow assembly YAML path as planner input", () => {
     const html = renderToString(
       <DeploymentPlannerPanel
         client={fakeClient()}
-        initialNeedsPath="samples/fabric-studio/checkout-needs.yaml"
+        initialAssemblyPath="samples/fabric-studio/unfurl-flow-assembly.yaml"
       />
     );
 
-    assert.match(html, /Needs YAML path/);
-    assert.match(html, /value="samples\/fabric-studio\/checkout-needs.yaml"/);
+    assert.match(html, /Assembly YAML path/);
+    assert.match(html, /value="samples\/fabric-studio\/unfurl-flow-assembly.yaml"/);
   });
 });
 

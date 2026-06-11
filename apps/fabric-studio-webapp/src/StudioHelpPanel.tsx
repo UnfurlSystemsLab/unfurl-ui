@@ -19,29 +19,31 @@ export function StudioHelpPanel() {
       <section className="studio-panel help-section" id="component-claims">
         <h2>Component Claims</h2>
         <p>
-          Each Intelligent Component must ship a DCP claim in its catalog metadata. Claims declare offers,
+          Each Intelligent Component or adapter must ship a DCP claim in its catalog metadata. Claims declare offers,
           dependencies, refusals, lifecycle, capability versions, and binding modes. Studio renders these facts; it
           does not invent compatibility rules.
         </p>
         <pre>{`META-INF/unfurl-catalog.yaml
 claim:
   offers:
-    - capability: validate.order
-      version: 1.1.0
+    - capability: workflow.execute
+      version: 1.0.0
   dependencies:
-    - customer.query@^1?substrate=true`}</pre>
+    - state-store@^1?substrate=true`}</pre>
       </section>
 
-      <section className="studio-panel help-section" id="needs">
-        <h2>Needs</h2>
+      <section className="studio-panel help-section" id="substrate-profile">
+        <h2>Substrate Profile</h2>
         <p>
-          Needs describe what the operator wants the composition to satisfy. Fabric uses needs as matcher input before
-          any Studio manipulation can become a candidate or compiled contract.
+          A Flow assembly is compiled against an explicit closed-world substrate profile. The profile lists only the
+          runtime ports that the selected components and adapters may use.
         </p>
-        <pre>{`needs:
-  - capability: validate.order
-    version: ^1
-    required: true`}</pre>
+        <pre>{`substrate:
+  profileMode: STRICT
+  ports:
+    - state-store
+    - event-sink
+    - secrets.provider`}</pre>
       </section>
 
       <section className="studio-panel help-section" id="trust-policy">

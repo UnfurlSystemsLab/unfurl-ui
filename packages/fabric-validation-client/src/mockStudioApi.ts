@@ -43,15 +43,15 @@ export const studioApiExampleCatalog: ListCatalogVisualsResponse = {
   catalogHash: "sha256:catalog",
   entries: [
     {
-      catalogEntryId: "com.unfurl:storage-s3:1.2.0",
-      claimHash: "sha256:claim-storage-s3",
-      artifactSha256: "sha256:artifact-storage-s3",
+      catalogEntryId: "com.unfurl.flow:orchestrator:0.1.0",
+      claimHash: "sha256:claim-flow-orchestrator",
+      artifactSha256: "sha256:artifact-flow-orchestrator",
       visualManifest: {
-        fallbackShape: { kind: "CUBE", category: "STORAGE" },
+        fallbackShape: { kind: "CUBE", category: "WORKFLOW" },
         ports: [
           {
-            id: "storage-put",
-            mapsTo: "claim.offers.storage.put",
+            id: "workflow-execute",
+            mapsTo: "claim.offers.workflow.execute",
             kind: "OFFER",
             anchor: "right-upper",
             connectorShape: "SQUARE_SOCKET"
@@ -67,15 +67,15 @@ export const studioApiExampleCatalog: ListCatalogVisualsResponse = {
         compositionMode: "DYNAMIC",
         dcpType: "COMPONENT",
         compatibleDescendants: [
-          "component.azure-blob",
-          "component.minio-storage",
-          "component.local-storage-gateway"
+          "component.distributed-worker",
+          "component.trigger-ingress",
+          "component.reference-resolver"
         ],
         selectionPolicy: {
           strategy: "POLICY_DRIVEN",
           rules: [
-            { when: "environment == aws", prefer: "component.storage-s3" },
-            { when: "tenant.dataResidency == private", prefer: "component.minio-storage" }
+            { when: "profileMode == STRICT", prefer: "component.flow-orchestrator" },
+            { when: "workers > 1", prefer: "component.distributed-worker" }
           ]
         },
         binding: {
@@ -84,7 +84,7 @@ export const studioApiExampleCatalog: ListCatalogVisualsResponse = {
         }
       },
       visualIntegrity: {
-        visualManifestHash: "sha256:visual-storage-s3",
+        visualManifestHash: "sha256:visual-flow-orchestrator",
         assets: []
       },
       warnings: []
@@ -116,53 +116,53 @@ export const studioApiExampleDynamicDcpProjection: DynamicDcpProjectionResponse 
   tenantId: DEFAULT_STUDIO_TENANT_ID,
   assemblyId: DEFAULT_STUDIO_ASSEMBLY_ID,
   compositionMode: "DYNAMIC",
-  rootNodeId: "company:e-commerce-platform",
-  focusNodeId: "assembly:e-commerce-platform",
+  rootNodeId: "runtime:unfurl",
+  focusNodeId: "assembly:unfurl-flow",
   nodes: [
     {
-      nodeId: "company:e-commerce-platform",
-      label: "E-Commerce Platform",
+      nodeId: "runtime:unfurl",
+      label: "Unfurl Runtime",
       dcpType: "COMPANY",
       level: "PARENT",
-      capabilities: ["commerce.checkout", "commerce.fulfillment"],
-      compatibleDescendants: ["assembly:e-commerce-platform"],
+      capabilities: ["workflow.orchestration", "component.composition"],
+      compatibleDescendants: ["assembly:unfurl-flow"],
       replacementAllowed: false
     },
     {
-      nodeId: "assembly:e-commerce-platform",
-      label: "Checkout Assembly",
+      nodeId: "assembly:unfurl-flow",
+      label: "Flow Runtime Assembly",
       dcpType: "MODULE",
       level: "ASSEMBLY",
-      capabilities: ["order.create", "validate.order", "payment.authorize"],
-      compatibleDescendants: ["component.validation-service", "component.storage-s3"],
+      capabilities: ["workflow.execute", "workflow.resolve", "node.dispatch"],
+      compatibleDescendants: ["component.flow-orchestrator", "component.state-store"],
       replacementAllowed: false
     },
     {
-      nodeId: "component.validation-service",
-      label: "Validation Service",
+      nodeId: "component.flow-orchestrator",
+      label: "Flow Orchestrator",
       dcpType: "COMPONENT",
       level: "CHILD",
-      catalogEntryId: "com.unfurl:validation-service:1.1.0",
-      capabilities: ["validate.order", "validate.payment", "validate.inventory"],
-      compatibleDescendants: ["component.customer-policy-validator", "component.fraud-validator"],
+      catalogEntryId: "com.unfurl.flow:orchestrator:0.1.0",
+      capabilities: ["node.dispatch", "workflow.state.transition", "workflow.status"],
+      compatibleDescendants: ["component.flow-orchestrator", "component.distributed-worker"],
       replacementAllowed: true
     },
     {
-      nodeId: "component.storage-s3",
-      label: "S3 Storage",
-      dcpType: "COMPONENT",
+      nodeId: "component.state-store",
+      label: "Postgres State Store",
+      dcpType: "ADAPTER",
       level: "CHILD",
-      catalogEntryId: "com.unfurl:storage-s3:1.2.0",
-      capabilities: ["storage.put"],
-      compatibleDescendants: ["component.azure-blob", "component.minio-storage"],
+      catalogEntryId: "com.unfurl.flow.adapter:postgres-state-store:0.1.0",
+      capabilities: ["state-store.claim", "state-store.checkpoint"],
+      compatibleDescendants: ["component.file-state-store", "component.in-memory-state-store"],
       replacementAllowed: true
     }
   ],
   edges: [
-    { fromNodeId: "company:e-commerce-platform", toNodeId: "assembly:e-commerce-platform", relationship: "CONTAINS" },
-    { fromNodeId: "assembly:e-commerce-platform", toNodeId: "component.validation-service", relationship: "CONTAINS" },
-    { fromNodeId: "assembly:e-commerce-platform", toNodeId: "component.storage-s3", relationship: "CONTAINS" },
-    { fromNodeId: "component.validation-service", toNodeId: "component.storage-s3", relationship: "REQUIRES" }
+    { fromNodeId: "runtime:unfurl", toNodeId: "assembly:unfurl-flow", relationship: "CONTAINS" },
+    { fromNodeId: "assembly:unfurl-flow", toNodeId: "component.flow-orchestrator", relationship: "CONTAINS" },
+    { fromNodeId: "assembly:unfurl-flow", toNodeId: "component.state-store", relationship: "CONTAINS" },
+    { fromNodeId: "component.flow-orchestrator", toNodeId: "component.state-store", relationship: "REQUIRES" }
   ],
   warnings: []
 };
@@ -170,31 +170,31 @@ export const studioApiExampleDynamicDcpProjection: DynamicDcpProjectionResponse 
 export const studioApiExampleReplacementCandidates: ReplacementCandidatesResponse = {
   tenantId: DEFAULT_STUDIO_TENANT_ID,
   assemblyId: DEFAULT_STUDIO_ASSEMBLY_ID,
-  componentNodeId: "component.validation-service",
+  componentNodeId: "component.flow-orchestrator",
   candidates: [
     {
-      catalogEntryId: "com.unfurl:validation-service:1.1.0",
-      label: "Validation Service",
+      catalogEntryId: "com.unfurl.flow:orchestrator:0.1.0",
+      label: "Flow Orchestrator",
       owner: "current-selection",
       shape: "COMPONENT",
       status: "ALLOWED",
       reason: "current selected component remains valid for this dynamic DCP slot"
     },
     {
-      catalogEntryId: "com.unfurl:customer-policy-validator:1.2.0",
-      label: "Customer Policy Validator",
-      owner: "risk-team",
+      catalogEntryId: "com.unfurl.flow:distributed-worker:0.1.0",
+      label: "Distributed Worker",
+      owner: "flow-team",
       shape: "CONTAINER",
       status: "ALLOWED",
-      reason: "offers the validation capabilities required by Validation Service"
+      reason: "offers node execution capabilities required by the Flow assembly"
     },
     {
-      catalogEntryId: "com.unfurl:fraud-only-validator:1.0.0",
-      label: "Fraud-only Validator",
-      owner: "risk-team",
+      catalogEntryId: "com.unfurl.flow:trigger-ingress:0.1.0",
+      label: "Trigger Ingress",
+      owner: "flow-team",
       shape: "SERVICE",
       status: "BLOCKED",
-      reason: "missing validate.inventory required by the selected DCP slot"
+      reason: "does not own deterministic node scheduling"
     }
   ],
   warnings: []
@@ -350,8 +350,8 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
       return ok<StudioAssemblySummary>({
         tenantId: session.tenantId,
         assemblyId: body?.assemblyId ?? session.assemblyId,
-        targetApplicationName: body?.targetApplicationName ?? "E-Commerce Platform",
-        defaultDeploymentTarget: body?.defaultDeploymentTarget ?? "On-Prem Cluster",
+        targetApplicationName: body?.targetApplicationName ?? "unfurl-flow",
+        defaultDeploymentTarget: body?.defaultDeploymentTarget ?? "Customer Runtime Substrate",
         needsId: "",
         deploymentShape: "CONTAINERIZED_SERVICE",
         currentCandidateId: "",
@@ -364,8 +364,8 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
         status: "SAVED",
         assembly: {
           ...assembly(session),
-          targetApplicationName: body?.targetApplicationName ?? "E-Commerce Platform",
-          defaultDeploymentTarget: body?.deploymentTarget ?? "On-Prem Cluster",
+          targetApplicationName: body?.targetApplicationName ?? "unfurl-flow",
+          defaultDeploymentTarget: body?.deploymentTarget ?? "Customer Runtime Substrate",
           needsId: body?.needsId ?? "",
           deploymentShape: body?.deploymentShape ?? "CONTAINERIZED_SERVICE"
         },
@@ -461,8 +461,8 @@ function assembly(session: StudioDraftSession): StudioAssemblySummary {
   return {
     tenantId: session.tenantId,
     assemblyId: session.assemblyId,
-    targetApplicationName: "E-Commerce Platform",
-    defaultDeploymentTarget: "On-Prem Cluster",
+    targetApplicationName: "unfurl-flow",
+    defaultDeploymentTarget: "Customer Runtime Substrate",
     needsId: "",
     deploymentShape: "CONTAINERIZED_SERVICE",
     currentCandidateId: session.currentCandidateId ?? "",

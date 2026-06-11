@@ -20,18 +20,18 @@ import { RequiredPortsPanel } from "./RequiredPortsPanel.js";
 export type DeploymentPlannerPanelProps = {
   readonly client: Pick<StudioFabricClient, "resolveDeployment">;
   readonly initialCatalogPath?: string;
-  readonly initialNeedsPath?: string;
+  readonly initialAssemblyPath?: string;
   readonly initialPlannerState?: DeploymentPlannerState | undefined;
 };
 
 export function DeploymentPlannerPanel({
   client,
   initialCatalogPath = "",
-  initialNeedsPath = "",
+  initialAssemblyPath = "",
   initialPlannerState
 }: DeploymentPlannerPanelProps) {
   const [catalogPath, setCatalogPath] = useState(initialCatalogPath);
-  const [needsPath, setNeedsPath] = useState(initialNeedsPath);
+  const [assemblyPath, setAssemblyPath] = useState(initialAssemblyPath);
   const [candidateId, setCandidateId] = useState("");
   const [autoSelectBest, setAutoSelectBest] = useState(false);
   const [isolationPattern, setIsolationPattern] = useState("");
@@ -54,7 +54,7 @@ export function DeploymentPlannerPanel({
     try {
       const resolved = await client.resolveDeployment({
         catalogPath,
-        needsPath,
+        needsPath: assemblyPath,
         ...(candidateId.trim() === "" ? {} : { candidateId: candidateId.trim() }),
         autoSelectBest,
         deploymentPolicy: policy
@@ -84,7 +84,7 @@ export function DeploymentPlannerPanel({
     <div className="studio-page">
       <header className="studio-header">
         <h1>{view.title}</h1>
-        <p>Resolve physical deployment shapes from catalog, needs, and operator policy.</p>
+        <p>Resolve physical deployment shapes from catalog, assembly profile, and operator policy.</p>
       </header>
 
       <section className="studio-panel">
@@ -94,8 +94,8 @@ export function DeploymentPlannerPanel({
           <input value={catalogPath} onChange={event => setCatalogPath(event.target.value)} />
         </label>
         <label>
-          Needs YAML path
-          <input value={needsPath} onChange={event => setNeedsPath(event.target.value)} />
+          Assembly YAML path
+          <input value={assemblyPath} onChange={event => setAssemblyPath(event.target.value)} />
         </label>
         <label>
           Candidate ID
