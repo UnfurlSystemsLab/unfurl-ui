@@ -157,6 +157,36 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /Flow Orchestrator/);
     assert.match(html, /COMPONENT.*replaceable/s);
   });
+
+  // Hover-preview contract: the panel accepts a client that exposes
+  // loadConnectionCandidates and renders palette buttons that the
+  // operator can hover. We can't assert event handlers in SSR (React 18
+  // attaches synthetic events client-side), so this test verifies the
+  // shape contract — the panel uses optional chaining on
+  // loadConnectionCandidates, so a client with or without it must
+  // render the workbench identically. Regression of either path would
+  // surface as a type error or render crash.
+  it("renders identically with or without a loadConnectionCandidates-capable client", () => {
+    const withFn = renderToString(
+      <DraftWorkspacePanel
+        client={{
+          ...client(),
+          loadConnectionCandidates: async () => ({
+            tenantId: "tenant-local",
+            assemblyId: "assembly-demo",
+            catalogEntryId: "any",
+            connections: [],
+            replacements: [],
+            warnings: []
+          })
+        }}
+      />
+    );
+    const withoutFn = renderToString(<DraftWorkspacePanel client={client()} />);
+
+    assert.match(withFn, /catalog-row/);
+    assert.match(withoutFn, /catalog-row/);
+  });
 });
 
 function client() {

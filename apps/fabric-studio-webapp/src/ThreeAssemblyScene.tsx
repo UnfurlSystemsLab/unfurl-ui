@@ -30,6 +30,18 @@ export type ThreeAssemblySceneProps = {
    * backend draft state has loaded.
    */
   readonly draftComponentCount?: number | undefined;
+  /**
+   * Hover-preview compatibility highlights. Populated while the operator
+   * is hovering a palette button: connectionNodes lights up draft
+   * components that the hovered candidate could plug into (amber glow),
+   * replacementNodes lights up slots it could substitute (purple glow),
+   * and portIds gives the specific port-socket meshes a brighter green
+   * emissive so the exact compatible port pops inside its component.
+   * All three undefined ⇒ no preview active; scene relaxes to neutral.
+   */
+  readonly previewConnectionNodes?: ReadonlySet<string> | undefined;
+  readonly previewReplacementNodes?: ReadonlySet<string> | undefined;
+  readonly previewPortIds?: ReadonlySet<string> | undefined;
   readonly onSelect: (surface: ThreeAssemblySurfaceId) => void;
   readonly onSelectPart?: (selection: ThreeAssemblySelection) => void;
   readonly onViewChange?: (view: string) => void;
@@ -108,6 +120,9 @@ export function ThreeAssemblyScene({
   semanticProjection,
   requestedSemanticZoomLevel,
   draftComponentCount,
+  previewConnectionNodes,
+  previewReplacementNodes,
+  previewPortIds,
   onSelect,
   onSelectPart,
   onViewChange,
@@ -132,6 +147,12 @@ export function ThreeAssemblyScene({
   // draftComponentCount drives module-slot visibility (each hardcoded
   // module slot 0..8 shows only when its index is below the count).
   const draftComponentCountRef = useRef(draftComponentCount);
+  // Hover-preview compatibility highlight sets, threaded through refs so
+  // they survive the mount-once invariant. The animate loop reads these
+  // each frame and updates emissive / scale / opacity in place.
+  const previewConnectionNodesRef = useRef(previewConnectionNodes);
+  const previewReplacementNodesRef = useRef(previewReplacementNodes);
+  const previewPortIdsRef = useRef(previewPortIds);
 
   onSelectRef.current = onSelect;
   onSelectPartRef.current = onSelectPart;
@@ -144,6 +165,9 @@ export function ThreeAssemblyScene({
   requestedSemanticZoomLevelRef.current = requestedSemanticZoomLevel;
   semanticProjectionRef.current = semanticProjection;
   draftComponentCountRef.current = draftComponentCount;
+  previewConnectionNodesRef.current = previewConnectionNodes;
+  previewReplacementNodesRef.current = previewReplacementNodes;
+  previewPortIdsRef.current = previewPortIds;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -403,7 +427,19 @@ export function ThreeAssemblyScene({
         semanticZoomLevel = nextSemanticZoomLevel;
         onSemanticZoomChangeRef.current?.(semanticZoomLevel);
       }
-      applySceneState(handles, selectedRef.current, selectedPartRef.current, extractedPartRef.current, viewRef.current, semanticZoomLevel, frame, draftComponentCountRef.current);
+      applySceneState(
+        handles,
+        selectedRef.current,
+        selectedPartRef.current,
+        extractedPartRef.current,
+        viewRef.current,
+        semanticZoomLevel,
+        frame,
+        draftComponentCountRef.current,
+        previewConnectionNodesRef.current,
+        previewReplacementNodesRef.current,
+        previewPortIdsRef.current
+      );
       renderer.render(scene, camera);
       raf = window.requestAnimationFrame(animate);
     }
@@ -1114,8 +1150,20 @@ function applySceneState(
   activeView: string,
   semanticZoomLevel: SemanticZoomLevel,
   frame: number,
-  draftComponentCount: number | undefined
+  draftComponentCount: number | undefined,
+  previewConnectionNodes: ReadonlySet<string> | undefined,
+  previewReplacementNodes: ReadonlySet<string> | undefined,
+  previewPortIds: ReadonlySet<string> | undefined
 ) {
+  // Hover-preview is active when any of the three sets has at least one
+  // entry. The non-preview path stays bit-identical to before so the
+  // existing select / extract / dim behaviour is unchanged when the
+  // operator isn't hovering.
+  const previewActive = !!(
+    (previewConnectionNodes && previewConnectionNodes.size > 0)
+    || (previewReplacementNodes && previewReplacementNodes.size > 0)
+    || (previewPortIds && previewPortIds.size > 0)
+  );
   for (const [id, group] of handles.moduleGroups) {
     const body = handles.moduleBodies.get(id);
     if (!body) {
@@ -1135,7 +1183,19 @@ function applySceneState(
     const selectedThis = id === selected;
     const dimmedForExploded = activeView === "Exploded" && !selectedThis && id !== "substrate";
     const dimmedForSubstrate = activeView === "Substrate" && id !== "substrate" && id !== "adapter" && id !== "validation";
-    const dimmed = dimmedForExploded || dimmedForSubstrate;
+    // The scene's hardcoded surface IDs ("validation", "adapter", ...)
+    // do not yet map 1:1 to backend node IDs ("component.consumer-app",
+    // ...). For now we apply a coarse loose match — any backend nodeId
+    // that mentions the surface ID slug counts. When real draft-state
+    // tracking lands and surface IDs align with backend nodeIds, this
+    // becomes precise without code change.
+    const isConnectionTarget = previewActive && matchesPreviewSet(id, previewConnectionNodes);
+    const isReplacementTarget = previewActive && matchesPreviewSet(id, previewReplacementNodes);
+    const dimmedForPreview = previewActive
+      && id !== "substrate"
+      && !isConnectionTarget
+      && !isReplacementTarget;
+    const dimmed = dimmedForExploded || dimmedForSubstrate || dimmedForPreview;
 
     const base = modulePlacementsById[id as ModulePlacement["id"]];
     if (base) {
@@ -1145,14 +1205,32 @@ function applySceneState(
       group.position.z = base.position[2] + (extractedThis ? 0.78 : 0);
     }
     group.scale.setScalar(selectedThis ? 1.055 : 1);
-    setObjectOpacity(group, dimmed ? 0.44 : 1);
+    setObjectOpacity(group, dimmed ? (dimmedForPreview ? 0.62 : 0.44) : 1);
 
-    const emissiveColor = selectedThis ? 0x7c3aed : activeView === "Validation" ? 0x16a34a : 0x000000;
+    // Selection wins, then validation tint, then preview overlay.
+    // Preview overlays add a soft amber/purple emissive so the candidate
+    // glow is unmistakable but doesn't override an explicit selection.
+    let emissiveColor = selectedThis ? 0x7c3aed
+      : activeView === "Validation" ? 0x16a34a
+        : 0x000000;
+    let emissiveIntensity = selectedThis ? 0.18
+      : activeView === "Validation" ? 0.035
+        : 0;
+    if (!selectedThis) {
+      if (isReplacementTarget) {
+        emissiveColor = 0x7c3aed;
+        emissiveIntensity = 0.18;
+      } else if (isConnectionTarget) {
+        emissiveColor = 0xf59e0b;
+        // Soft pulse to draw the eye without strobing.
+        emissiveIntensity = 0.12 + Math.sin(frame * 2) * 0.04;
+      }
+    }
     const materials = Array.isArray(body.material) ? body.material : [body.material];
     for (const material of materials) {
       if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) {
         material.emissive.set(emissiveColor);
-        material.emissiveIntensity = selectedThis ? 0.18 : activeView === "Validation" ? 0.035 : 0;
+        material.emissiveIntensity = emissiveIntensity;
       }
     }
   }
@@ -1191,13 +1269,28 @@ function applySceneState(
   setObjectOpacity(handles.parentDcpGroup, semanticZoomLevel === "PARENT_DCP" ? 1 : 0);
   setObjectOpacity(handles.childDcpGroup, semanticZoomLevel === "CHILD_DCP" ? 1 : 0);
   handles.childDcpGroup.position.y = -0.42 + Math.sin(frame * 1.3) * 0.018;
-  applyPartState(handles, selectedPartId, extractedPartId, frame);
+  applyPartState(handles, selectedPartId, extractedPartId, frame, previewPortIds);
 }
 
-function applyPartState(handles: SceneHandles, selectedPartId: string | undefined, extractedPartId: string | undefined, frame: number) {
+function applyPartState(
+  handles: SceneHandles,
+  selectedPartId: string | undefined,
+  extractedPartId: string | undefined,
+  frame: number,
+  previewPortIds: ReadonlySet<string> | undefined
+) {
   for (const [id, object] of handles.selectableParts) {
     const selected = id === selectedPartId || id.startsWith(`${selectedPartId}:`);
     const extracted = id === extractedPartId || id.startsWith(`${extractedPartId}:`);
+    // Port-level preview match: the operator hovered a palette entry and
+    // the backend told us {@code id} is a compatible target port. The
+    // selectableParts ids include {@code connector:<surface>:<index>}
+    // for individual port sockets; we accept either an exact id match
+    // or a substring match against a backend port id so the same loose
+    // gating as the module-level preview applies.
+    const portIsPreviewTarget = !!(previewPortIds
+      && (previewPortIds.has(id)
+        || matchesIdAgainstSet(id, previewPortIds)));
     object.traverse(child => {
       if (!(child instanceof THREE.Mesh || child instanceof THREE.Line)) {
         return;
@@ -1208,6 +1301,11 @@ function applyPartState(handles: SceneHandles, selectedPartId: string | undefine
           if (selected || extracted) {
             material.emissive.set(extracted ? 0x0ea5e9 : 0x7c3aed);
             material.emissiveIntensity = extracted ? 0.42 + Math.sin(frame * 4) * 0.08 : 0.28;
+          } else if (portIsPreviewTarget) {
+            // Bright green so the compatible port "pops" inside its
+            // amber-tinted parent component group.
+            material.emissive.set(0x10b981);
+            material.emissiveIntensity = 0.32;
           }
         }
         if (material instanceof THREE.LineBasicMaterial || material instanceof THREE.LineDashedMaterial) {
@@ -1217,10 +1315,27 @@ function applyPartState(handles: SceneHandles, selectedPartId: string | undefine
       if (extracted && child instanceof THREE.Mesh && child.userData.selection?.kind !== "component") {
         child.scale.setScalar(1.18);
       } else if (child instanceof THREE.Mesh && child.userData.selection?.kind !== "component") {
-        child.scale.setScalar(selected ? 1.08 : 1);
+        child.scale.setScalar(portIsPreviewTarget ? 1.12 : (selected ? 1.08 : 1));
       }
     });
   }
+}
+
+/**
+ * Substring match for port-level preview ids — same idea as
+ * {@link matchesPreviewSet} for modules. Tolerates the temporary
+ * mismatch between the scene's port ids
+ * ({@code "connector:<surface>:<index>"}) and the backend's port ids
+ * ({@code "need-<capability>"} / {@code "<capability>"}). When the two
+ * id spaces are unified, swap for {@code set.has(id)}.
+ */
+function matchesIdAgainstSet(id: string, ids: ReadonlySet<string>): boolean {
+  for (const candidate of ids) {
+    if (id.includes(candidate) || candidate.includes(id)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function setObjectOpacity(object: THREE.Object3D, opacity: number) {
@@ -1302,4 +1417,28 @@ const MODULE_SLOT_INDEX: ReadonlyMap<ThreeAssemblySurfaceId, number> = new Map(
  */
 function moduleSlotIndex(id: ThreeAssemblySurfaceId): number {
   return MODULE_SLOT_INDEX.get(id) ?? -1;
+}
+
+/**
+ * Loose match between a scene surface id (e.g. {@code "validation"}) and
+ * a backend node-id set (e.g. {@code "component.validation-service"}).
+ * Returns true when any nodeId in the set contains the surfaceId as a
+ * substring. Used by {@link applySceneState} to bridge the gap between
+ * the scene's hardcoded surface ids and the backend's dynamic-projection
+ * node ids until the two id spaces are unified. When that unification
+ * happens, swap this for direct {@code set.has(id)}.
+ */
+function matchesPreviewSet(
+  surfaceId: ThreeAssemblySurfaceId,
+  nodes: ReadonlySet<string> | undefined
+): boolean {
+  if (!nodes || nodes.size === 0) {
+    return false;
+  }
+  for (const nodeId of nodes) {
+    if (nodeId.includes(surfaceId)) {
+      return true;
+    }
+  }
+  return false;
 }

@@ -245,6 +245,46 @@ export type ReplacementCandidatesResponse = {
   readonly warnings: readonly string[];
 };
 
+// ---- Hover-preview connection candidates --------------------------------
+//
+// Mirrors the backend's
+// GET /studio/tenants/{tenantId}/assemblies/{assemblyId}/dynamic-dcp/connection-candidates?catalogEntryId=...
+// surface. Consumed by the Studio palette's hover handler: each hover
+// returns the connection edges (OFFER↔DEPENDENCY pairings against the
+// current draft) and replacement edges (slot substitutions) for the
+// hovered catalog entry, so the 3D scene can light up compatible
+// targets before the operator clicks Add.
+
+export type ConnectionCandidatesRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly catalogEntryId: string;
+};
+
+export type StudioConnectionEdge = {
+  readonly targetNodeId: string;
+  readonly targetPortId: string;
+  readonly candidatePortId: string;
+  readonly direction: "CANDIDATE_OFFERS" | "CANDIDATE_NEEDS" | string;
+  readonly status: "ALLOWED" | "BLOCKED" | string;
+  readonly reason: string;
+};
+
+export type StudioReplacementEdge = {
+  readonly targetNodeId: string;
+  readonly status: "ALLOWED" | "BLOCKED" | string;
+  readonly reason: string;
+};
+
+export type ConnectionCandidatesResponse = {
+  readonly tenantId: string;
+  readonly assemblyId: string;
+  readonly catalogEntryId: string;
+  readonly connections: readonly StudioConnectionEdge[];
+  readonly replacements: readonly StudioReplacementEdge[];
+  readonly warnings: readonly string[];
+};
+
 export type LoadCompositionViewRequest = {
   readonly contractPath: string;
   readonly substrateProfilePath: string;
@@ -426,6 +466,7 @@ export interface StudioFabricClient {
   readonly saveLayoutState?: (request: SaveLayoutStateRequest) => Promise<StudioLayoutState>;
   readonly loadDynamicDcpProjection?: (request?: DynamicDcpProjectionRequest) => Promise<DynamicDcpProjectionResponse>;
   readonly loadReplacementCandidates?: (request: ReplacementCandidatesRequest) => Promise<ReplacementCandidatesResponse>;
+  readonly loadConnectionCandidates?: (request: ConnectionCandidatesRequest) => Promise<ConnectionCandidatesResponse>;
   readonly loadCompositionView: (request: LoadCompositionViewRequest) => Promise<LoadCompositionViewResponse>;
   readonly createDraftComposition: (request: CreateDraftCompositionRequest) => Promise<CreateDraftCompositionResponse>;
   readonly getDraftSession: (request: string | ({

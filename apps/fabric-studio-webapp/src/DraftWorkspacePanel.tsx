@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   DEFAULT_STUDIO_ASSEMBLY_ID,
@@ -7,7 +7,8 @@ import {
   type StudioSessionEvent,
   type StudioReplacementCandidate as FabricReplacementCandidate,
   type StudioLayoutState,
-  type StudioFabricClient
+  type StudioFabricClient,
+  type ConnectionCandidatesResponse
 } from "@unfurl/fabric-validation-client";
 import type { VisualCatalogEntry } from "@unfurl/visual-manifest";
 import {
@@ -32,6 +33,7 @@ export type DraftWorkspacePanelProps = {
     "saveLayoutState" |
     "loadDynamicDcpProjection" |
     "loadReplacementCandidates" |
+    "loadConnectionCandidates" |
     "listCatalogVisuals" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate"
     | "heartbeatCollaborator" | "sessionEventsUrl"
   >;
@@ -118,6 +120,17 @@ export function DraftWorkspacePanel({
   });
   const [extractedPartId, setExtractedPartId] = useState<string | undefined>();
   const [replacementEntryId, setReplacementEntryId] = useState("com.unfurl:validation-service:1.1.0");
+  // Hover-preview state: populated while the operator's pointer is over a
+  // palette button, cleared on mouseleave or after a successful intent.
+  // The 3D scene reads these sets to light up compatible targets.
+  const [preview, setPreview] = useState<{
+    readonly catalogEntryId: string;
+    readonly connectionNodes: ReadonlySet<string>;
+    readonly replacementNodes: ReadonlySet<string>;
+    readonly portIds: ReadonlySet<string>;
+  } | undefined>(undefined);
+  const hoverDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const hoverGenerationRef = useRef(0);
   const [activeView, setActiveView] = useState("Assembly");
   const [activeInspectorTab, setActiveInspectorTab] = useState("Properties");
   const [tutorialOpen, setTutorialOpen] = useState(() => shouldShowTutorial());
@@ -410,9 +423,73 @@ export function DraftWorkspacePanel({
         }
       ]);
       selectScenePart({ id: `component:${slugFromCatalogEntry(entryId)}`, kind: "component", surface: "validation", label: labelForCatalogEntry(entryId) });
+      clearPreview();
     } finally {
       setBusy(false);
     }
+  }
+
+  // ---- Hover-preview wiring -------------------------------------------
+  //
+  // hoverCandidate is debounced 150 ms so quickly skimming the palette
+  // doesn't fire one request per button. Each invocation bumps the
+  // hover-generation counter; the eventual fetch checks the counter when
+  // it resolves and discards stale responses (operator may have moved on
+  // before the network round-trip finished).
+
+  function clearPreview() {
+    if (hoverDebounceRef.current !== undefined) {
+      clearTimeout(hoverDebounceRef.current);
+      hoverDebounceRef.current = undefined;
+    }
+    hoverGenerationRef.current += 1;
+    setPreview(undefined);
+  }
+
+  function hoverCandidate(entryId: string) {
+    if (!entryId || !knownCatalogEntryIds.has(entryId)) {
+      // Skip hover lookups for unknown / blank entries — backend would
+      // return a warning, and we'd just clear the existing preview.
+      return;
+    }
+    if (!client.loadConnectionCandidates) {
+      return;
+    }
+    if (hoverDebounceRef.current !== undefined) {
+      clearTimeout(hoverDebounceRef.current);
+    }
+    const generation = ++hoverGenerationRef.current;
+    hoverDebounceRef.current = setTimeout(() => {
+      hoverDebounceRef.current = undefined;
+      void (async () => {
+        try {
+          const response: ConnectionCandidatesResponse = await client.loadConnectionCandidates!({
+            tenantId,
+            assemblyId,
+            catalogEntryId: entryId
+          });
+          if (generation !== hoverGenerationRef.current) {
+            // Stale response — operator moved on before the round-trip
+            // finished. Do not overwrite a fresher preview / cleared
+            // state with this result.
+            return;
+          }
+          const connectionNodes = new Set(response.connections.map(edge => edge.targetNodeId));
+          const replacementNodes = new Set(response.replacements.map(edge => edge.targetNodeId));
+          const portIds = new Set(response.connections.map(edge => edge.targetPortId));
+          setPreview({
+            catalogEntryId: entryId,
+            connectionNodes,
+            replacementNodes,
+            portIds
+          });
+        } catch {
+          // Silent: hover preview is non-critical UX. A failed lookup
+          // leaves the existing preview in place rather than blanking
+          // the scene.
+        }
+      })();
+    }, 150);
   }
 
   async function connectPorts() {
@@ -423,6 +500,7 @@ export function DraftWorkspacePanel({
     try {
       setState(await applyDraftIntent(client, state, { type: "CONNECT", fromPort, toPort }));
       selectScenePart({ id: "substrate:base", kind: "substrate", surface: "substrate", label: "Substrate base plate" });
+      clearPreview();
     } finally {
       setBusy(false);
     }
@@ -490,6 +568,7 @@ export function DraftWorkspacePanel({
       }));
       setCatalogEntryId(replacementEntryId);
       setExtractedPartId(undefined);
+      clearPreview();
     } finally {
       setBusy(false);
     }
@@ -699,7 +778,17 @@ export function DraftWorkspacePanel({
           </label>
           {catalogError && <p className="live-data-notice">Live catalog unavailable; showing generated fallback.</p>}
           <div className="palette-list grouped">
-            <CatalogGroup title="Flow Components" entries={paletteEntries} busy={busy} ready={state?.status === "READY"} knownCatalogEntryIds={knownCatalogEntryIds} onSelect={entryId => void addComponent(entryId)} />
+            <CatalogGroup
+              title="Flow Components"
+              entries={paletteEntries}
+              busy={busy}
+              ready={state?.status === "READY"}
+              knownCatalogEntryIds={knownCatalogEntryIds}
+              hoveredCatalogEntryId={preview?.catalogEntryId}
+              onSelect={entryId => void addComponent(entryId)}
+              onHover={hoverCandidate}
+              onHoverEnd={clearPreview}
+            />
             <StaticCatalogGroup title="Adapters" names={["Postgres State Store", "Kafka Event Sink", "HTTP Connector", "Foundry Agent Runtime"]} />
             <StaticCatalogGroup title="Substrate Ports" names={["Java Runtime", "Secrets Provider", "Telemetry OTEL", "Container Scheduler"]} />
             <StaticCatalogGroup title="Libraries" names={["Substrate Engine", "DCP Contracts", "Definition Registry"]} />
@@ -763,6 +852,12 @@ export function DraftWorkspacePanel({
                   // index N < draftComponentCount. `undefined` (initial
                   // demo state) preserves the original all-slots view.
                   draftComponentCount={draftComponents === undefined ? undefined : draftComponents.length}
+                  // Hover-preview highlight sets — undefined when the
+                  // operator isn't hovering anything, so the scene
+                  // relaxes to neutral.
+                  previewConnectionNodes={preview?.connectionNodes}
+                  previewReplacementNodes={preview?.replacementNodes}
+                  previewPortIds={preview?.portIds}
                   onSelect={setSelectedComponent}
                   onSelectPart={selectScenePart}
                   onViewChange={setActiveView}
@@ -1224,26 +1319,42 @@ function CatalogGroup({
   ready,
   busy,
   knownCatalogEntryIds,
-  onSelect
+  hoveredCatalogEntryId,
+  onSelect,
+  onHover,
+  onHoverEnd
 }: {
   readonly title: string;
   readonly entries: readonly VisualCatalogEntry[];
   readonly ready: boolean;
   readonly busy: boolean;
   readonly knownCatalogEntryIds: ReadonlySet<string>;
+  readonly hoveredCatalogEntryId?: string | undefined;
   readonly onSelect: (entryId: string) => void;
+  readonly onHover?: (entryId: string) => void;
+  readonly onHoverEnd?: () => void;
 }) {
   return (
     <section className="catalog-group">
       <h3>{title}</h3>
       {entries.map((entry, index) => {
         const inCatalog = knownCatalogEntryIds.has(entry.catalogEntryId);
+        const isHovered = hoveredCatalogEntryId === entry.catalogEntryId;
+        const baseClass = index === 0 ? "catalog-row active" : "catalog-row";
         return (
           <button
             type="button"
-            className={index === 0 ? "catalog-row active" : "catalog-row"}
+            className={isHovered ? `${baseClass} previewing` : baseClass}
             key={entry.catalogEntryId}
             onClick={() => onSelect(entry.catalogEntryId)}
+            // Hover drives the compatibility preview: the panel debounces
+            // the lookup (150 ms) so quickly skimming buttons doesn't
+            // fire a request per row. Mouseleave clears the preview so
+            // the scene relaxes to neutral the moment focus drifts.
+            onMouseEnter={onHover ? () => onHover(entry.catalogEntryId) : undefined}
+            onMouseLeave={onHoverEnd}
+            onFocus={onHover ? () => onHover(entry.catalogEntryId) : undefined}
+            onBlur={onHoverEnd}
             disabled={!ready || busy || !inCatalog}
             title={inCatalog ? undefined : "Not in the live catalog; admit it before assembly"}
           >

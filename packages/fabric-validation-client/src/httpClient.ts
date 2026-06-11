@@ -21,6 +21,8 @@ import type {
   HeartbeatCollaboratorRequest,
   ReplacementCandidatesRequest,
   ReplacementCandidatesResponse,
+  ConnectionCandidatesRequest,
+  ConnectionCandidatesResponse,
   IntentResponse,
   ListCatalogVisualsResponse,
   LoadCompositionViewRequest,
@@ -189,6 +191,18 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/dynamic-dcp/replacements?componentNodeId=${componentNodeId}`,
+        undefined,
+        tenantHeaders(scope.tenantId, authContext)
+      );
+    },
+    loadConnectionCandidates: async (body: ConnectionCandidatesRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      const catalogEntryId = encodeURIComponent(body.catalogEntryId);
+      return request<ConnectionCandidatesResponse>(
+        fetchImpl,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/dynamic-dcp/connection-candidates?catalogEntryId=${catalogEntryId}`,
         undefined,
         tenantHeaders(scope.tenantId, authContext)
       );
