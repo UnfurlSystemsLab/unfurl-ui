@@ -687,6 +687,19 @@ export function DraftWorkspacePanel({
     () => new Set(paletteEntries.map(entry => entry.catalogEntryId)),
     [paletteEntries]
   );
+  // Allow-set the 3D scene filters its modules through. When the
+  // operator's draft has zero components, this is an empty set and the
+  // scene shows only the substrate plate — so the empty-assembly
+  // overlay reads correctly instead of overlapping a 3D rendering of
+  // the entire catalog. `undefined` when draftComponents hasn't loaded
+  // yet (e.g. fixture mode without a draft session) so the scene
+  // skips the filter and shows everything in the projection.
+  const draftCatalogEntryIdSet = useMemo(
+    () => draftComponents === undefined
+      ? undefined
+      : new Set(draftComponents.map(component => component.catalogEntryId)),
+    [draftComponents]
+  );
   const draftComponentCount = draftComponents?.length ?? initialDraftComponentCount;
   const showFallbackAssembly = dynamicProjection === undefined
     && draftComponents === undefined
@@ -1009,6 +1022,17 @@ export function DraftWorkspacePanel({
                   semanticProjection={semanticSceneProjection}
                   requestedSemanticZoomLevel={requestedSemanticZoomLevel}
                   dynamicProjection={dynamicProjection}
+                  // Restrict the scene to ONLY render modules for
+                  // components the operator has actually added to the
+                  // draft. Without this filter, the dynamicProjection
+                  // ships the whole catalog (because the backend's
+                  // dynamic-dcp endpoint reads from catalog), so an
+                  // empty draft would render every catalog entry on
+                  // stage — overlapping the "Import or add components"
+                  // empty-assembly overlay. `undefined` ⇒ no filter
+                  // (catalog-browsing preview); empty set ⇒ scene
+                  // shows only the substrate plate.
+                  draftCatalogEntryIds={draftCatalogEntryIdSet}
                   // Hover-preview highlight sets — undefined when the
                   // operator isn't hovering anything, so the scene
                   // relaxes to neutral.
@@ -1269,38 +1293,58 @@ export function DraftWorkspacePanel({
               </button>
             </div>
           </section>
-          <section className="inspector-card">
-            <h2>Replace Component</h2>
-            <p className="live-data-notice">
-              {fabricReplacementCandidates
-                ? "Replacement options are sourced from Fabric's dynamic DCP projection."
-                : "Replacement options are using local demo fallback data."}
-            </p>
-            <div className="replacement-shelf" aria-label="Replacement candidates">
-              {replacementCandidates.map(candidate => (
-                <button
-                  type="button"
-                  className={replacementEntryId === candidate.catalogEntryId ? `replacement-card selected ${candidate.status.toLowerCase()}` : `replacement-card ${candidate.status.toLowerCase()}`}
-                  key={candidate.catalogEntryId}
-                  onClick={() => setReplacementEntryId(candidate.catalogEntryId)}
-                >
-                  <strong>{candidate.label}</strong>
-                  <span>{candidate.owner} / {candidate.shape}</span>
-                  <small>{candidate.status === "ALLOWED" ? "Allowed" : "Blocked"}: {candidate.reason}</small>
-                </button>
-              ))}
-            </div>
-            <button type="button" disabled={busy || state?.status !== "READY" || selectedPart.kind !== "component" || selectedReplacement?.status !== "ALLOWED" || !knownCatalogEntryIds.has(replacementEntryId)} onClick={replaceSelectedComponent}>
-              Validate & Replace
-            </button>
-            {state?.status === "READY" && replacementEntryId !== "" && !knownCatalogEntryIds.has(replacementEntryId) && (
-              <p className="studio-error">Replacement candidate '{replacementEntryId}' is not in the live catalog and cannot be applied.</p>
-            )}
-            {selectedReplacement?.status === "BLOCKED" && <p className="studio-error">{selectedReplacement.reason}</p>}
-            {replacementCandidateError && <p className="studio-error">{replacementCandidateError}</p>}
-            {state?.status !== "READY" && <p className="live-data-notice">Create a draft before governed replacements are allowed.</p>}
-            {state?.status === "READY" && state.lastResponse?.status === "INVALID" && <p className="studio-error">{state.lastResponse.reason}: {state.lastResponse.details}</p>}
-          </section>
+          {selectedPart.kind === "substrate" ? (
+            <section className="inspector-card">
+              <h2>Substrate</h2>
+              <p className="live-data-notice">
+                The substrate base plate is derived from the deployment profile, not from
+                the catalog. It cannot be replaced from this panel — adjust the substrate
+                profile to change which runtime hosts the assembly.
+              </p>
+            </section>
+          ) : selectedPart.kind === "pipe" ? (
+            <section className="inspector-card">
+              <h2>Pipe</h2>
+              <p className="live-data-notice">
+                Pipes are derived from declared needs ↔ offers between draft components.
+                Use Disconnect on the selected scene part to remove this wiring, or
+                remove the consuming component to drop the pipe.
+              </p>
+            </section>
+          ) : (
+            <section className="inspector-card">
+              <h2>Replace Component</h2>
+              <p className="live-data-notice">
+                {fabricReplacementCandidates
+                  ? "Replacement options are sourced from Fabric's dynamic DCP projection."
+                  : "Replacement options are using local demo fallback data."}
+              </p>
+              <div className="replacement-shelf" aria-label="Replacement candidates">
+                {replacementCandidates.map(candidate => (
+                  <button
+                    type="button"
+                    className={replacementEntryId === candidate.catalogEntryId ? `replacement-card selected ${candidate.status.toLowerCase()}` : `replacement-card ${candidate.status.toLowerCase()}`}
+                    key={candidate.catalogEntryId}
+                    onClick={() => setReplacementEntryId(candidate.catalogEntryId)}
+                  >
+                    <strong>{candidate.label}</strong>
+                    <span>{candidate.owner} / {candidate.shape}</span>
+                    <small>{candidate.status === "ALLOWED" ? "Allowed" : "Blocked"}: {candidate.reason}</small>
+                  </button>
+                ))}
+              </div>
+              <button type="button" disabled={busy || state?.status !== "READY" || selectedPart.kind !== "component" || selectedReplacement?.status !== "ALLOWED" || !knownCatalogEntryIds.has(replacementEntryId)} onClick={replaceSelectedComponent}>
+                Validate & Replace
+              </button>
+              {state?.status === "READY" && replacementEntryId !== "" && !knownCatalogEntryIds.has(replacementEntryId) && (
+                <p className="studio-error">Replacement candidate '{replacementEntryId}' is not in the live catalog and cannot be applied.</p>
+              )}
+              {selectedReplacement?.status === "BLOCKED" && <p className="studio-error">{selectedReplacement.reason}</p>}
+              {replacementCandidateError && <p className="studio-error">{replacementCandidateError}</p>}
+              {state?.status !== "READY" && <p className="live-data-notice">Create a draft before governed replacements are allowed.</p>}
+              {state?.status === "READY" && state.lastResponse?.status === "INVALID" && <p className="studio-error">{state.lastResponse.reason}: {state.lastResponse.details}</p>}
+            </section>
+          )}
           <section className="inspector-card">
             <h2>{showDraftInventory ? "Draft Inventory" : "Dynamic DCP Projection"}</h2>
             {showDraftInventory ? (

@@ -47,6 +47,15 @@ export type ThreeAssemblySceneProps = {
    */
   readonly dynamicProjection?: DynamicDcpProjectionResponse | undefined;
   /**
+   * Catalog entry ids currently in the operator's draft. The scene
+   * renders ONLY modules whose catalogEntryId is in this set; pipes
+   * remain governed by the projection's connections. Pass
+   * {@code undefined} to disable filtering (catalog-browsing preview).
+   * Empty set ⇒ empty scene; the panel's empty-assembly overlay then
+   * reads correctly instead of overlapping the catalog visualisation.
+   */
+  readonly draftCatalogEntryIds?: ReadonlySet<string> | undefined;
+  /**
    * Fired when a palette entry is dropped onto the scene. The scene
    * owns the drag listeners on its own canvas (it has the raycaster);
    * this callback hands the panel the catalog entry id + the geometric
@@ -160,6 +169,7 @@ export function ThreeAssemblyScene({
   previewReplacementNodes,
   previewPortIds,
   dynamicProjection,
+  draftCatalogEntryIds,
   onCatalogEntryDropped,
   onSelect,
   onSelectPart,
@@ -196,6 +206,7 @@ export function ThreeAssemblyScene({
   // for the parent/child DCP groups); when it changes, rebuildDynamic*
   // tears down and rebuilds those groups in place.
   const dynamicProjectionRef = useRef(dynamicProjection);
+  const draftCatalogEntryIdsRef = useRef(draftCatalogEntryIds);
 
   onSelectRef.current = onSelect;
   onSelectPartRef.current = onSelectPart;
@@ -212,6 +223,7 @@ export function ThreeAssemblyScene({
   previewReplacementNodesRef.current = previewReplacementNodes;
   previewPortIdsRef.current = previewPortIds;
   dynamicProjectionRef.current = dynamicProjection;
+  draftCatalogEntryIdsRef.current = draftCatalogEntryIds;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -316,6 +328,7 @@ export function ThreeAssemblyScene({
     // building fresh.
 
     let appliedDynamicProjection: DynamicDcpProjectionResponse | undefined;
+    let appliedDraftCatalogEntryIds: ReadonlySet<string> | undefined;
     let appliedDynamicLayout: readonly LayoutEntry[] = [];
     let appliedDynamicClickables: THREE.Object3D[] = [];
     let appliedDynamicSelectableKeys: string[] = [];
@@ -336,7 +349,7 @@ export function ThreeAssemblyScene({
       appliedDynamicSelectableKeys = [];
       appliedDynamicModuleKeys = [];
 
-      const layout = layoutNodes(next);
+      const layout = layoutNodes(next, draftCatalogEntryIdsRef.current);
       const portIds = portIdsByNodeId(next);
       const group = new THREE.Group();
       for (const entry of layout) {
@@ -415,6 +428,7 @@ export function ThreeAssemblyScene({
     rebuildDynamicModules(dynamicProjectionRef.current);
     rebuildDynamicPipes(dynamicProjectionRef.current);
     appliedDynamicProjection = dynamicProjectionRef.current;
+    appliedDraftCatalogEntryIds = draftCatalogEntryIdsRef.current;
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -600,13 +614,21 @@ export function ThreeAssemblyScene({
       if (currentProjection !== appliedProjection) {
         rebuildDcpGroups(currentProjection);
       }
-      // Dynamic projection drives the modules + pipes. Same in-place
-      // swap-on-identity-change pattern as the DCP groups above.
+      // Dynamic projection + draft-membership filter drive the modules +
+      // pipes. Same in-place swap-on-identity-change pattern as the DCP
+      // groups above. We diff on EITHER the projection identity or the
+      // draftCatalogEntryIds identity changing — adding / removing a
+      // component changes only the second.
       const currentDynamicProjection = dynamicProjectionRef.current;
-      if (currentDynamicProjection !== appliedDynamicProjection) {
+      const currentDraftCatalogEntryIds = draftCatalogEntryIdsRef.current;
+      if (
+        currentDynamicProjection !== appliedDynamicProjection
+        || currentDraftCatalogEntryIds !== appliedDraftCatalogEntryIds
+      ) {
         rebuildDynamicModules(currentDynamicProjection);
         rebuildDynamicPipes(currentDynamicProjection);
         appliedDynamicProjection = currentDynamicProjection;
+        appliedDraftCatalogEntryIds = currentDraftCatalogEntryIds;
       }
       root.rotation.y = -0.23 + Math.sin(frame * 0.8) * 0.01;
       root.rotation.x = -0.06 + Math.sin(frame * 0.55) * 0.006;

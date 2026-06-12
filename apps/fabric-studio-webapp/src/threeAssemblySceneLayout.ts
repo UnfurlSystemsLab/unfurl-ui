@@ -36,18 +36,33 @@ const TIER_ACCENTS = {
 } as const;
 
 /**
- * Pure layout function. Given a {@link DynamicDcpProjectionResponse},
- * filter to CHILD-level nodes (the actual draft components), classify
- * each into a tier based on its role in the projection's port
- * connections, and assign deterministic positions left-to-right within
- * each tier. Same input ⇒ byte-identical output.
+ * Pure layout function. Given a {@link DynamicDcpProjectionResponse}
+ * and optionally a set of catalog entry ids that are actually in the
+ * draft, filter to CHILD-level nodes whose catalogEntryId is in the
+ * draft set, classify each into a tier based on its role in the
+ * projection's port connections, and assign deterministic positions
+ * left-to-right within each tier. Same input ⇒ byte-identical output.
+ *
+ * <p>{@code draftCatalogEntryIds === undefined} means "no filter" —
+ * every CHILD node renders (useful for catalog-browsing previews).
+ * An empty set means an empty draft and produces zero modules so the
+ * substrate plate alone is visible while the panel's empty-assembly
+ * overlay reads correctly.
  */
-export function layoutNodes(projection: DynamicDcpProjectionResponse | undefined): readonly LayoutEntry[] {
+export function layoutNodes(
+  projection: DynamicDcpProjectionResponse | undefined,
+  draftCatalogEntryIds?: ReadonlySet<string>
+): readonly LayoutEntry[] {
   if (!projection || !projection.nodes || projection.nodes.length === 0) {
     return [];
   }
   const connections = projection.connections ?? [];
-  const childNodes = projection.nodes.filter(node => node.level === "CHILD");
+  let childNodes = projection.nodes.filter(node => node.level === "CHILD");
+  if (draftCatalogEntryIds !== undefined) {
+    childNodes = childNodes.filter(node =>
+      node.catalogEntryId !== undefined
+      && draftCatalogEntryIds.has(node.catalogEntryId));
+  }
   if (childNodes.length === 0) {
     return [];
   }
