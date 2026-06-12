@@ -202,6 +202,13 @@ export type DynamicDcpProjectionResponse = {
   readonly focusNodeId: string;
   readonly nodes: readonly DynamicDcpNode[];
   readonly edges: readonly DynamicDcpEdge[];
+  // Port-level wirings derived from declared needs ↔ offers among the
+  // current draft components. Drives the Studio 3D scene's pipe
+  // rendering. ?owner=host / ?owner=fabric needs are filtered out
+  // server-side because they're external dependencies, not in-scene
+  // pipes. Optional for backward compatibility with older clients /
+  // mock responses; absent ⇒ treat as empty list.
+  readonly connections?: readonly StudioPortConnectionEdge[];
   readonly warnings: readonly string[];
 };
 
@@ -220,6 +227,16 @@ export type DynamicDcpEdge = {
   readonly fromNodeId: string;
   readonly toNodeId: string;
   readonly relationship: "CONTAINS" | "REQUIRES" | "BINDS" | "REPLACES" | string;
+};
+
+export type StudioPortConnectionEdge = {
+  readonly sourceNodeId: string;
+  readonly sourcePortId: string;
+  readonly targetNodeId: string;
+  readonly targetPortId: string;
+  readonly capability: string;
+  readonly status: "ALLOWED" | "BLOCKED" | string;
+  readonly reason: string;
 };
 
 export type ReplacementCandidatesRequest = {

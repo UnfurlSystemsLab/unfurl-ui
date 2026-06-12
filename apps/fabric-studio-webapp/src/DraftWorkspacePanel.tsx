@@ -4,6 +4,7 @@ import {
   DEFAULT_STUDIO_ASSEMBLY_ID,
   DEFAULT_STUDIO_TENANT_ID,
   type DynamicDcpProjectionResponse,
+  type DeploymentShape,
   type StudioSessionEvent,
   type StudioReplacementCandidate as FabricReplacementCandidate,
   type StudioLayoutState,
@@ -17,8 +18,16 @@ import {
   createDraftWorkspace,
   type DraftWorkspaceState
 } from "./draftWorkspace.js";
+import {
+  DEPLOYMENT_SHAPE_OPTIONS,
+  createDefaultDeploymentPlannerState,
+  deploymentPolicyFromPlannerState,
+  preferDeploymentShape,
+  setDeploymentRuntime,
+  type DeploymentPlannerState
+} from "./deploymentPlanner.js";
 import { buildSigningHandoff } from "./signingHandoff.js";
-import type { SemanticDcpSceneProjection, SemanticZoomLevel, ThreeAssemblySelection, ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
+import type { SceneDropTarget, SemanticDcpSceneProjection, SemanticZoomLevel, ThreeAssemblySelection, ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
 
 const ThreeAssemblyScene = lazy(async () => {
   const module = await import("./ThreeAssemblyScene.js");
@@ -119,7 +128,7 @@ export function DraftWorkspacePanel({
     label: "Flow Orchestrator"
   });
   const [extractedPartId, setExtractedPartId] = useState<string | undefined>();
-  const [replacementEntryId, setReplacementEntryId] = useState("com.unfurl:validation-service:1.1.0");
+  const [replacementEntryId, setReplacementEntryId] = useState("com.unfurl.flow:orchestrator:0.1.0");
   // Hover-preview state: populated while the operator's pointer is over a
   // palette button, cleared on mouseleave or after a successful intent.
   // The 3D scene reads these sets to light up compatible targets.
@@ -139,6 +148,7 @@ export function DraftWorkspacePanel({
   const [saveDeploymentTarget, setSaveDeploymentTarget] = useState(targetDeploymentTarget);
   const [saveDeploymentShape, setSaveDeploymentShape] = useState("CONTAINERIZED_SERVICE");
   const [saveDraftStatus, setSaveDraftStatus] = useState<string | undefined>();
+  const [deploymentPlanner, setDeploymentPlanner] = useState<DeploymentPlannerState>(() => createDefaultDeploymentPlannerState());
   const [draftComponents, setDraftComponents] = useState<readonly DraftComponentItem[] | undefined>(() => {
     if (initialDraftComponentCatalogEntryIds !== undefined) {
       return initialDraftComponentCatalogEntryIds.map(catalogEntryId => ({
@@ -320,7 +330,7 @@ export function DraftWorkspacePanel({
       id: layout.selectedSurface === "substrate" ? "substrate:base" : `component:${layout.selectedSurface}`,
       kind: layout.selectedSurface === "substrate" ? "substrate" : "component",
       surface: layout.selectedSurface,
-      label: inspectorDetails[layout.selectedSurface].name
+      label: inspectorDetails[layout.selectedSurface]?.name ?? layout.selectedSurface
     });
   }
 
@@ -377,6 +387,7 @@ export function DraftWorkspacePanel({
 
   function openSaveDraft() {
     setSaveDeploymentTarget(targetDeploymentTarget);
+    setSaveDeploymentShape(deploymentPolicy.preferredShapes[0] ?? saveDeploymentShape);
     setSaveDraftOpen(true);
   }
 
@@ -423,6 +434,39 @@ export function DraftWorkspacePanel({
         }
       ]);
       selectScenePart({ id: `component:${slugFromCatalogEntry(entryId)}`, kind: "component", surface: "validation", label: labelForCatalogEntry(entryId) });
+      clearPreview();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addComponentAndConnect(entryId: string, targetPortId: string) {
+    if (!state) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const added = await applyDraftIntent(client, state, { type: "ADD_COMPONENT", catalogEntryId: entryId });
+      if (added.status !== "READY") {
+        setState(added);
+        return;
+      }
+      const sourcePortId = firstOfferPortId(entryId, catalog);
+      if (!sourcePortId) {
+        setState(added);
+        setCatalogError(`Added ${labelForCatalogEntry(entryId)}, but no offer port was available to connect.`);
+        return;
+      }
+      setState(await applyDraftIntent(client, added, { type: "CONNECT", fromPort: sourcePortId, toPort: targetPortId }));
+      setCatalogEntryId(entryId);
+      setDraftComponents(current => [
+        ...(current ?? []),
+        {
+          catalogEntryId: entryId,
+          label: labelForCatalogEntry(entryId),
+          status: "ADDED"
+        }
+      ]);
       clearPreview();
     } finally {
       setBusy(false);
@@ -512,10 +556,15 @@ export function DraftWorkspacePanel({
     }
     setBusy(true);
     try {
-      setState(await compileDraftWorkspace(client, state, { sign }));
+      setState(await compileDraftWorkspace(client, state, { sign, deploymentPolicy }));
     } finally {
       setBusy(false);
     }
+  }
+
+  function preferAssemblyDeploymentShape(shape: DeploymentShape) {
+    setDeploymentPlanner(current => preferDeploymentShape(current, shape));
+    setSaveDeploymentShape(shape);
   }
 
   function selectScenePart(selection: ThreeAssemblySelection) {
@@ -574,21 +623,74 @@ export function DraftWorkspacePanel({
     }
   }
 
+  async function replaceComponentAtNode(entryId: string, nodeId: string) {
+    if (state?.status !== "READY") {
+      return;
+    }
+    setBusy(true);
+    try {
+      setState(await applyDraftIntent(client, state, {
+        type: "REPLACE_COMPONENT",
+        oldComponentId: nodeId,
+        newCatalogEntryId: entryId
+      }));
+      setReplacementEntryId(entryId);
+      setCatalogEntryId(entryId);
+      setExtractedPartId(undefined);
+      clearPreview();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleCatalogEntryDrop(entryId: string, target: SceneDropTarget) {
+    if (busy) {
+      return;
+    }
+    setCatalogError(undefined);
+    if (target.kind === "empty") {
+      void addComponent(entryId);
+      return;
+    }
+    if (target.kind === "component") {
+      const replacementNodes = preview?.catalogEntryId === entryId ? preview.replacementNodes : new Set<string>();
+      if (replacementNodes.has(target.nodeId)) {
+        void replaceComponentAtNode(entryId, target.nodeId);
+      } else {
+        setCatalogError(`${labelForCatalogEntry(entryId)} is not a valid replacement for ${nodeLabel(dynamicProjection, target.nodeId)}.`);
+      }
+      return;
+    }
+    const portIds = preview?.catalogEntryId === entryId ? preview.portIds : new Set<string>();
+    if (portIds.has(target.portId)) {
+      void addComponentAndConnect(entryId, target.portId);
+    } else {
+      setCatalogError(`${labelForCatalogEntry(entryId)} cannot connect to ${target.portId}.`);
+    }
+  }
+
   const handoff = state ? buildSigningHandoff(state, { signingRequested: sign }) : undefined;
-  const selected = inspectorDetails[selectedComponent];
+  const selected = inspectorDetailsFor(selectedComponent, dynamicProjection);
   const ports = useMemo(() => activePorts(catalog[0]), [catalog]);
   const paletteEntries = catalog.length === 0 ? fallbackCatalog() : catalog;
+  const deploymentPolicy = useMemo(
+    () => deploymentPolicyFromPlannerState(deploymentPlanner),
+    [deploymentPlanner]
+  );
+  const preferredDeploymentShape = deploymentPolicy.preferredShapes[0] ?? "CONTAINERIZED_SERVICE";
   // Defence-in-depth: only catalog-registered entries are assemblable. Buttons
   // outside this set are disabled in the UI; the backend rejects the same
   // intents with CATALOG_ENTRY_NOT_FOUND. Derived from the LIVE catalog (not
   // paletteEntries) — when the live catalog is empty we render fallback
   // entries for orientation but they cannot be added.
   const knownCatalogEntryIds = useMemo(
-    () => new Set(catalog.map(entry => entry.catalogEntryId)),
-    [catalog]
+    () => new Set(paletteEntries.map(entry => entry.catalogEntryId)),
+    [paletteEntries]
   );
   const draftComponentCount = draftComponents?.length ?? initialDraftComponentCount;
-  const showFallbackAssembly = draftComponents === undefined && (draftComponentCount === undefined || draftComponentCount > 0);
+  const showFallbackAssembly = dynamicProjection === undefined
+    && draftComponents === undefined
+    && (draftComponentCount === undefined || draftComponentCount > 0);
   const showEmptyAssembly = draftComponents !== undefined && draftComponents.length === 0;
   const showDraftInventory = draftComponents !== undefined;
   const semanticSceneProjection = useMemo(
@@ -797,6 +899,65 @@ export function DraftWorkspacePanel({
         </aside>
 
         <main className="workbench-stage" aria-label="Composition workbench">
+          <section className="save-draft-panel" aria-label="Assembly deployment planner">
+            <div>
+              <strong>Assembly Deployment Plan</strong>
+              <span>Compile and save use this policy for the current draft assembly.</span>
+            </div>
+            <div className="summary-row">
+              <span>preferred: {deploymentPolicy.preferredShapes.join(", ") || "none"}</span>
+              <span>disallowed: {deploymentPolicy.disallowedShapes.join(", ") || "none"}</span>
+              <span>runtime: {deploymentRuntimeSummary(deploymentPolicy.runtime)}</span>
+            </div>
+            <div className="button-row">
+              {DEPLOYMENT_SHAPE_OPTIONS.map(option => (
+                <button
+                  type="button"
+                  className={preferredDeploymentShape === option.shape ? "secondary-active" : "secondary"}
+                  key={option.shape}
+                  onClick={() => preferAssemblyDeploymentShape(option.shape)}
+                  title={option.description}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <div className="button-row">
+              <label className="studio-checkbox">
+                <input
+                  type="checkbox"
+                  checked={deploymentPlanner.runtime.springBoot === true}
+                  onChange={event => setDeploymentPlanner(current => setDeploymentRuntime(current, {
+                    ...current.runtime,
+                    springBoot: event.target.checked
+                  }))}
+                />
+                Spring Boot
+              </label>
+              <label className="studio-checkbox">
+                <input
+                  type="checkbox"
+                  checked={deploymentPlanner.runtime.kubernetes === true}
+                  onChange={event => setDeploymentPlanner(current => setDeploymentRuntime(current, {
+                    ...current.runtime,
+                    kubernetes: event.target.checked
+                  }))}
+                />
+                Kubernetes
+              </label>
+              <label className="studio-checkbox">
+                <input
+                  type="checkbox"
+                  checked={deploymentPlanner.runtime.serviceMesh === true}
+                  onChange={event => setDeploymentPlanner(current => setDeploymentRuntime(current, {
+                    ...current.runtime,
+                    serviceMesh: event.target.checked
+                  }))}
+                />
+                Service mesh
+              </label>
+            </div>
+          </section>
           {saveDraftOpen && (
             <section className="save-draft-panel" aria-label="Save draft deployment options">
               <div>
@@ -833,7 +994,7 @@ export function DraftWorkspacePanel({
           </div>
 
             <div className={`composition-plane ${viewClassName(activeView)} ${showEmptyAssembly ? "empty-assembly-plane" : ""}`}>
-              {(showFallbackAssembly || draftComponents !== undefined) && (
+              {(showFallbackAssembly || draftComponents !== undefined || dynamicProjection !== undefined) && (
                 <Suspense fallback={<div className="three-assembly-scene" aria-label="3D assembly scene" />}>
                 <ThreeAssemblyScene
                   // No `key` prop here: ThreeAssemblyScene's effect is
@@ -847,17 +1008,14 @@ export function DraftWorkspacePanel({
                   extractedPartId={extractedPartId}
                   semanticProjection={semanticSceneProjection}
                   requestedSemanticZoomLevel={requestedSemanticZoomLevel}
-                  // draftComponents being defined means the scene is now
-                  // mirroring real assembly state: slot N is visible iff
-                  // index N < draftComponentCount. `undefined` (initial
-                  // demo state) preserves the original all-slots view.
-                  draftComponentCount={draftComponents === undefined ? undefined : draftComponents.length}
+                  dynamicProjection={dynamicProjection}
                   // Hover-preview highlight sets — undefined when the
                   // operator isn't hovering anything, so the scene
                   // relaxes to neutral.
                   previewConnectionNodes={preview?.connectionNodes}
                   previewReplacementNodes={preview?.replacementNodes}
                   previewPortIds={preview?.portIds}
+                  onCatalogEntryDropped={handleCatalogEntryDrop}
                   onSelect={setSelectedComponent}
                   onSelectPart={selectScenePart}
                   onViewChange={setActiveView}
@@ -1347,6 +1505,14 @@ function CatalogGroup({
             className={isHovered ? `${baseClass} previewing` : baseClass}
             key={entry.catalogEntryId}
             onClick={() => onSelect(entry.catalogEntryId)}
+            draggable={inCatalog}
+            onDragStart={event => {
+              if (!inCatalog || !ready || busy) {
+                return;
+              }
+              event.dataTransfer.setData("application/x-unfurl-catalog-entry", entry.catalogEntryId);
+              event.dataTransfer.effectAllowed = "copy";
+            }}
             // Hover drives the compatibility preview: the panel debounces
             // the lookup (150 ms) so quickly skimming buttons doesn't
             // fire a request per row. Mouseleave clears the preview so
@@ -1429,6 +1595,12 @@ function slugFromCatalogEntry(catalogEntryId: string): string {
 
 function activePorts(entry: VisualCatalogEntry | undefined): readonly string[] {
   return entry?.visualManifest?.ports.map(port => port.id) ?? [];
+}
+
+function firstOfferPortId(catalogEntryId: string, catalogEntries: readonly VisualCatalogEntry[]): string | undefined {
+  const entry = catalogEntries.find(entry => entry.catalogEntryId === catalogEntryId);
+  const offer = entry?.visualManifest?.ports.find(port => port.kind === "OFFER");
+  return offer?.id;
 }
 
 function buildReplacementCandidates(
@@ -1675,6 +1847,32 @@ const inspectorDetails: Record<SelectedSurfaceId, InspectorDetails> = {
   }
 };
 
+function inspectorDetailsFor(surface: SelectedSurfaceId, projection: DynamicDcpProjectionResponse | undefined): InspectorDetails {
+  const staticDetails = inspectorDetails[surface];
+  if (staticDetails) {
+    return staticDetails;
+  }
+  const node = projection?.nodes.find(node => node.nodeId === surface);
+  return {
+    name: node?.label ?? surface,
+    icon: (node?.label ?? surface).slice(0, 1).toUpperCase() || "C",
+    iconClass: "purple",
+    type: node?.dcpType ?? "Component",
+    version: node?.catalogEntryId?.split(":").at(-1) ?? "dynamic",
+    owner: "catalog",
+    status: node?.replacementAllowed ? "Replaceable" : "Included",
+    description: node?.catalogEntryId
+      ? `Projection node ${node.nodeId} from ${node.catalogEntryId}.`
+      : `Projection node ${surface}.`,
+    bindingMode: "DYNAMIC",
+    deploymentShape: node?.dcpType ?? "COMPONENT",
+    substrateTarget: "Customer Runtime Substrate",
+    isolationPattern: "POLICY",
+    providedPorts: node?.capabilities ?? [],
+    requiredPorts: []
+  };
+}
+
 function toolGlyph(tool: string): string {
   return {
     Select: "SEL",
@@ -1843,8 +2041,15 @@ function validSurface(value: string): SelectedSurfaceId {
     : "validation";
 }
 
-function nodeLabel(projection: DynamicDcpProjectionResponse, nodeId: string): string {
-  return projection.nodes.find(node => node.nodeId === nodeId)?.label ?? nodeId;
+function nodeLabel(projection: DynamicDcpProjectionResponse | undefined, nodeId: string): string {
+  return projection?.nodes.find(node => node.nodeId === nodeId)?.label ?? nodeId;
+}
+
+function deploymentRuntimeSummary(runtime: Record<string, unknown>): string {
+  const entries = Object.entries(runtime)
+    .filter(([, value]) => value !== undefined && value !== false && value !== "")
+    .map(([key, value]) => `${key}=${value}`);
+  return entries.length === 0 ? "default" : entries.join(", ");
 }
 
 function toSemanticSceneProjection(projection: DynamicDcpProjectionResponse): SemanticDcpSceneProjection {

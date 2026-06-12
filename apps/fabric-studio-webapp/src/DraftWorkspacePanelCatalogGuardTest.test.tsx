@@ -10,7 +10,7 @@ describe("DraftWorkspacePanel catalog guard", () => {
   // buttons rendered from fallbackCatalog() should all be disabled —
   // that's the guard's at-rest invariant: nothing is assemblable until
   // the live catalog confirms membership.
-  it("disables Flow Components add buttons when no live catalog has loaded", () => {
+  it("renders Flow Components as disabled-but-draggable before a draft is ready", () => {
     const html = renderToString(<DraftWorkspacePanel client={fakeFabricClient()} />);
 
     assert.match(html, /Flow Components/);
@@ -25,12 +25,12 @@ describe("DraftWorkspacePanel catalog guard", () => {
       assert.match(
         button,
         /disabled/,
-        `expected catalog button to be disabled when not in live catalog: ${button.slice(0, 80)}`
+        `expected catalog button to be disabled before a draft is ready: ${button.slice(0, 80)}`
       );
       assert.match(
         button,
-        /title="Not in the live catalog/,
-        "expected guard tooltip on disabled palette button"
+        /draggable="true"/,
+        "expected fallback Flow catalog affordance to be draggable-capable"
       );
     }
   });

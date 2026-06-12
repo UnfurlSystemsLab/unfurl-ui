@@ -1,18 +1,16 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import type { DynamicDcpProjectionResponse } from "@unfurl/fabric-validation-client";
+import { layoutNodes, layoutPipes, type LayoutEntry } from "./threeAssemblySceneLayout.js";
 
-export type ThreeAssemblySurfaceId =
-  | "gateway"
-  | "order"
-  | "inventory"
-  | "validation"
-  | "payment"
-  | "audit"
-  | "notification"
-  | "workflow"
-  | "adapter"
-  | "substrate";
+// Surface id is now a free-form string because module surfaces are
+// rendered from the backend's projection nodes — the id IS the
+// projection nodeId (e.g. "component.foundry-substrate-engine"). The
+// special "substrate" value remains for the static substrate plate;
+// "exploded" is the validation drilldown wrapper. Any other value names
+// a CHILD-level draft component.
+export type ThreeAssemblySurfaceId = string;
 
 export type ThreeAssemblySceneProps = {
   readonly activeView: string;
@@ -29,7 +27,6 @@ export type ThreeAssemblySceneProps = {
    * (all 9 modules visible) — used during the brief window before the
    * backend draft state has loaded.
    */
-  readonly draftComponentCount?: number | undefined;
   /**
    * Hover-preview compatibility highlights. Populated while the operator
    * is hovering a palette button: connectionNodes lights up draft
@@ -42,6 +39,27 @@ export type ThreeAssemblySceneProps = {
   readonly previewConnectionNodes?: ReadonlySet<string> | undefined;
   readonly previewReplacementNodes?: ReadonlySet<string> | undefined;
   readonly previewPortIds?: ReadonlySet<string> | undefined;
+  /**
+   * Full dynamic-DCP projection from the backend. The scene renders one
+   * module per CHILD-level node and one pipe per port-connection edge.
+   * {@code undefined} ⇒ no draft data yet; scene is empty except for
+   * substrate plate + DCP framing groups (still useful for first-load).
+   */
+  readonly dynamicProjection?: DynamicDcpProjectionResponse | undefined;
+  /**
+   * Fired when a palette entry is dropped onto the scene. The scene
+   * owns the drag listeners on its own canvas (it has the raycaster);
+   * this callback hands the panel the catalog entry id + the geometric
+   * drop target (empty space / existing component / specific port) so
+   * the panel can route to ADD / REPLACE / ADD+CONNECT.
+   *
+   * The drag MIME type is {@code application/x-unfurl-catalog-entry};
+   * other drop sources are ignored.
+   */
+  readonly onCatalogEntryDropped?: (
+    catalogEntryId: string,
+    target: SceneDropTarget
+  ) => void;
   readonly onSelect: (surface: ThreeAssemblySurfaceId) => void;
   readonly onSelectPart?: (selection: ThreeAssemblySelection) => void;
   readonly onViewChange?: (view: string) => void;
@@ -80,6 +98,19 @@ type ModulePlacement = {
   readonly scale: readonly [number, number, number];
 };
 
+/**
+ * Drop-target descriptor returned by the scene's raycaster — describes
+ * what the operator's pointer was over when they released a drag.
+ * "empty" means free space (route to ADD); "component" means an
+ * existing draft module (route to REPLACE if hover-preview says it's
+ * replaceable); "port" means a specific port socket (route to ADD
+ * followed by an auto-CONNECT to that port).
+ */
+export type SceneDropTarget =
+  | { readonly kind: "empty" }
+  | { readonly kind: "component"; readonly nodeId: string }
+  | { readonly kind: "port"; readonly nodeId: string; readonly portId: string };
+
 type SceneHandles = {
   readonly moduleGroups: Map<ThreeAssemblySurfaceId, THREE.Group>;
   readonly moduleBodies: Map<ThreeAssemblySurfaceId, THREE.Mesh>;
@@ -91,6 +122,12 @@ type SceneHandles = {
   // See rebuildDcpGroups() inside the mount effect.
   parentDcpGroup: THREE.Group;
   childDcpGroup: THREE.Group;
+  // dynamicModuleGroup / dynamicPipeGroup are swappable too. They host
+  // every CHILD-level draft component as a module and every resolved
+  // port-connection as a pipe. Rebuilt by rebuildDynamicModules /
+  // rebuildDynamicPipes when the dynamicProjection identity changes.
+  dynamicModuleGroup: THREE.Group;
+  dynamicPipeGroup: THREE.Group;
   readonly validationLines: readonly THREE.Line[];
   readonly selectableParts: Map<string, THREE.Object3D>;
   readonly modeGroups: {
@@ -119,10 +156,11 @@ export function ThreeAssemblyScene({
   extractedPartId,
   semanticProjection,
   requestedSemanticZoomLevel,
-  draftComponentCount,
   previewConnectionNodes,
   previewReplacementNodes,
   previewPortIds,
+  dynamicProjection,
+  onCatalogEntryDropped,
   onSelect,
   onSelectPart,
   onViewChange,
@@ -133,6 +171,7 @@ export function ThreeAssemblyScene({
   const onSelectPartRef = useRef(onSelectPart);
   const onViewChangeRef = useRef(onViewChange);
   const onSemanticZoomChangeRef = useRef(onSemanticZoomChange);
+  const onCatalogEntryDroppedRef = useRef(onCatalogEntryDropped);
   const selectedRef = useRef(selectedSurface);
   const selectedPartRef = useRef(selectedPartId);
   const extractedPartRef = useRef(extractedPartId);
@@ -146,28 +185,33 @@ export function ThreeAssemblyScene({
   const semanticProjectionRef = useRef(semanticProjection);
   // draftComponentCount drives module-slot visibility (each hardcoded
   // module slot 0..8 shows only when its index is below the count).
-  const draftComponentCountRef = useRef(draftComponentCount);
   // Hover-preview compatibility highlight sets, threaded through refs so
   // they survive the mount-once invariant. The animate loop reads these
   // each frame and updates emissive / scale / opacity in place.
   const previewConnectionNodesRef = useRef(previewConnectionNodes);
   const previewReplacementNodesRef = useRef(previewReplacementNodes);
   const previewPortIdsRef = useRef(previewPortIds);
+  // Dynamic projection drives module + pipe rendering. Diffed by object
+  // identity in the animate loop (same pattern as semanticProjectionRef
+  // for the parent/child DCP groups); when it changes, rebuildDynamic*
+  // tears down and rebuilds those groups in place.
+  const dynamicProjectionRef = useRef(dynamicProjection);
 
   onSelectRef.current = onSelect;
   onSelectPartRef.current = onSelectPart;
   onViewChangeRef.current = onViewChange;
   onSemanticZoomChangeRef.current = onSemanticZoomChange;
+  onCatalogEntryDroppedRef.current = onCatalogEntryDropped;
   selectedRef.current = selectedSurface;
   selectedPartRef.current = selectedPartId;
   extractedPartRef.current = extractedPartId;
   viewRef.current = activeView;
   requestedSemanticZoomLevelRef.current = requestedSemanticZoomLevel;
   semanticProjectionRef.current = semanticProjection;
-  draftComponentCountRef.current = draftComponentCount;
   previewConnectionNodesRef.current = previewConnectionNodes;
   previewReplacementNodesRef.current = previewReplacementNodes;
   previewPortIdsRef.current = previewPortIds;
+  dynamicProjectionRef.current = dynamicProjection;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -263,6 +307,115 @@ export function ThreeAssemblyScene({
           sceneChildNodes(next).map(node => `component:validation:${node.nodeId.replaceAll(":", "-")}`);
     }
 
+    // ---- Dynamic modules & pipes ----------------------------------------
+    //
+    // One module per CHILD-level draft node; one pipe per resolved
+    // port-connection edge. Mirrors the rebuildDcpGroups pattern: track
+    // what each rebuild added to clickable / selectableParts /
+    // moduleGroups, then on the next rebuild tear it down before
+    // building fresh.
+
+    let appliedDynamicProjection: DynamicDcpProjectionResponse | undefined;
+    let appliedDynamicLayout: readonly LayoutEntry[] = [];
+    let appliedDynamicClickables: THREE.Object3D[] = [];
+    let appliedDynamicSelectableKeys: string[] = [];
+    let appliedDynamicModuleKeys: string[] = [];
+
+    function rebuildDynamicModules(next: DynamicDcpProjectionResponse | undefined) {
+      root.remove(handles.dynamicModuleGroup);
+      disposeObject(handles.dynamicModuleGroup);
+      removeClickables(clickable, appliedDynamicClickables);
+      for (const key of appliedDynamicSelectableKeys) {
+        handles.selectableParts.delete(key);
+      }
+      for (const key of appliedDynamicModuleKeys) {
+        handles.moduleGroups.delete(key);
+        handles.moduleBodies.delete(key);
+      }
+      appliedDynamicClickables = [];
+      appliedDynamicSelectableKeys = [];
+      appliedDynamicModuleKeys = [];
+
+      const layout = layoutNodes(next);
+      const portIds = portIdsByNodeId(next);
+      const group = new THREE.Group();
+      for (const entry of layout) {
+        const placement: ModulePlacement = {
+          id: entry.nodeId,
+          label: entry.label,
+          badge: entry.label.length > 0 ? entry.label.charAt(0).toUpperCase() : "C",
+          accent: entry.accentColor,
+          portColor: entry.portColor,
+          position: entry.position,
+          scale: entry.scale
+        };
+        const moduleGroup = createModule(placement);
+        moduleGroup.userData.origin = entry.position;
+        const body = moduleGroup.userData.body as THREE.Mesh;
+        handles.moduleGroups.set(entry.nodeId, moduleGroup);
+        handles.moduleBodies.set(entry.nodeId, body);
+        clickable.push(body);
+        appliedDynamicClickables.push(body);
+        const selectableKey = `component:${entry.nodeId}`;
+        handles.selectableParts.set(selectableKey, moduleGroup);
+        appliedDynamicSelectableKeys.push(selectableKey);
+        appliedDynamicModuleKeys.push(entry.nodeId);
+        group.add(moduleGroup);
+
+        const portParts = addModulePorts(group, placement, clickable, handles.selectableParts, portIds.get(entry.nodeId));
+        appliedDynamicClickables.push(...portParts.clickables);
+        appliedDynamicSelectableKeys.push(...portParts.selectableKeys);
+      }
+      appliedDynamicLayout = layout;
+
+      handles.dynamicModuleGroup = group;
+      root.add(group);
+    }
+
+    let appliedPipeKeys: string[] = [];
+    let appliedPipeClickables: THREE.Object3D[] = [];
+
+    function rebuildDynamicPipes(next: DynamicDcpProjectionResponse | undefined) {
+      root.remove(handles.dynamicPipeGroup);
+      disposeObject(handles.dynamicPipeGroup);
+      removeClickables(clickable, appliedPipeClickables);
+      for (const key of appliedPipeKeys) {
+        handles.selectableParts.delete(key);
+      }
+      appliedPipeKeys = [];
+      appliedPipeClickables = [];
+
+      const group = new THREE.Group();
+      const pipes = layoutPipes(appliedDynamicLayout, next?.connections);
+      for (const pipe of pipes) {
+        const [sx, sy, sz] = pipe.source.position;
+        const [tx, ty, tz] = pipe.target.position;
+        const from: [number, number, number] = [sx + 0.65, sy, sz + 0.05];
+        const to: [number, number, number] = [tx - 0.65, ty, tz + 0.05];
+        const pipeObject = addSelectablePipe(
+          group,
+          clickable,
+          handles.selectableParts,
+          pipe.id,
+          `${pipe.source.nodeId} -> ${pipe.target.nodeId} (${pipe.capability})`,
+          pipe.source.nodeId,
+          from,
+          to,
+          0x16a34a,
+          0.04,
+          true);
+        appliedPipeClickables.push(pipeObject);
+        appliedPipeKeys.push(pipe.id);
+      }
+      handles.dynamicPipeGroup = group;
+      root.add(group);
+    }
+
+    // Initial build using whatever projection ref points at right now.
+    rebuildDynamicModules(dynamicProjectionRef.current);
+    rebuildDynamicPipes(dynamicProjectionRef.current);
+    appliedDynamicProjection = dynamicProjectionRef.current;
+
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     const downPoint = new THREE.Vector2();
@@ -286,6 +439,47 @@ export function ThreeAssemblyScene({
       raycaster.setFromCamera(pointer, camera);
       const hit = raycaster.intersectObjects(clickable, true)[0];
       return resolveSelection(hit?.object);
+    }
+
+    function resolveDropTargetAt(clientX: number, clientY: number): SceneDropTarget {
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -(((clientY - rect.top) / rect.height) * 2 - 1);
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster.intersectObjects(clickable, true)[0];
+      const selection = resolveSelection(hit?.object);
+      if (!selection) {
+        return { kind: "empty" };
+      }
+      if (selection.kind === "connector") {
+        return { kind: "port", nodeId: selection.surface, portId: selection.id };
+      }
+      if (selection.kind === "component") {
+        return { kind: "component", nodeId: selection.surface };
+      }
+      return { kind: "empty" };
+    }
+
+    function handleDragOver(event: DragEvent) {
+      // Only accept our MIME type; default-deny lets the browser pick
+      // the right cursor for everything else.
+      const types = event.dataTransfer?.types;
+      if (types && Array.from(types).includes("application/x-unfurl-catalog-entry")) {
+        event.preventDefault();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "copy";
+        }
+      }
+    }
+
+    function handleDrop(event: DragEvent) {
+      const entryId = event.dataTransfer?.getData("application/x-unfurl-catalog-entry");
+      if (!entryId) {
+        return;
+      }
+      event.preventDefault();
+      const target = resolveDropTargetAt(event.clientX, event.clientY);
+      onCatalogEntryDroppedRef.current?.(entryId, target);
     }
 
     function handlePointerDown(event: PointerEvent) {
@@ -387,6 +581,8 @@ export function ThreeAssemblyScene({
     renderer.domElement.addEventListener("pointerup", handlePointerUp);
     renderer.domElement.addEventListener("pointerleave", handlePointerLeave);
     renderer.domElement.addEventListener("dblclick", handleDoubleClick);
+    renderer.domElement.addEventListener("dragover", handleDragOver);
+    renderer.domElement.addEventListener("drop", handleDrop);
     window.addEventListener("keydown", handleKeyDown);
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(hostElement);
@@ -403,6 +599,14 @@ export function ThreeAssemblyScene({
       const currentProjection = semanticProjectionRef.current ?? defaultSemanticProjection;
       if (currentProjection !== appliedProjection) {
         rebuildDcpGroups(currentProjection);
+      }
+      // Dynamic projection drives the modules + pipes. Same in-place
+      // swap-on-identity-change pattern as the DCP groups above.
+      const currentDynamicProjection = dynamicProjectionRef.current;
+      if (currentDynamicProjection !== appliedDynamicProjection) {
+        rebuildDynamicModules(currentDynamicProjection);
+        rebuildDynamicPipes(currentDynamicProjection);
+        appliedDynamicProjection = currentDynamicProjection;
       }
       root.rotation.y = -0.23 + Math.sin(frame * 0.8) * 0.01;
       root.rotation.x = -0.06 + Math.sin(frame * 0.55) * 0.006;
@@ -435,7 +639,6 @@ export function ThreeAssemblyScene({
         viewRef.current,
         semanticZoomLevel,
         frame,
-        draftComponentCountRef.current,
         previewConnectionNodesRef.current,
         previewReplacementNodesRef.current,
         previewPortIdsRef.current
@@ -453,6 +656,8 @@ export function ThreeAssemblyScene({
       renderer.domElement.removeEventListener("pointerup", handlePointerUp);
       renderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
       renderer.domElement.removeEventListener("dblclick", handleDoubleClick);
+      renderer.domElement.removeEventListener("dragover", handleDragOver);
+      renderer.domElement.removeEventListener("drop", handleDrop);
       renderer.domElement.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("keydown", handleKeyDown);
       hostElement.removeChild(renderer.domElement);
@@ -500,23 +705,18 @@ function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[], semanticP
   addWorkbenchBase(root);
   addGlassEnclosure(root);
 
-  const pipeGroup = new THREE.Group();
-  root.add(pipeGroup);
-  addServicePipes(pipeGroup, clickable, selectableParts);
+  // Empty dynamic groups; rebuildDynamicModules / rebuildDynamicPipes
+  // populate these on the first animate frame once the projection is
+  // available. The hardcoded e-commerce module set + pipe set that
+  // used to live here have been deleted — every draft component now
+  // comes from the projection.
+  const dynamicModuleGroup = new THREE.Group();
+  root.add(dynamicModuleGroup);
+  const dynamicPipeGroup = new THREE.Group();
+  root.add(dynamicPipeGroup);
 
   const portGroup = new THREE.Group();
   root.add(portGroup);
-
-  for (const module of modules) {
-    const group = createModule(module);
-    moduleGroups.set(module.id, group);
-    const body = group.userData.body as THREE.Mesh;
-    moduleBodies.set(module.id, body);
-    clickable.push(body);
-    selectableParts.set(`component:${module.id}`, group);
-    root.add(group);
-    addModulePorts(portGroup, module, clickable, selectableParts);
-  }
 
   const substrateGroup = createSubstrateBase();
   const substratePlate = substrateGroup.userData.plate as THREE.Mesh;
@@ -536,9 +736,7 @@ function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[], semanticP
   root.add(childDcpGroup);
 
   const { explodedGroup, validationLines } = createExplodedModule();
-  clickable.push(explodedGroup.userData.body as THREE.Mesh);
-  selectableParts.set("component:validation:exploded", explodedGroup);
-  root.add(explodedGroup);
+  explodedGroup.visible = false;
 
   return {
     moduleGroups,
@@ -548,6 +746,8 @@ function buildAssembly(root: THREE.Group, clickable: THREE.Object3D[], semanticP
     substratePlate,
     parentDcpGroup,
     childDcpGroup,
+    dynamicModuleGroup,
+    dynamicPipeGroup,
     validationLines,
     selectableParts,
     modeGroups: { portGroup, substrateLinks }
@@ -866,8 +1066,9 @@ function addModulePorts(
   root: THREE.Group,
   module: ModulePlacement,
   clickable: THREE.Object3D[],
-  selectableParts: Map<string, THREE.Object3D>
-) {
+  selectableParts: Map<string, THREE.Object3D>,
+  portIds?: readonly string[] | undefined
+): { readonly clickables: readonly THREE.Object3D[]; readonly selectableKeys: readonly string[] } {
   // Templates + per-mesh clone so each socket / ring has its own material.
   // applyPartState() mutates emissive + emissiveIntensity per selectable part;
   // sharing one material across 3 sockets meant "select one port → all three
@@ -889,12 +1090,15 @@ function addModulePorts(
     [0, bottomY, frontZ]
   ] as const;
 
+  const addedClickables: THREE.Object3D[] = [];
+  const addedSelectableKeys: string[] = [];
   positions.forEach(([x, y, z], index) => {
+    const portId = portIds?.[index] ?? `connector:${module.id}:${index + 1}`;
     const selection: ThreeAssemblySelection = {
-      id: `connector:${module.id}:${index + 1}`,
+      id: portId,
       kind: "connector",
       surface: module.id,
-      label: `${module.label} connector ${index + 1}`
+      label: `${module.label} ${portId}`
     };
     const socket = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.08, 20), socketTemplate.clone());
     socket.rotation.x = Math.PI / 2;
@@ -902,7 +1106,9 @@ function addModulePorts(
     socket.userData.surface = module.id;
     socket.userData.selection = selection;
     clickable.push(socket);
+    addedClickables.push(socket);
     selectableParts.set(selection.id, socket);
+    addedSelectableKeys.push(selection.id);
     root.add(socket);
 
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.088, 0.014, 10, 24), ringTemplate.clone());
@@ -911,20 +1117,16 @@ function addModulePorts(
     ring.userData.surface = module.id;
     ring.userData.selection = selection;
     selectableParts.set(`${selection.id}:ring`, ring);
+    addedSelectableKeys.push(`${selection.id}:ring`);
     root.add(ring);
   });
+  return { clickables: addedClickables, selectableKeys: addedSelectableKeys };
 }
 
-function addServicePipes(root: THREE.Group, clickable: THREE.Object3D[], selectableParts: Map<string, THREE.Object3D>) {
-  const metal = 0x778899;
-  addSelectablePipe(root, clickable, selectableParts, "pipe:api-trigger", "Flow API to trigger ingress pipe", "gateway", [-3.2, 0.45, 1.22], [-1.72, 0.45, 1.12], metal, 0.045, true);
-  addSelectablePipe(root, clickable, selectableParts, "pipe:registry-orchestrator", "Definition registry to orchestrator pipe", "inventory", [-1.74, 0.45, 1.12], [-0.4, 0.48, 1.06], metal, 0.045, true);
-  addSelectablePipe(root, clickable, selectableParts, "pipe:orchestrator-worker", "Orchestrator to worker pipe", "validation", [0.4, 0.48, 1.06], [1.76, 0.43, 1.15], metal, 0.045, true);
-  addSelectablePipe(root, clickable, selectableParts, "pipe:orchestrator-substrate", "Orchestrator substrate pipe", "validation", [0.25, -0.45, 1.1], [0.45, -1.45, 1.0], 0x2563eb, 0.042, false);
-  addSelectablePipe(root, clickable, selectableParts, "pipe:audit-resolver", "Audit sink to resolver pipe", "audit", [-2.05, -1.55, 1.05], [0.45, -1.45, 1.0], 0x64748b, 0.035, true);
-  addSelectablePipe(root, clickable, selectableParts, "pipe:event-adapter", "Event sink to state adapter pipe", "notification", [-0.74, -1.55, 0.98], [1.88, -1.55, 1.03], 0x64748b, 0.035, true);
-  addSelectablePipe(root, clickable, selectableParts, "pipe:adapter-substrate", "Adapter substrate pipe", "adapter", [2.08, -1.45, 1.03], [2.5, -2.08, 0.8], 0x2563eb, 0.035, false);
-}
+// Hardcoded addServicePipes() removed — pipes are now built per
+// projection by rebuildDynamicPipes (one pipe per resolved
+// port-connection edge). addSelectablePipe below is reused by the
+// dynamic builder, so it stays.
 
 function addSelectablePipe(
   root: THREE.Group,
@@ -938,13 +1140,45 @@ function addSelectablePipe(
   color: number,
   radius: number,
   withJoints: boolean
-) {
+): THREE.Object3D {
   const pipe = addPipe(root, from, to, color, radius, withJoints);
   const selection: ThreeAssemblySelection = { id, kind: "pipe", surface, label };
   pipe.userData.surface = surface;
   pipe.userData.selection = selection;
   clickable.push(pipe);
   selectableParts.set(id, pipe);
+  return pipe;
+}
+
+function removeClickables(clickable: THREE.Object3D[], removed: readonly THREE.Object3D[]): void {
+  if (removed.length === 0) {
+    return;
+  }
+  const removedSet = new Set(removed);
+  for (let index = clickable.length - 1; index >= 0; index -= 1) {
+    if (removedSet.has(clickable[index]!)) {
+      clickable.splice(index, 1);
+    }
+  }
+}
+
+function portIdsByNodeId(projection: DynamicDcpProjectionResponse | undefined): Map<string, readonly string[]> {
+  const byNode = new Map<string, string[]>();
+  for (const edge of projection?.connections ?? []) {
+    appendUnique(byNode, edge.sourceNodeId, edge.sourcePortId);
+    appendUnique(byNode, edge.targetNodeId, edge.targetPortId);
+  }
+  return byNode;
+}
+
+function appendUnique(map: Map<string, string[]>, nodeId: string, portId: string): void {
+  if (!portId) {
+    return;
+  }
+  const existing = map.get(nodeId) ?? [];
+  if (!existing.includes(portId)) {
+    map.set(nodeId, [...existing, portId]);
+  }
 }
 
 function addPipe(
@@ -1150,7 +1384,6 @@ function applySceneState(
   activeView: string,
   semanticZoomLevel: SemanticZoomLevel,
   frame: number,
-  draftComponentCount: number | undefined,
   previewConnectionNodes: ReadonlySet<string> | undefined,
   previewReplacementNodes: ReadonlySet<string> | undefined,
   previewPortIds: ReadonlySet<string> | undefined
@@ -1169,40 +1402,36 @@ function applySceneState(
     if (!body) {
       continue;
     }
-    // Module-slot visibility gate. Substrate is always visible; the 9
-    // hardcoded module slots are revealed in order as draft components
-    // are added. `undefined` means pre-data demo state — show everything.
-    const slotIndex = moduleSlotIndex(id);
-    const slotVisible = draftComponentCount === undefined
-        || id === "substrate"
-        || (slotIndex >= 0 && slotIndex < draftComponentCount);
-    group.visible = slotVisible;
-    if (!slotVisible) {
-      continue;
-    }
-    const selectedThis = id === selected;
-    const dimmedForExploded = activeView === "Exploded" && !selectedThis && id !== "substrate";
-    const dimmedForSubstrate = activeView === "Substrate" && id !== "substrate" && id !== "adapter" && id !== "validation";
-    // The scene's hardcoded surface IDs ("validation", "adapter", ...)
-    // do not yet map 1:1 to backend node IDs ("component.consumer-app",
-    // ...). For now we apply a coarse loose match — any backend nodeId
-    // that mentions the surface ID slug counts. When real draft-state
-    // tracking lands and surface IDs align with backend nodeIds, this
-    // becomes precise without code change.
-    const isConnectionTarget = previewActive && matchesPreviewSet(id, previewConnectionNodes);
-    const isReplacementTarget = previewActive && matchesPreviewSet(id, previewReplacementNodes);
+    // Modules are rendered only when the projection lists them, so the
+    // old visibility gate is gone — every module in the map is visible
+    // by definition. The substrate plate is always present.
+    group.visible = true;
+    const selectedThis = id === selected || selectedPartId === `component:${id}`;
+    const dimmedForSubstrate = activeView === "Substrate" && id !== "substrate";
+    // Surface ids are now backend node ids, so a precise set.has() is
+    // correct — the substring-bridge from the hover-preview campaign is
+    // no longer needed.
+    const isConnectionTarget = previewActive && !!previewConnectionNodes && previewConnectionNodes.has(id);
+    const isReplacementTarget = previewActive && !!previewReplacementNodes && previewReplacementNodes.has(id);
     const dimmedForPreview = previewActive
       && id !== "substrate"
       && !isConnectionTarget
       && !isReplacementTarget;
-    const dimmed = dimmedForExploded || dimmedForSubstrate || dimmedForPreview;
+    const dimmed = dimmedForSubstrate || dimmedForPreview;
 
-    const base = modulePlacementsById[id as ModulePlacement["id"]];
-    if (base) {
+    // Each dynamic module remembers its layout origin in userData so we
+    // can offset it slightly when extracted without losing the original
+    // position. The subtle float animation that was here for the
+    // hardcoded modules has been removed — re-add via userData.origin
+    // once the dynamic layout proves itself in the demo.
+    const origin = group.userData.origin as readonly [number, number, number] | undefined;
+    if (origin) {
       const extractedThis = extractedPartId === `component:${id}`;
-      group.position.x = base.position[0] + (extractedThis ? 0.18 : 0);
-      group.position.y = base.position[1] + Math.sin(frame * 1.7 + base.position[0]) * 0.014 + (extractedThis ? 0.12 : 0);
-      group.position.z = base.position[2] + (extractedThis ? 0.78 : 0);
+      const explodedThis = activeView === "Exploded" && selectedThis && id !== "substrate";
+      const pulledForward = extractedThis || explodedThis;
+      group.position.x = origin[0] + (pulledForward ? 0.18 : 0);
+      group.position.y = origin[1] + (pulledForward ? 0.12 : 0);
+      group.position.z = origin[2] + (pulledForward ? 0.78 : 0);
     }
     group.scale.setScalar(selectedThis ? 1.055 : 1);
     setObjectOpacity(group, dimmed ? (dimmedForPreview ? 0.62 : 0.44) : 1);
@@ -1242,17 +1471,18 @@ function applySceneState(
     substrateMaterial.emissiveIntensity = substrateActive ? 0.12 : 0;
   }
 
-  // Exploded view represents the validation slot — hide if its slot is hidden.
-  const explodedVisible = draftComponentCount === undefined
-      || moduleSlotIndex("validation") < draftComponentCount;
-  handles.explodedGroup.visible = explodedVisible;
-  if (explodedVisible) {
+  // Exploded view is now decoration only — it's the validation drilldown
+  // that has no projection-driven counterpart yet. Keep it visible as a
+  // visual scaffold; later refactor can drive it from the selected
+  // node's drilldown data.
+  handles.explodedGroup.visible = false;
+  if (handles.explodedGroup.visible) {
     setObjectOpacity(handles.explodedGroup, activeView === "Substrate" ? 0.58 : 1);
     handles.explodedGroup.scale.setScalar(selected === "validation" ? 1.03 : 0.96);
   }
 
   for (const line of handles.validationLines) {
-    line.visible = activeView !== "Substrate";
+    line.visible = false;
     const material = line.material;
     if (material instanceof THREE.LineDashedMaterial) {
       material.opacity = selected === "validation" || activeView === "Ports" ? 0.86 : 0.48;
@@ -1282,15 +1512,10 @@ function applyPartState(
   for (const [id, object] of handles.selectableParts) {
     const selected = id === selectedPartId || id.startsWith(`${selectedPartId}:`);
     const extracted = id === extractedPartId || id.startsWith(`${extractedPartId}:`);
-    // Port-level preview match: the operator hovered a palette entry and
-    // the backend told us {@code id} is a compatible target port. The
-    // selectableParts ids include {@code connector:<surface>:<index>}
-    // for individual port sockets; we accept either an exact id match
-    // or a substring match against a backend port id so the same loose
-    // gating as the module-level preview applies.
-    const portIsPreviewTarget = !!(previewPortIds
-      && (previewPortIds.has(id)
-        || matchesIdAgainstSet(id, previewPortIds)));
+    // Port-level preview match: the backend's connection-candidates
+    // endpoint returns port ids that match the scene's selectableParts
+    // ids directly now (both speak the same node-id vocabulary).
+    const portIsPreviewTarget = !!(previewPortIds && previewPortIds.has(id));
     object.traverse(child => {
       if (!(child instanceof THREE.Mesh || child instanceof THREE.Line)) {
         return;
@@ -1319,23 +1544,6 @@ function applyPartState(
       }
     });
   }
-}
-
-/**
- * Substring match for port-level preview ids — same idea as
- * {@link matchesPreviewSet} for modules. Tolerates the temporary
- * mismatch between the scene's port ids
- * ({@code "connector:<surface>:<index>"}) and the backend's port ids
- * ({@code "need-<capability>"} / {@code "<capability>"}). When the two
- * id spaces are unified, swap for {@code set.has(id)}.
- */
-function matchesIdAgainstSet(id: string, ids: ReadonlySet<string>): boolean {
-  for (const candidate of ids) {
-    if (id.includes(candidate) || candidate.includes(id)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function setObjectOpacity(object: THREE.Object3D, opacity: number) {
@@ -1391,54 +1599,9 @@ function disposeObject(object: THREE.Object3D) {
   });
 }
 
-const modules = [
-  { id: "gateway", label: "Flow API", badge: "N", accent: 0x16a34a, portColor: 0x16a34a, position: [0, 0.96, 0.48], scale: [1.72, 0.68, 0.78] },
-  { id: "order", label: "Trigger Ingress", badge: "T", accent: 0x65a30d, portColor: 0x16a34a, position: [-2.55, -0.38, 0.74], scale: [1.16, 0.9, 0.94] },
-  { id: "inventory", label: "Definition Registry", badge: "D", accent: 0x65a30d, portColor: 0x16a34a, position: [-1.12, -0.42, 0.68], scale: [1.16, 0.9, 0.94] },
-  { id: "validation", label: "Flow Orchestrator", badge: "O", accent: 0x7c3aed, portColor: 0x7c3aed, position: [0.32, -0.42, 0.62], scale: [1.24, 1.08, 1.02] },
-  { id: "payment", label: "Distributed Worker", badge: "W", accent: 0x65a30d, portColor: 0x16a34a, position: [1.78, -0.46, 0.72], scale: [1.16, 0.9, 0.94] },
-  { id: "audit", label: "Audit Sink", badge: "A", accent: 0x2563eb, portColor: 0x2563eb, position: [-2.08, -1.54, 0.52], scale: [1.1, 0.88, 0.86] },
-  { id: "notification", label: "Event Sink", badge: "E", accent: 0xea580c, portColor: 0xf59e0b, position: [-0.72, -1.62, 0.5], scale: [1.1, 0.88, 0.86] },
-  { id: "workflow", label: "Reference Resolver", badge: "R", accent: 0x0ea5e9, portColor: 0x0ea5e9, position: [0.64, -1.52, 0.5], scale: [1.1, 0.88, 0.86] },
-  { id: "adapter", label: "State Store Adapter", badge: "S", accent: 0xdc2626, portColor: 0x2563eb, position: [2.12, -1.58, 0.48], scale: [1.1, 0.88, 0.86] }
-] as const satisfies readonly ModulePlacement[];
-
-const modulePlacementsById = Object.fromEntries(modules.map(module => [module.id, module])) as Record<ModulePlacement["id"], ModulePlacement>;
-
-const MODULE_SLOT_INDEX: ReadonlyMap<ThreeAssemblySurfaceId, number> = new Map(
-  modules.map((module, index) => [module.id, index])
-);
-
-/**
- * Slot index for a surface, used to gate visibility against the live
- * draft-component count. Returns -1 for surfaces that are not in the
- * 9-slot module array (e.g. {@code "substrate"} which is always
- * visible regardless of count).
- */
-function moduleSlotIndex(id: ThreeAssemblySurfaceId): number {
-  return MODULE_SLOT_INDEX.get(id) ?? -1;
-}
-
-/**
- * Loose match between a scene surface id (e.g. {@code "validation"}) and
- * a backend node-id set (e.g. {@code "component.validation-service"}).
- * Returns true when any nodeId in the set contains the surfaceId as a
- * substring. Used by {@link applySceneState} to bridge the gap between
- * the scene's hardcoded surface ids and the backend's dynamic-projection
- * node ids until the two id spaces are unified. When that unification
- * happens, swap this for direct {@code set.has(id)}.
- */
-function matchesPreviewSet(
-  surfaceId: ThreeAssemblySurfaceId,
-  nodes: ReadonlySet<string> | undefined
-): boolean {
-  if (!nodes || nodes.size === 0) {
-    return false;
-  }
-  for (const nodeId of nodes) {
-    if (nodeId.includes(surfaceId)) {
-      return true;
-    }
-  }
-  return false;
-}
+// Hardcoded e-commerce demo module set + MODULE_SLOT_INDEX + the
+// substring matchesPreviewSet / matchesIdAgainstSet bridges have been
+// removed. Modules are now built per-projection by rebuildDynamicModules
+// (see threeAssemblySceneLayout.ts for the layout algorithm), and
+// preview-set membership tests use direct set.has() because surface
+// ids ARE backend node ids.

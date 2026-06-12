@@ -164,6 +164,17 @@ export const studioApiExampleDynamicDcpProjection: DynamicDcpProjectionResponse 
     { fromNodeId: "assembly:unfurl-flow", toNodeId: "component.state-store", relationship: "CONTAINS" },
     { fromNodeId: "component.flow-orchestrator", toNodeId: "component.state-store", relationship: "REQUIRES" }
   ],
+  connections: [
+    {
+      sourceNodeId: "component.state-store",
+      sourcePortId: "state-store-claim",
+      targetNodeId: "component.flow-orchestrator",
+      targetPortId: "need-state-store",
+      capability: "state-store",
+      status: "ALLOWED",
+      reason: "Postgres State Store offers state-store required by Flow Orchestrator"
+    }
+  ],
   warnings: []
 };
 

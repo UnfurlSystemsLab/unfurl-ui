@@ -45,6 +45,9 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /Take Out/);
     assert.match(html, /Replace Component/);
     assert.match(html, /Replacement candidates/);
+    assert.match(html, /Assembly Deployment Plan/);
+    assert.match(html, /Compile and save use this policy/);
+    assert.match(html, /In-process library/);
     assert.match(html, /Distributed Worker/);
     assert.match(html, /Trigger Ingress/);
     assert.match(html, /Blocked/);
@@ -185,6 +188,7 @@ describe("DraftWorkspacePanel", () => {
     const withoutFn = renderToString(<DraftWorkspacePanel client={client()} />);
 
     assert.match(withFn, /catalog-row/);
+    assert.match(withFn, /draggable="true"/);
     assert.match(withoutFn, /catalog-row/);
   });
 });
@@ -237,6 +241,7 @@ function projection(): DynamicDcpProjectionResponse {
       { fromNodeId: "runtime:unfurl", toNodeId: "assembly:unfurl-flow", relationship: "CONTAINS" },
       { fromNodeId: "assembly:unfurl-flow", toNodeId: "component.flow-orchestrator", relationship: "CONTAINS" }
     ],
+    connections: [],
     warnings: []
   };
 }
