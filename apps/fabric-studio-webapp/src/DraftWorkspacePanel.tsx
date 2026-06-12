@@ -701,6 +701,15 @@ export function DraftWorkspacePanel({
     [draftComponents]
   );
   const draftComponentCount = draftComponents?.length ?? initialDraftComponentCount;
+  const liveConnectionCount = dynamicProjection?.connections?.length ?? 0;
+  const liveSubstratePorts = dynamicProjection?.substratePorts ?? [];
+  const visibleSubstrateCapabilities = liveSubstratePorts.length > 0
+    ? liveSubstratePorts.map(port => ({
+      name: port.label,
+      short: shortSubstrateLabel(port.label),
+      status: port.status === "AVAILABLE" ? "healthy" : "muted"
+    }))
+    : substrateCapabilities;
   const showFallbackAssembly = dynamicProjection === undefined
     && draftComponents === undefined
     && (draftComponentCount === undefined || draftComponentCount > 0);
@@ -1244,13 +1253,13 @@ export function DraftWorkspacePanel({
 
           <div className="substrate-strip" aria-label="Substrate runtime layer">
             <div className="substrate-label">Substrate Runtime Layer</div>
-            {showDraftInventory ? (
+            {showDraftInventory && liveSubstratePorts.length === 0 ? (
               <div className="substrate-empty-state">
                 <strong>No substrate selected</strong>
                 <span>Substrate ports appear after validated component connections.</span>
               </div>
             ) : (
-              substrateCapabilities.map(capability => (
+              visibleSubstrateCapabilities.map(capability => (
                 <button type="button" className={selectedComponent === "substrate" ? "substrate-tile selected" : "substrate-tile"} key={capability.name} onClick={() => selectScenePart({ id: "substrate:base", kind: "substrate", surface: "substrate", label: "Substrate base plate" })}>
                   <span className={`substrate-logo ${capability.status}`}>{capability.short}</span>
                   <strong>{capability.name}</strong>
@@ -1351,7 +1360,7 @@ export function DraftWorkspacePanel({
               <>
                 <dl>
                   <dt>Components</dt><dd>{draftComponents.length}</dd>
-                  <dt>Substrate Ports</dt><dd>0</dd>
+                  <dt>Substrate Ports</dt><dd>{liveSubstratePorts.length}</dd>
                   <dt>Mode</dt><dd>{draftComponents.length === 0 ? "EMPTY_DRAFT" : "DRAFT_EDIT"}</dd>
                 </dl>
                 <ul>
@@ -1376,7 +1385,22 @@ export function DraftWorkspacePanel({
                   <dt>Mode</dt><dd>{dynamicProjection.compositionMode}</dd>
                   <dt>Root</dt><dd>{nodeLabel(dynamicProjection, dynamicProjection.rootNodeId)}</dd>
                   <dt>Focus</dt><dd>{nodeLabel(dynamicProjection, dynamicProjection.focusNodeId)}</dd>
+                  <dt>Substrate Ports</dt><dd>{liveSubstratePorts.length}</dd>
+                  <dt>Connections</dt><dd>{liveConnectionCount}</dd>
                 </dl>
+                {liveSubstratePorts.length > 0 && (
+                  <div>
+                    <strong>SUBSTRATE</strong>
+                    <ul>
+                      {liveSubstratePorts.map(port => (
+                        <li key={port.portId}>
+                          <span>{port.label}</span>
+                          <small>{port.provider} / {port.status}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 <div className="dynamic-dcp-levels">
                   {(["PARENT", "ASSEMBLY", "CHILD"] as const).map(level => (
                     <div key={level}>
@@ -1471,11 +1495,11 @@ export function DraftWorkspacePanel({
         </div>
         <div>
           <strong>Connections</strong>
-          <span>{showEmptyAssembly ? 0 : 28}</span>
+          <span>{showEmptyAssembly ? 0 : liveConnectionCount}</span>
         </div>
         <div>
           <strong>Substrate Ports Used</strong>
-          <span>{showEmptyAssembly ? "0 / 12" : "5 / 12"}</span>
+          <span>{showEmptyAssembly ? "0 / 12" : `${liveSubstratePorts.length} / 12`}</span>
         </div>
         <div>
           <strong>Validation</strong>
@@ -2135,6 +2159,14 @@ function collaboratorLabel(count: number): string {
     return "solo";
   }
   return count === 1 ? "1 active" : `${count} active`;
+}
+
+function shortSubstrateLabel(label: string): string {
+  const words = label.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return words.slice(0, 2).map(word => word.charAt(0).toUpperCase()).join("");
+  }
+  return label.slice(0, 2).toUpperCase() || "S";
 }
 
 const projectionSurfaceNodeIds: Partial<Record<ThreeAssemblySurfaceId, string>> = {

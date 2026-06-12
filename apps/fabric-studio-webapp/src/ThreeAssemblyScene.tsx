@@ -399,12 +399,16 @@ export function ThreeAssemblyScene({
       appliedPipeClickables = [];
 
       const group = new THREE.Group();
-      const pipes = layoutPipes(appliedDynamicLayout, next?.connections);
+      const pipes = layoutPipes(appliedDynamicLayout, next?.connections, next?.substratePorts);
       for (const pipe of pipes) {
         const [sx, sy, sz] = pipe.source.position;
         const [tx, ty, tz] = pipe.target.position;
-        const from: [number, number, number] = [sx + 0.65, sy, sz + 0.05];
-        const to: [number, number, number] = [tx - 0.65, ty, tz + 0.05];
+        const from: [number, number, number] = pipe.source.kind === "substrate"
+          ? [sx, sy, sz]
+          : [sx + 0.65, sy, sz + 0.05];
+        const to: [number, number, number] = pipe.target.kind === "substrate"
+          ? [tx, ty, tz]
+          : [tx - 0.65, ty, tz + 0.05];
         const pipeObject = addSelectablePipe(
           group,
           clickable,
@@ -414,8 +418,8 @@ export function ThreeAssemblyScene({
           pipe.source.nodeId,
           from,
           to,
-          0x16a34a,
-          0.04,
+          pipe.source.kind === "substrate" || pipe.target.kind === "substrate" ? 0x2563eb : 0x16a34a,
+          pipe.source.kind === "substrate" || pipe.target.kind === "substrate" ? 0.035 : 0.04,
           true);
         appliedPipeClickables.push(pipeObject);
         appliedPipeKeys.push(pipe.id);

@@ -22,13 +22,21 @@ describe("threeAssemblySceneLayout", () => {
 
   it("derives stable pipe ids from resolved port connection edges", () => {
     const projectionFixture = projection();
-    const pipes = layoutPipes(layoutNodes(projectionFixture), projectionFixture.connections);
+    const pipes = layoutPipes(
+      layoutNodes(projectionFixture),
+      projectionFixture.connections,
+      projectionFixture.substratePorts
+    );
 
     assert.deepEqual(
       pipes.map(pipe => pipe.id),
-      ["pipe:component.rag:offer-rag->component.agent:need-rag"]
+      [
+        "pipe:component.rag:offer-rag->component.agent:need-rag",
+        "pipe:substrate:runtime:substrate:event-sink->component.agent:need-event-sink"
+      ]
     );
     assert.equal(pipes[0]?.capability, "rag.query");
+    assert.equal(pipes[1]?.source.kind, "substrate");
   });
 });
 
@@ -47,6 +55,15 @@ function projection(): DynamicDcpProjectionResponse {
       child("component.host-bean", "Host Bean Adapter", "com.unfurl:host-bean-adapter:1.0.0")
     ],
     edges: [],
+    substratePorts: [
+      {
+        portId: "substrate:event-sink",
+        capability: "event-sink",
+        label: "Event Sink",
+        provider: "kafka",
+        status: "AVAILABLE"
+      }
+    ],
     connections: [
       {
         sourceNodeId: "component.rag",
@@ -56,6 +73,15 @@ function projection(): DynamicDcpProjectionResponse {
         capability: "rag.query",
         status: "ALLOWED",
         reason: "RAG Substrate offers rag.query required by Research Agent"
+      },
+      {
+        sourceNodeId: "substrate:runtime",
+        sourcePortId: "substrate:event-sink",
+        targetNodeId: "component.agent",
+        targetPortId: "need-event-sink",
+        capability: "event-sink",
+        status: "ALLOWED",
+        reason: "Unfurl substrate offers event-sink required by Research Agent"
       }
     ],
     warnings: []

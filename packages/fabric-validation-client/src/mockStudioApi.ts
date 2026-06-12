@@ -164,6 +164,15 @@ export const studioApiExampleDynamicDcpProjection: DynamicDcpProjectionResponse 
     { fromNodeId: "assembly:unfurl-flow", toNodeId: "component.state-store", relationship: "CONTAINS" },
     { fromNodeId: "component.flow-orchestrator", toNodeId: "component.state-store", relationship: "REQUIRES" }
   ],
+  substratePorts: [
+    {
+      portId: "substrate:event-sink",
+      capability: "event-sink",
+      label: "Event Sink",
+      provider: "kafka",
+      status: "AVAILABLE"
+    }
+  ],
   connections: [
     {
       sourceNodeId: "component.state-store",
@@ -173,6 +182,15 @@ export const studioApiExampleDynamicDcpProjection: DynamicDcpProjectionResponse 
       capability: "state-store",
       status: "ALLOWED",
       reason: "Postgres State Store offers state-store required by Flow Orchestrator"
+    },
+    {
+      sourceNodeId: "substrate:runtime",
+      sourcePortId: "substrate:event-sink",
+      targetNodeId: "component.flow-orchestrator",
+      targetPortId: "need-event-sink",
+      capability: "event-sink",
+      status: "ALLOWED",
+      reason: "Unfurl substrate offers event-sink required by Flow Orchestrator"
     }
   ],
   warnings: []

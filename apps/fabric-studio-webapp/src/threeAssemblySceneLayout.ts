@@ -1,4 +1,9 @@
-import type { DynamicDcpProjectionResponse, DynamicDcpNode, StudioPortConnectionEdge } from "@unfurl/fabric-validation-client";
+import type {
+  DynamicDcpProjectionResponse,
+  DynamicDcpNode,
+  StudioPortConnectionEdge,
+  StudioSubstratePort
+} from "@unfurl/fabric-validation-client";
 
 // Layout output for one module slot. The scene's rebuildDynamicModules
 // loop iterates over these and calls createModule + addModulePorts with
@@ -170,6 +175,7 @@ export function positionForNodeId(
 export type PipeEndpoint = {
   readonly nodeId: string;
   readonly portId: string;
+  readonly kind: "component" | "substrate";
   readonly position: readonly [number, number, number];
 };
 
@@ -189,24 +195,55 @@ export type PipeLayout = {
  */
 export function layoutPipes(
   layout: readonly LayoutEntry[],
-  connections: readonly StudioPortConnectionEdge[] | undefined
+  connections: readonly StudioPortConnectionEdge[] | undefined,
+  substratePorts: readonly StudioSubstratePort[] | undefined = []
 ): readonly PipeLayout[] {
   if (!connections || connections.length === 0) {
     return [];
   }
   const out: PipeLayout[] = [];
   for (const edge of connections) {
-    const sourcePos = positionForNodeId(layout, edge.sourceNodeId);
-    const targetPos = positionForNodeId(layout, edge.targetNodeId);
-    if (!sourcePos || !targetPos) {
+    const source = endpointFor(layout, substratePorts, edge.sourceNodeId, edge.sourcePortId);
+    const target = endpointFor(layout, substratePorts, edge.targetNodeId, edge.targetPortId);
+    if (!source || !target) {
       continue;
     }
     out.push({
       id: `pipe:${edge.sourceNodeId}:${edge.sourcePortId}->${edge.targetNodeId}:${edge.targetPortId}`,
-      source: { nodeId: edge.sourceNodeId, portId: edge.sourcePortId, position: sourcePos },
-      target: { nodeId: edge.targetNodeId, portId: edge.targetPortId, position: targetPos },
+      source,
+      target,
       capability: edge.capability
     });
   }
   return out;
+}
+
+function endpointFor(
+  layout: readonly LayoutEntry[],
+  substratePorts: readonly StudioSubstratePort[] | undefined,
+  nodeId: string,
+  portId: string
+): PipeEndpoint | undefined {
+  if (nodeId === "substrate:runtime" || nodeId === "substrate") {
+    return {
+      nodeId,
+      portId,
+      kind: "substrate",
+      position: substratePortPosition(substratePorts ?? [], portId)
+    };
+  }
+  const position = positionForNodeId(layout, nodeId);
+  return position ? { nodeId, portId, kind: "component", position } : undefined;
+}
+
+function substratePortPosition(
+  substratePorts: readonly StudioSubstratePort[],
+  portId: string
+): readonly [number, number, number] {
+  const index = Math.max(0, substratePorts.findIndex(port => port.portId === portId));
+  const count = Math.max(1, substratePorts.length);
+  const xMin = -3.9;
+  const xMax = 3.9;
+  const x = count === 1 ? 0 : xMin + ((xMax - xMin) / (count - 1)) * index;
+  return [x, -1.78, 2.48] as const;
 }
