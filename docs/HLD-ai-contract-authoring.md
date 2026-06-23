@@ -27,11 +27,12 @@ AI authoring does **not** add a parallel pipeline. It adds a conversational laye
 
 ## Where the AI runs (and where it must not)
 
-The authoring AI is a **foundry agent** invoked **server-side** through a new Studio API endpoint — **never a browser→LLM call**. This is non-negotiable for the product posture:
+The authoring AI is a **foundry agent**. The Studio endpoint (`POST /studio/authoring/converse`) does **not** run the model — it **delegates to foundry over DCP `agent.run`**, and never makes a browser→LLM call. This is non-negotiable for the product posture:
 
-- **Residency / no phone-home (master doc §1, §3):** the model provider is the customer's own configured provider (resolved through foundry's `ProviderRegistry`); no model SDK or provider key ever reaches the browser, and Studio makes no vendor callback.
-- **Grounding:** the agent is grounded in the **admitted component catalog** — the DCP claims/offers and negotiation surfaces the Studio already holds. It composes *only* from real catalog components; it cannot invent a component or capability.
-- **Governance:** because it is a foundry agent, the authoring run is governed by budget and permission like any other (and is a natural consumer of the **skill substrate** — a `fabric-authoring` skill bundles the catalog-query and intent-proposal tools with a budget cap and permission scope).
+- **Foundry runs it; Fabric delegates.** Fabric turns a converse turn into a neutral `agent.run` `ContractInvocation` (`{ userMessage, conversation, catalog }`) and sends it to foundry through a `ContractInvocable`. In the committed wiring that invocable is `DcpAuthoringClient` (Fabric), which speaks HTTP/JSON to foundry's `FoundryDcpServer`; a co-packaged host could inject an in-process invocable with the identical contract. **Neither product depends on the other at runtime** — cross-product is DCP only. When no foundry endpoint is configured, Fabric falls back to a deterministic in-Fabric bridge.
+- **Residency / no phone-home (master doc §1, §3):** the model provider is the customer's own, registered in **foundry's** `ProviderRegistry` and keyed from the environment (`ANTHROPIC_API_KEY`); no model SDK or provider key ever reaches the browser or Fabric, and Studio makes no vendor callback.
+- **Grounding:** the agent is grounded in the **admitted component catalog** the Studio passes in the invocation. It composes *only* from real catalog components, and Fabric **re-validates** every proposed component against the admitted catalog before returning a proposal — an unsatisfiable need is a gap, never a hallucinated component.
+- **Governance:** because it is a foundry agent, the authoring run is governed by budget and permission like any other (and is a natural consumer of the **skill substrate** — a `fabric-authoring` skill bundles the tools with a budget cap and permission scope).
 
 ## The conversational contract (structured, not freeform)
 
