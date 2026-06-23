@@ -142,3 +142,15 @@ Useful options:
 .\scripts\launch-studio.ps1 -Mode preview -NoOpen
 .\scripts\launch-studio.ps1 -Mode preview -NoBuild
 ```
+
+### Demo fallbacks
+
+By default the workspace shows real backend data or an honest empty/error state. When an
+endpoint returns nothing it does **not** invent content — no generated catalog, no sample
+assembly, no local demo replacement options. To re-enable that demo content for offline UI
+development, demos, or screenshots without a live backend:
+
+```powershell
+$env:VITE_STUDIO_DEMO_FALLBACKS = "true"
+npm run dev:studio
+```

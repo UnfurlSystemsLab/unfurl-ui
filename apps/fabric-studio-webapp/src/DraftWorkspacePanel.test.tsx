@@ -7,7 +7,7 @@ import { DraftWorkspacePanel } from "./DraftWorkspacePanel.js";
 
 describe("DraftWorkspacePanel", () => {
   it("renders the governed composition workbench", () => {
-    const html = renderToString(<DraftWorkspacePanel client={client()} />);
+    const html = renderToString(<DraftWorkspacePanel client={client()} demoFallbacks />);
 
     assert.match(html, /Unfurl Studio Workbench/);
     assert.match(html, /Guided Tour/);
@@ -56,7 +56,7 @@ describe("DraftWorkspacePanel", () => {
   });
 
   it("renders inspectable component-specific metadata", () => {
-    const html = renderToString(<DraftWorkspacePanel client={client()} />);
+    const html = renderToString(<DraftWorkspacePanel client={client()} demoFallbacks />);
 
     assert.match(html, /Distributed Worker/);
     assert.match(html, /State Store Adapter/);
@@ -172,6 +172,7 @@ describe("DraftWorkspacePanel", () => {
   it("renders identically with or without a loadConnectionCandidates-capable client", () => {
     const withFn = renderToString(
       <DraftWorkspacePanel
+        demoFallbacks
         client={{
           ...client(),
           loadConnectionCandidates: async () => ({
@@ -185,11 +186,58 @@ describe("DraftWorkspacePanel", () => {
         }}
       />
     );
-    const withoutFn = renderToString(<DraftWorkspacePanel client={client()} />);
+    const withoutFn = renderToString(<DraftWorkspacePanel client={client()} demoFallbacks />);
 
     assert.match(withFn, /catalog-row/);
     assert.match(withFn, /draggable="true"/);
     assert.match(withoutFn, /catalog-row/);
+  });
+});
+
+describe("DraftWorkspacePanel without demo fallbacks (default)", () => {
+  it("shows an honest no-data state instead of the sample assembly", () => {
+    const html = renderToString(<DraftWorkspacePanel client={client()} />);
+
+    assert.match(html, /No Assembly Data/);
+    assert.match(html, /connect to a backend with a live DCP projection/);
+    // None of the hardcoded sample-assembly modules should appear.
+    assert.doesNotMatch(html, /Flow API/);
+    assert.doesNotMatch(html, /Trigger Ingress/);
+    assert.doesNotMatch(html, /Audit Sink/);
+  });
+
+  it("shows an empty inspector instead of hardcoded component details", () => {
+    const html = renderToString(<DraftWorkspacePanel client={client()} />);
+
+    assert.match(html, /No component selected/);
+    assert.match(html, /Select a component in the assembly to inspect its governed details/);
+    // The hardcoded sample "Flow Orchestrator" inspector identity must not leak.
+    assert.doesNotMatch(html, /Orchestration Component/);
+    assert.doesNotMatch(html, /Owns deterministic DAG scheduling/);
+  });
+
+  it("does not surface local demo replacement options", () => {
+    const html = renderToString(<DraftWorkspacePanel client={client()} />);
+
+    assert.match(html, /No replacement options available from Fabric/);
+    assert.doesNotMatch(html, /using local demo fallback data/);
+  });
+
+  it("does not render a generated fallback catalog when the live catalog is empty", () => {
+    const html = renderToString(
+      <DraftWorkspacePanel
+        client={{
+          ...client(),
+          listCatalogVisuals: async () => ({ catalogHash: "sha256:empty", entries: [] })
+        }}
+      />
+    );
+
+    // SSR render has no live catalog yet (effect not fired) and demo
+    // fallbacks are off, so the Flow Components palette has no entries.
+    // (The static Adapters/Substrate/Libraries groups still render rows.)
+    assert.match(html, /No catalog entries available/);
+    assert.match(html, /<h3>Flow Components<\/h3><\/section>/);
   });
 });
 

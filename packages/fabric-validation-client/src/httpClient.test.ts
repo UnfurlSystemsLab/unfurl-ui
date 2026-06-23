@@ -527,6 +527,45 @@ describe("HTTP Studio Fabric client", () => {
     ]);
   });
 
+  it("converses with the server-side authoring endpoint without provider fields", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      defaultTenantId: "tenant-payments",
+      defaultAssemblyId: "assembly-checkout",
+      fetch: fakeFetch(calls, {
+        kind: "clarify",
+        assistantMessage: "Where should this run?",
+        questions: [
+          {
+            id: "target",
+            label: "Target",
+            type: "SINGLE_SELECT",
+            options: ["Customer Runtime Substrate"]
+          }
+        ]
+      })
+    });
+
+    const response = await client.converseAuthoring?.({
+      sessionId: "studio-session-123",
+      conversation: [],
+      userMessage: "Build a docs chatbot"
+    });
+
+    assert.equal(response?.kind, "clarify");
+    assert.equal(calls[0]?.input, "http://fabric.local/studio/authoring/converse");
+    assert.equal(calls[0]?.method, "POST");
+    assert.deepEqual(JSON.parse(calls[0]?.body ?? "{}"), {
+      tenantId: "tenant-payments",
+      assemblyId: "assembly-checkout",
+      sessionId: "studio-session-123",
+      conversation: [],
+      userMessage: "Build a docs chatbot"
+    });
+    assert.doesNotMatch(calls[0]?.body ?? "", /apiKey|providerKey|modelProvider/i);
+  });
+
   it("loads visual assets by encoded Fabric asset id", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

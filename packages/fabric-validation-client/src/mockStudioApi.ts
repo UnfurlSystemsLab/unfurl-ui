@@ -2,6 +2,7 @@ import type { StudioDraftSession } from "@unfurl/fabric-scene-model";
 import type { VisualCatalogEntry } from "@unfurl/visual-manifest";
 import type {
   CompileDraftCandidateResponse,
+  AuthoringConverseResponse,
   CreateDraftCompositionRequest,
   CreateDraftCompositionResponse,
   AdmitCatalogArtifactsResponse,
@@ -35,6 +36,7 @@ export type MockStudioApiFixtures = {
   readonly layoutState?: StudioLayoutState;
   readonly intentResponse?: IntentResponse;
   readonly compileResponse?: CompileDraftCandidateResponse;
+  readonly authoringResponse?: AuthoringConverseResponse;
   readonly resolveDeploymentResponse?: ResolveDeploymentResponse;
   readonly asset?: StudioVisualAsset;
 };
@@ -448,6 +450,62 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     }
     if (method === "POST" && (path === `/studio/sessions/${encodeURIComponent(session.sessionId)}/compile` || path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/compile`))) {
       return ok(fixtures.compileResponse ?? studioApiExampleCompileResponse);
+    }
+    if (method === "POST" && path === "/studio/authoring/converse") {
+      const body = parseJson<{ readonly userMessage?: string }>(init?.body);
+      if (fixtures.authoringResponse) {
+        return ok(fixtures.authoringResponse);
+      }
+      if ((body?.userMessage ?? "").toLowerCase().includes("uncatalogued")) {
+        return ok<AuthoringConverseResponse>({
+          kind: "gap",
+          unmet: ["uncatalogued.capability"],
+          assistantMessage: "No admitted catalog component offers uncatalogued.capability."
+        });
+      }
+      if ((body?.userMessage ?? "").trim().length < 8) {
+        return ok<AuthoringConverseResponse>({
+          kind: "clarify",
+          assistantMessage: "I need one more detail before proposing a contract.",
+          questions: [
+            {
+              id: "deployment-target",
+              label: "Where should this run?",
+              type: "SINGLE_SELECT",
+              required: true,
+              options: ["Customer Runtime Substrate", "Kubernetes"]
+            }
+          ]
+        });
+      }
+      return ok<AuthoringConverseResponse>({
+        kind: "proposal",
+        assistantMessage: "I found a catalog-backed composition proposal.",
+        proposal: {
+          summary: "Add the Flow Orchestrator and bind it to the state-store port.",
+          needsYaml: "requiredCapabilities:\n  - capability: workflow.execute\n",
+          intents: [
+            {
+              type: "ADD_COMPONENT",
+              catalogEntryId: catalog.entries[0]?.catalogEntryId ?? "com.unfurl.flow:orchestrator:0.1.0"
+            },
+            {
+              type: "CONNECT",
+              fromPort: "workflow-execute",
+              toPort: "state-store"
+            }
+          ],
+          deploymentPolicy: {
+            preferredShapes: ["CONTAINERIZED_SERVICE"],
+            disallowedShapes: [],
+            requireIsolationForCapabilityPatterns: ["workflow.*"],
+            runtime: {
+              kubernetes: true
+            }
+          },
+          warnings: []
+        }
+      });
     }
     if (method === "POST" && path === "/studio/deployment/resolve") {
       return ok(fixtures.resolveDeploymentResponse ?? studioApiExampleResolveDeploymentResponse);

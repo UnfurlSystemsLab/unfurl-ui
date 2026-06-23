@@ -78,3 +78,16 @@ export function studioAssemblyId(): string {
   const fromEnv = env?.VITE_STUDIO_ASSEMBLY_ID?.trim();
   return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_STUDIO_ASSEMBLY_ID;
 }
+
+export function studioDemoFallbacks(): boolean {
+  // Default is OFF — the Studio shows real backend data (catalog, dynamic
+  // DCP projection, replacement candidates) or an honest empty/error state
+  // when an endpoint returns nothing. Set VITE_STUDIO_DEMO_FALLBACKS=true to
+  // re-enable the generated demo catalog, the hardcoded sample assembly, and
+  // local demo replacement options — useful for offline UI development,
+  // demos, and screenshot generation without a live backend. Defaulting these
+  // on previously mixed fictional, ungoverned content into a governed
+  // workbench, hiding backend failures behind plausible-looking demo data.
+  const env = (import.meta as ImportMeta & { readonly env?: { readonly VITE_STUDIO_DEMO_FALLBACKS?: string } }).env;
+  return env?.VITE_STUDIO_DEMO_FALLBACKS === "true";
+}

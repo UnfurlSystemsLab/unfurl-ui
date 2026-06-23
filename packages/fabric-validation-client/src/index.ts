@@ -9,6 +9,26 @@ export type StudioIntent =
   | DisconnectIntent
   | ReplaceComponentIntent;
 
+export type AuthoringProposedIntent =
+  | {
+      readonly type: "ADD_COMPONENT";
+      readonly catalogEntryId: string;
+    }
+  | {
+      readonly type: "CONNECT";
+      readonly fromPort: string;
+      readonly toPort: string;
+    }
+  | {
+      readonly type: "DISCONNECT";
+      readonly pipeId: string;
+    }
+  | {
+      readonly type: "REPLACE_COMPONENT";
+      readonly oldComponentId: string;
+      readonly newCatalogEntryId: string;
+    };
+
 export type StudioScope = {
   readonly tenantId: string;
   readonly assemblyId: string;
@@ -367,6 +387,52 @@ export type CompileDraftCandidateRequest = {
   readonly deploymentPolicy?: DeploymentPolicyDraft;
 };
 
+export type AuthoringConversationMessage = {
+  readonly role: "USER" | "ASSISTANT" | "SYSTEM";
+  readonly content: string;
+};
+
+export type AuthoringQuestion = {
+  readonly id: string;
+  readonly label: string;
+  readonly type: "SINGLE_SELECT" | "MULTI_SELECT" | "FREE_TEXT";
+  readonly required?: boolean;
+  readonly options?: readonly string[];
+};
+
+export type AuthoringConverseRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly sessionId?: string;
+  readonly conversation: readonly AuthoringConversationMessage[];
+  readonly userMessage?: string;
+};
+
+export type AuthoringProposal = {
+  readonly needsYaml: string;
+  readonly intents: readonly AuthoringProposedIntent[];
+  readonly deploymentPolicy?: DeploymentPolicyDraft;
+  readonly summary: string;
+  readonly warnings: readonly string[];
+};
+
+export type AuthoringConverseResponse =
+  | {
+      readonly kind: "clarify";
+      readonly questions: readonly AuthoringQuestion[];
+      readonly assistantMessage: string;
+    }
+  | {
+      readonly kind: "proposal";
+      readonly proposal: AuthoringProposal;
+      readonly assistantMessage: string;
+    }
+  | {
+      readonly kind: "gap";
+      readonly unmet: readonly string[];
+      readonly assistantMessage: string;
+    };
+
 export type DeploymentShape =
   | "IN_PROCESS_LIBRARY"
   | "MODULAR_MONOLITH_MODULE"
@@ -504,6 +570,7 @@ export interface StudioFabricClient {
   readonly sessionEventsUrl?: (request: SessionEventsRequest) => string;
   readonly applyIntent: (intent: StudioIntent) => Promise<IntentResponse>;
   readonly compileCandidate: (request: CompileDraftCandidateRequest) => Promise<CompileDraftCandidateResponse>;
+  readonly converseAuthoring?: (request: AuthoringConverseRequest) => Promise<AuthoringConverseResponse>;
   readonly resolveDeployment?: (request: ResolveDeploymentRequest) => Promise<ResolveDeploymentResponse>;
   readonly getVisualAsset: (assetId: string) => Promise<StudioVisualAsset>;
 }

@@ -4,6 +4,7 @@ import {
   DEFAULT_STUDIO_ASSEMBLY_ID,
   DEFAULT_STUDIO_TENANT_ID,
   type DynamicDcpProjectionResponse,
+  type DeploymentPolicyDraft,
   type DeploymentShape,
   type StudioSessionEvent,
   type StudioReplacementCandidate as FabricReplacementCandidate,
@@ -27,6 +28,7 @@ import {
   type DeploymentPlannerState
 } from "./deploymentPlanner.js";
 import { buildSigningHandoff } from "./signingHandoff.js";
+import { AuthoringConversationPanel } from "./AuthoringConversationPanel.js";
 import type { SceneDropTarget, SemanticDcpSceneProjection, SemanticZoomLevel, ThreeAssemblySelection, ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
 
 const ThreeAssemblyScene = lazy(async () => {
@@ -43,7 +45,7 @@ export type DraftWorkspacePanelProps = {
     "loadDynamicDcpProjection" |
     "loadReplacementCandidates" |
     "loadConnectionCandidates" |
-    "listCatalogVisuals" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate"
+    "listCatalogVisuals" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate" | "resolveDeployment" | "converseAuthoring"
     | "heartbeatCollaborator" | "sessionEventsUrl"
   >;
   readonly initialTenantId?: string | undefined;
@@ -52,6 +54,16 @@ export type DraftWorkspacePanelProps = {
   readonly initialDraftComponentCount?: number | undefined;
   readonly initialDraftComponentCatalogEntryIds?: readonly string[] | undefined;
   readonly initialDynamicProjection?: DynamicDcpProjectionResponse | undefined;
+  /**
+   * When {@code true}, the panel falls back to generated demo content
+   * (a sample catalog, a hardcoded sample assembly, and local demo
+   * replacement options) whenever the backend returns nothing. Default
+   * {@code false} — a governed workbench should show real Fabric data or
+   * an honest empty/error state, never fictional ungoverned content.
+   * Enable for offline UI development, demos, or screenshot generation
+   * (wired from {@code VITE_STUDIO_DEMO_FALLBACKS} in the host shell).
+   */
+  readonly demoFallbacks?: boolean | undefined;
 };
 
 type SelectedSurfaceId = ThreeAssemblySurfaceId;
@@ -105,7 +117,8 @@ export function DraftWorkspacePanel({
   initialBaseCatalogHash = "sha256:catalog",
   initialDraftComponentCount,
   initialDraftComponentCatalogEntryIds,
-  initialDynamicProjection
+  initialDynamicProjection,
+  demoFallbacks = false
 }: DraftWorkspacePanelProps) {
   const [tenantId, setTenantId] = useState(initialTenantId);
   const [assemblyId, setAssemblyId] = useState(initialAssemblyId);
@@ -433,7 +446,7 @@ export function DraftWorkspacePanel({
           status: "ADDED"
         }
       ]);
-      selectScenePart({ id: `component:${slugFromCatalogEntry(entryId)}`, kind: "component", surface: "validation", label: labelForCatalogEntry(entryId) });
+      selectScenePart(draftComponentSelection(entryId, labelForCatalogEntry(entryId), dynamicProjection));
       clearPreview();
     } finally {
       setBusy(false);
@@ -562,6 +575,24 @@ export function DraftWorkspacePanel({
     }
   }
 
+  function applyAuthoringDeploymentPolicy(proposal: { readonly deploymentPolicy?: DeploymentPolicyDraft }) {
+    const policy = proposal.deploymentPolicy;
+    if (!policy) {
+      return;
+    }
+    setDeploymentPlanner(current => ({
+      ...current,
+      preferredShapes: policy.preferredShapes,
+      disallowedShapes: policy.disallowedShapes,
+      requireIsolationForCapabilityPatterns: policy.requireIsolationForCapabilityPatterns,
+      runtime: policy.runtime
+    }));
+    const preferred = policy.preferredShapes[0];
+    if (preferred) {
+      setSaveDeploymentShape(preferred);
+    }
+  }
+
   function preferAssemblyDeploymentShape(shape: DeploymentShape) {
     setDeploymentPlanner(current => preferDeploymentShape(current, shape));
     setSaveDeploymentShape(shape);
@@ -670,9 +701,17 @@ export function DraftWorkspacePanel({
   }
 
   const handoff = state ? buildSigningHandoff(state, { signingRequested: sign }) : undefined;
-  const selected = inspectorDetailsFor(selectedComponent, dynamicProjection);
+  const selected = inspectorDetailsFor(selectedComponent, dynamicProjection, demoFallbacks);
+  // A draft component the operator selected that the projection has no
+  // governed node for yet (surface carries the `draft:` sentinel). We show
+  // its real label with a "pending" note rather than "No component selected".
+  const pendingDraftComponentLabel = !selected
+    && selectedPart.kind === "component"
+    && selectedPart.surface.startsWith("draft:")
+    ? selectedPart.label
+    : undefined;
   const ports = useMemo(() => activePorts(catalog[0]), [catalog]);
-  const paletteEntries = catalog.length === 0 ? fallbackCatalog() : catalog;
+  const paletteEntries = catalog.length === 0 && demoFallbacks ? fallbackCatalog() : catalog;
   const deploymentPolicy = useMemo(
     () => deploymentPolicyFromPlannerState(deploymentPlanner),
     [deploymentPlanner]
@@ -710,9 +749,16 @@ export function DraftWorkspacePanel({
       status: port.status === "AVAILABLE" ? "healthy" : "muted"
     }))
     : substrateCapabilities;
-  const showFallbackAssembly = dynamicProjection === undefined
+  const showFallbackAssembly = demoFallbacks
+    && dynamicProjection === undefined
     && draftComponents === undefined
     && (draftComponentCount === undefined || draftComponentCount > 0);
+  // With demo fallbacks off and no draft yet and no live projection, the
+  // scene has nothing real to render. Surface an honest prompt instead of
+  // a blank plane or fictional sample modules.
+  const showNoAssemblyData = !demoFallbacks
+    && dynamicProjection === undefined
+    && draftComponents === undefined;
   const showEmptyAssembly = draftComponents !== undefined && draftComponents.length === 0;
   const showDraftInventory = draftComponents !== undefined;
   const semanticSceneProjection = useMemo(
@@ -722,8 +768,10 @@ export function DraftWorkspacePanel({
   const replacementCandidates = useMemo(
     () => fabricReplacementCandidates
       ? toReplacementCandidates(fabricReplacementCandidates)
-      : buildReplacementCandidates(selectedPart.surface, paletteEntries),
-    [fabricReplacementCandidates, selectedPart.surface, paletteEntries]
+      : demoFallbacks
+        ? buildReplacementCandidates(selectedPart.surface, paletteEntries)
+        : [],
+    [fabricReplacementCandidates, selectedPart.surface, paletteEntries, demoFallbacks]
   );
   const selectedReplacement = replacementCandidates.find(candidate => candidate.catalogEntryId === replacementEntryId) ?? replacementCandidates[0];
   const tutorialSteps = useMemo<readonly TutorialStep[]>(() => [
@@ -900,7 +948,16 @@ export function DraftWorkspacePanel({
             Catalog hash
             <input value={baseCatalogHash} onChange={event => setBaseCatalogHash(event.target.value)} />
           </label>
-          {catalogError && <p className="live-data-notice">Live catalog unavailable; showing generated fallback.</p>}
+          {catalogError && (
+            <p className="live-data-notice">
+              {demoFallbacks
+                ? "Live catalog unavailable; showing generated fallback."
+                : "Live catalog unavailable."}
+            </p>
+          )}
+          {!catalogError && paletteEntries.length === 0 && (
+            <p className="live-data-notice">No catalog entries available for this tenant.</p>
+          )}
           <div className="palette-list grouped">
             <CatalogGroup
               title="Flow Components"
@@ -921,6 +978,14 @@ export function DraftWorkspacePanel({
         </aside>
 
         <main className="workbench-stage" aria-label="Composition workbench">
+          <AuthoringConversationPanel
+            client={client}
+            tenantId={tenantId.trim() || DEFAULT_STUDIO_TENANT_ID}
+            assemblyId={assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID}
+            state={state}
+            onStateChange={setState}
+            onDeploymentPolicy={applyAuthoringDeploymentPolicy}
+          />
           <section className="save-draft-panel" aria-label="Assembly deployment planner">
             <div>
               <strong>Assembly Deployment Plan</strong>
@@ -1015,7 +1080,7 @@ export function DraftWorkspacePanel({
             ))}
           </div>
 
-            <div className={`composition-plane ${viewClassName(activeView)} ${showEmptyAssembly ? "empty-assembly-plane" : ""}`}>
+            <div className={`composition-plane ${viewClassName(activeView)} ${showEmptyAssembly || showNoAssemblyData ? "empty-assembly-plane" : ""}`}>
               {(showFallbackAssembly || draftComponents !== undefined || dynamicProjection !== undefined) && (
                 <Suspense fallback={<div className="three-assembly-scene" aria-label="3D assembly scene" />}>
                 <ThreeAssemblyScene
@@ -1076,6 +1141,12 @@ export function DraftWorkspacePanel({
                 <span>Import or add verified catalog components to begin this draft.</span>
               </div>
             )}
+            {showNoAssemblyData && (
+              <div className="empty-assembly-state" role="status">
+                <strong>No Assembly Data</strong>
+                <span>Start a New Draft, or connect to a backend with a live DCP projection for this assembly.</span>
+              </div>
+            )}
             {showDraftInventory && draftComponents.length > 0 && (
               <div className="draft-assembly-surface" aria-label="Draft assembly components">
                 <strong>Draft Assembly</strong>
@@ -1086,12 +1157,7 @@ export function DraftWorkspacePanel({
                       type="button"
                       className="draft-component-chip"
                       key={component.catalogEntryId}
-                      onClick={() => selectScenePart({
-                        id: `component:${slugFromCatalogEntry(component.catalogEntryId)}`,
-                        kind: "component",
-                        surface: "validation",
-                        label: component.label
-                      })}
+                      onClick={() => selectScenePart(draftComponentSelection(component.catalogEntryId, component.label, dynamicProjection))}
                     >
                       <span className="module-icon purple">{component.label.slice(0, 1) || "C"}</span>
                       <strong>{component.label}</strong>
@@ -1272,11 +1338,25 @@ export function DraftWorkspacePanel({
 
         <aside className="workbench-inspector" aria-label="Inspector">
           <div className="inspector-selected">
-            <span className={`module-icon ${selected.iconClass}`}>{selected.icon}</span>
-            <div>
-              <strong>{selected.name}</strong>
-              <span className="valid-pill">{selected.status}</span>
-            </div>
+            {selected ? (
+              <>
+                <span className={`module-icon ${selected.iconClass}`}>{selected.icon}</span>
+                <div>
+                  <strong>{selected.name}</strong>
+                  <span className="valid-pill">{selected.status}</span>
+                </div>
+              </>
+            ) : pendingDraftComponentLabel ? (
+              <div>
+                <strong>{pendingDraftComponentLabel}</strong>
+                <span>Live DCP details appear once the projection includes this component.</span>
+              </div>
+            ) : (
+              <div>
+                <strong>No component selected</strong>
+                <span>Select a component in the assembly to inspect it.</span>
+              </div>
+            )}
           </div>
           <div className="inspector-tabs">
             {["Properties", "Bindings", "Diagnostics", "Audit"].map(tab => (
@@ -1326,7 +1406,9 @@ export function DraftWorkspacePanel({
               <p className="live-data-notice">
                 {fabricReplacementCandidates
                   ? "Replacement options are sourced from Fabric's dynamic DCP projection."
-                  : "Replacement options are using local demo fallback data."}
+                  : demoFallbacks
+                    ? "Replacement options are using local demo fallback data."
+                    : "No replacement options available from Fabric for the selected component."}
               </p>
               <div className="replacement-shelf" aria-label="Replacement candidates">
                 {replacementCandidates.map(candidate => (
@@ -1423,23 +1505,33 @@ export function DraftWorkspacePanel({
           </section>
           <section className="inspector-card">
             <h2>Component Details</h2>
-            <dl>
-              <dt>Type</dt><dd>{selected.type}</dd>
-              <dt>Version</dt><dd>{selected.version}</dd>
-              <dt>Owner</dt><dd>{selected.owner}</dd>
-              <dt>Status</dt><dd><span className="included-dot" /> {selected.status}</dd>
-            </dl>
-            <p>{selected.description}</p>
+            {selected ? (
+              <>
+                <dl>
+                  <dt>Type</dt><dd>{selected.type}</dd>
+                  <dt>Version</dt><dd>{selected.version}</dd>
+                  <dt>Owner</dt><dd>{selected.owner}</dd>
+                  <dt>Status</dt><dd><span className="included-dot" /> {selected.status}</dd>
+                </dl>
+                <p>{selected.description}</p>
+              </>
+            ) : pendingDraftComponentLabel ? (
+              <p className="live-data-notice">{pendingDraftComponentLabel} is in this draft; governed details appear once the projection includes it.</p>
+            ) : (
+              <p className="live-data-notice">Select a component in the assembly to inspect its governed details.</p>
+            )}
           </section>
-          <section className="inspector-card">
-            <h2>Deployment</h2>
-            <dl>
-              <dt>Binding Mode</dt><dd>{selected.bindingMode}</dd>
-              <dt>Deployment Shape</dt><dd><span className="shape-pill">{selected.deploymentShape}</span></dd>
-              <dt>Substrate Target</dt><dd>{selected.substrateTarget}</dd>
-              <dt>Isolation Pattern</dt><dd><span className="strict-pill">{selected.isolationPattern}</span></dd>
-            </dl>
-          </section>
+          {selected && (
+            <section className="inspector-card">
+              <h2>Deployment</h2>
+              <dl>
+                <dt>Binding Mode</dt><dd>{selected.bindingMode}</dd>
+                <dt>Deployment Shape</dt><dd><span className="shape-pill">{selected.deploymentShape}</span></dd>
+                <dt>Substrate Target</dt><dd>{selected.substrateTarget}</dd>
+                <dt>Isolation Pattern</dt><dd><span className="strict-pill">{selected.isolationPattern}</span></dd>
+              </dl>
+            </section>
+          )}
           <div className="inspector-stack">
             <label>
               Catalog entry intent
@@ -1459,14 +1551,18 @@ export function DraftWorkspacePanel({
               Request signed compile
             </label>
           </div>
-          <section className="inspector-card">
-            <h2>Provided Ports ({selected.providedPorts.length})</h2>
-            <PortList kind="provided" names={selected.providedPorts} />
-          </section>
-          <section className="inspector-card">
-            <h2>Required Ports ({selected.requiredPorts.length})</h2>
-            <PortList kind="required" names={selected.requiredPorts} />
-          </section>
+          {selected && (
+            <section className="inspector-card">
+              <h2>Provided Ports ({selected.providedPorts.length})</h2>
+              <PortList kind="provided" names={selected.providedPorts} />
+            </section>
+          )}
+          {selected && (
+            <section className="inspector-card">
+              <h2>Required Ports ({selected.requiredPorts.length})</h2>
+              <PortList kind="required" names={selected.requiredPorts} />
+            </section>
+          )}
           <section className="inspector-card">
             <h2>Validation Status</h2>
             <ul className="validation-list">
@@ -1657,10 +1753,6 @@ function labelForCatalogEntry(catalogEntryId: string): string {
     .join(" ");
 }
 
-function slugFromCatalogEntry(catalogEntryId: string): string {
-  return catalogEntryId.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "component";
-}
-
 function activePorts(entry: VisualCatalogEntry | undefined): readonly string[] {
   return entry?.visualManifest?.ports.map(port => port.id) ?? [];
 }
@@ -1733,6 +1825,40 @@ function projectionNodeIdForSelection(
 
 function moduleClass(baseClass: string, selected: SelectedSurfaceId, surface: SelectedSurfaceId): string {
   return selected === surface ? `${baseClass} selected` : baseClass;
+}
+
+function projectionNodeIdForCatalogEntry(
+  projection: DynamicDcpProjectionResponse | undefined,
+  catalogEntryId: string
+): string | undefined {
+  return projection?.nodes.find(
+    node => node.level === "CHILD" && node.catalogEntryId === catalogEntryId
+  )?.nodeId;
+}
+
+// Build the scene selection for a draft component (palette add or Draft
+// Assembly chip). When the live projection already has a CHILD node for this
+// catalog entry, select that node id so the selection matches a 3D-module
+// click exactly — same highlight, and inspectorDetailsFor resolves real
+// projection-backed details. Otherwise fall back to a stable
+// `draft:<catalogEntryId>` sentinel: the component is in the draft but the
+// projection has no governed details for it yet, so the inspector reports a
+// pending state instead of the misleading "No component selected" (or a
+// fabricated identity). Replaces the old hardcoded `surface: "validation"`,
+// which always resolved to the demo Flow Orchestrator.
+function draftComponentSelection(
+  catalogEntryId: string,
+  label: string,
+  projection: DynamicDcpProjectionResponse | undefined
+): ThreeAssemblySelection {
+  const nodeId = projectionNodeIdForCatalogEntry(projection, catalogEntryId);
+  const surface = nodeId ?? `draft:${catalogEntryId}`;
+  return {
+    id: `component:${surface}`,
+    kind: "component",
+    surface,
+    label
+  };
 }
 
 function fallbackCatalog(): readonly VisualCatalogEntry[] {
@@ -1915,12 +2041,32 @@ const inspectorDetails: Record<SelectedSurfaceId, InspectorDetails> = {
   }
 };
 
-function inspectorDetailsFor(surface: SelectedSurfaceId, projection: DynamicDcpProjectionResponse | undefined): InspectorDetails {
-  const staticDetails = inspectorDetails[surface];
-  if (staticDetails) {
-    return staticDetails;
+function inspectorDetailsFor(
+  surface: SelectedSurfaceId,
+  projection: DynamicDcpProjectionResponse | undefined,
+  demoFallbacks: boolean
+): InspectorDetails | undefined {
+  // The substrate base plate is a real, profile-derived surface — its
+  // details are not demo content, so they're always available.
+  if (surface === "substrate") {
+    return inspectorDetails.substrate;
+  }
+  // The rest of the static map is hardcoded sample-assembly metadata.
+  // Only consult it in demo mode; otherwise the inspector must reflect the
+  // live projection or report that it has nothing real to show.
+  if (demoFallbacks) {
+    const staticDetails = inspectorDetails[surface];
+    if (staticDetails) {
+      return staticDetails;
+    }
   }
   const node = projection?.nodes.find(node => node.nodeId === surface);
+  if (!node && !demoFallbacks) {
+    // No projection-backed details for this surface and demo content is
+    // off — signal the caller to render an honest empty state rather than
+    // fabricate a component identity.
+    return undefined;
+  }
   return {
     name: node?.label ?? surface,
     icon: (node?.label ?? surface).slice(0, 1).toUpperCase() || "C",

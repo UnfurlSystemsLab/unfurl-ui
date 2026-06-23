@@ -1,6 +1,8 @@
 import type {
   CompileDraftCandidateRequest,
   CompileDraftCandidateResponse,
+  AuthoringConverseRequest,
+  AuthoringConverseResponse,
   CreateDraftCompositionRequest,
   CreateDraftCompositionResponse,
   AdmitCatalogArtifactsRequest,
@@ -267,6 +269,17 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/compile`,
+        { ...body, ...scope },
+        tenantHeaders(scope.tenantId, authContext)
+      );
+    },
+    converseAuthoring: async (body: AuthoringConverseRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      return request<AuthoringConverseResponse>(
+        fetchImpl,
+        baseUrl,
+        "POST",
+        "/studio/authoring/converse",
         { ...body, ...scope },
         tenantHeaders(scope.tenantId, authContext)
       );

@@ -12,7 +12,7 @@ import {
   VisualDiffPanel,
   createAllShapesDeploymentPlannerState
 } from "@unfurl/fabric-studio-webapp";
-import { useStudioClient } from "./StudioClientContext.js";
+import { studioDemoFallbacks, useStudioClient } from "./StudioClientContext.js";
 import { useSearchParams } from "react-router-dom";
 
 export function AppRoutes() {
@@ -68,6 +68,7 @@ function WorkspaceRoute() {
       initialTenantId={searchParams.get("tenantId") ?? undefined}
       initialAssemblyId={searchParams.get("assemblyId") ?? undefined}
       initialBaseCatalogHash={searchParams.get("catalogHash") ?? undefined}
+      demoFallbacks={studioDemoFallbacks()}
     />
   );
 }

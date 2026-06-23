@@ -11,7 +11,7 @@ describe("DraftWorkspacePanel catalog guard", () => {
   // that's the guard's at-rest invariant: nothing is assemblable until
   // the live catalog confirms membership.
   it("renders Flow Components as disabled-but-draggable before a draft is ready", () => {
-    const html = renderToString(<DraftWorkspacePanel client={fakeFabricClient()} />);
+    const html = renderToString(<DraftWorkspacePanel client={fakeFabricClient()} demoFallbacks />);
 
     assert.match(html, /Flow Components/);
 

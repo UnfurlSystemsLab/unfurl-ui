@@ -36,6 +36,11 @@ describe("mock Studio API contract", () => {
       sessionId: session.sessionId,
       ...(session.currentCandidateId === undefined ? {} : { candidateId: session.currentCandidateId })
     });
+    const authoring = await client.converseAuthoring?.({
+      sessionId: session.sessionId,
+      conversation: [],
+      userMessage: "Build a docs chatbot"
+    });
     const asset = await client.getVisualAsset("storage-s3-model");
 
     assert.equal(composition.view.contractId, "contract-123");
@@ -43,7 +48,27 @@ describe("mock Studio API contract", () => {
     assert.equal(intent.status, "VALID");
     assert.equal(compile.status, "COMPILED");
     assert.equal(deployment?.status, "RESOLVED");
+    assert.equal(authoring?.kind, "proposal");
     assert.equal(asset.sha256, "sha256:storage-s3-model");
+  });
+
+  it("returns clarifying questions and gaps from authoring fixture paths", async () => {
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: createMockStudioApiFetch()
+    });
+
+    const clarify = await client.converseAuthoring?.({
+      conversation: [],
+      userMessage: "bot"
+    });
+    const gap = await client.converseAuthoring?.({
+      conversation: [],
+      userMessage: "Need uncatalogued capability"
+    });
+
+    assert.equal(clarify?.kind, "clarify");
+    assert.equal(gap?.kind, "gap");
   });
 
   it("adds admitted artifacts to the mock catalog", async () => {
