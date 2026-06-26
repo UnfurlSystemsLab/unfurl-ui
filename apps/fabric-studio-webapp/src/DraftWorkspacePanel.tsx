@@ -29,6 +29,7 @@ import {
 } from "./deploymentPlanner.js";
 import { buildSigningHandoff } from "./signingHandoff.js";
 import { AuthoringConversationPanel } from "./AuthoringConversationPanel.js";
+import { SemanticZoomNavigator } from "./SemanticZoomNavigator.js";
 import type { SceneDropTarget, SemanticDcpSceneProjection, SemanticZoomLevel, ThreeAssemblySelection, ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
 
 const ThreeAssemblyScene = lazy(async () => {
@@ -887,9 +888,27 @@ export function DraftWorkspacePanel({
   return (
     <div className={`studio-workbench-page ${tutorialOpen ? `tutorial-active tutorial-target-${activeTutorialStep?.target}` : ""}`} aria-label="Unfurl Studio Workbench">
       <header className="workbench-topbar">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">U</span>
+          <span className="brand-name">Unfurl Studio</span>
+        </div>
+        <nav className="workbench-sections" aria-label="Studio sections">
+          {["Composition", "Catalog", "Deployment", "Signing", "Ports", "Audit", "Help"].map((section, index) => (
+            <span key={section} className={index === 0 ? "section-link active" : "section-link"}>{section}</span>
+          ))}
+        </nav>
+        <div className="topbar-spacer" />
+        <span className="sync-pill"><span className="sync-dot" aria-hidden="true" />Fabric synced</span>
+        <span className="assembly-chip">{assemblyId}</span>
+        <span className="user-avatar" aria-hidden="true">DR</span>
+      </header>
+
+      <div className="workbench-subbar">
         <div className="workbench-breadcrumbs">
-          <span>Studio</span>
-          <span>Compositions</span>
+          <span>studio</span>
+          <span className="sep">/</span>
+          <span>composition</span>
+          <span className="sep">/</span>
           <strong>unfurl-flow</strong>
         </div>
         <div className="workbench-view-tabs" aria-label="Workbench views">
@@ -905,7 +924,7 @@ export function DraftWorkspacePanel({
           <button type="button" disabled={busy} onClick={create}>{busy ? "Working..." : "New Draft"}</button>
           <button type="button" disabled={busy || state?.status !== "READY"} onClick={compile}>Compile & Validate</button>
         </div>
-      </header>
+      </div>
 
       <div className="workbench-grid">
         <aside className="workbench-palette" aria-label="Catalog palette">
@@ -1079,6 +1098,16 @@ export function DraftWorkspacePanel({
               </button>
             ))}
           </div>
+
+          <SemanticZoomNavigator
+            projection={dynamicProjection}
+            onSelectNode={nodeId => selectScenePart({
+              id: `component:${nodeId}`,
+              kind: "component",
+              surface: nodeId,
+              label: nodeLabel(dynamicProjection, nodeId)
+            })}
+          />
 
             <div className={`composition-plane ${viewClassName(activeView)} ${showEmptyAssembly || showNoAssemblyData ? "empty-assembly-plane" : ""}`}>
               {(showFallbackAssembly || draftComponents !== undefined || dynamicProjection !== undefined) && (
@@ -1503,6 +1532,36 @@ export function DraftWorkspacePanel({
               <p className="live-data-notice">{dynamicProjectionError ?? "Loading dynamic DCP projection..."}</p>
             )}
           </section>
+          {dynamicProjection && dynamicProjection.nodes.length > 0 && (
+            <section className="inspector-card">
+              <div className="card-head-row">
+                <h2>Component Hierarchy</h2>
+                <small className="mono-muted">{dynamicProjection.nodes.length}</small>
+              </div>
+              <div className="hierarchy-tree">
+                {dynamicProjection.nodes.map(node => {
+                  // Indent by the projection's real recursive depth when present
+                  // (arbitrary-depth composition); fall back to the legacy
+                  // PARENT/ASSEMBLY/CHILD ranking for flat 3-level projections.
+                  const legacyRank = node.level === "PARENT" ? 0 : node.level === "ASSEMBLY" ? 1 : 2;
+                  const rank = Math.min(node.depth ?? legacyRank, 8);
+                  return (
+                    <button
+                      type="button"
+                      className="hierarchy-node"
+                      key={node.nodeId}
+                      style={{ paddingLeft: `${8 + rank * 14}px` }}
+                      onClick={() => selectScenePart({ id: `component:${node.nodeId}`, kind: "component", surface: node.nodeId, label: node.label })}
+                    >
+                      <span className="hierarchy-dot" aria-hidden="true" />
+                      <span className="hierarchy-label">{node.label}</span>
+                      <span className="hierarchy-sub">{node.level}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
           <section className="inspector-card">
             <h2>Component Details</h2>
             {selected ? (

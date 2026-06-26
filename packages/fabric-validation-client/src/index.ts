@@ -237,7 +237,9 @@ export type DynamicDcpNode = {
   readonly nodeId: string;
   readonly label: string;
   readonly dcpType: "COMPANY" | "SUBSTRATE" | "MODULE" | "COMPONENT" | string;
-  readonly level: "PARENT" | "ASSEMBLY" | "CHILD";
+  readonly level: "PARENT" | "ASSEMBLY" | "CHILD" | string;
+  readonly parentNodeId?: string;
+  readonly depth?: number;
   readonly catalogEntryId?: string;
   readonly capabilities: readonly string[];
   readonly compatibleDescendants: readonly string[];

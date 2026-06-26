@@ -92,9 +92,7 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /No substrate ports used/);
     assert.doesNotMatch(html, /Keyboard-accessible projection synchronized with the 3D assembly/);
     assert.doesNotMatch(html, /Flow Orchestrator.*allowed by Fabric/s);
-    assert.doesNotMatch(html, /Dynamic DCP Projection/);
-    assert.doesNotMatch(html, /Flow Runtime Assembly/);
-    assert.match(html, /Components/);
+    assert.doesNotMatch(html, /Dynamic DCP Projection/);    assert.match(html, /Components/);
     assert.match(html, /Substrate Ports Used/);
     assert.match(html, /0 \/ 12/);
   });
@@ -115,9 +113,7 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /No substrate selected/);
     assert.doesNotMatch(html, /Empty Assembly/);
     assert.doesNotMatch(html, /Flow API/);
-    assert.doesNotMatch(html, /Keyboard-accessible projection synchronized with the 3D assembly/);
-    assert.doesNotMatch(html, /Flow Runtime Assembly/);
-    assert.doesNotMatch(html, /Dynamic DCP Projection/);
+    assert.doesNotMatch(html, /Keyboard-accessible projection synchronized with the 3D assembly/);    assert.doesNotMatch(html, /Dynamic DCP Projection/);
     assert.doesNotMatch(html, /Java 21/);
   });
 
@@ -141,9 +137,7 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /Storage S3/);
     assert.match(html, /Draft Inventory/);
     assert.match(html, /No substrate selected/);
-    assert.doesNotMatch(html, /Flow API/);
-    assert.doesNotMatch(html, /Flow Runtime Assembly/);
-    assert.doesNotMatch(html, /Dynamic DCP Projection/);
+    assert.doesNotMatch(html, /Flow API/);    assert.doesNotMatch(html, /Dynamic DCP Projection/);
   });
 
   it("renders Fabric-backed dynamic DCP projection levels", () => {
@@ -159,6 +153,9 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /Flow Runtime Assembly/);
     assert.match(html, /Flow Orchestrator/);
     assert.match(html, /COMPONENT.*replaceable/s);
+    // New redesign surfaces driven by the same projection.
+    assert.match(html, /Semantic zoom navigator/);
+    assert.match(html, /Component Hierarchy/);
   });
 
   // Hover-preview contract: the panel accepts a client that exposes
