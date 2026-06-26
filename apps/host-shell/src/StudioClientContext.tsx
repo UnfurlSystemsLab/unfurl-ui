@@ -10,7 +10,17 @@ import { createFixtureStudioFabricClient } from "./fixtures/deploymentResolution
 
 const StudioClientContext = createContext<StudioFabricClient | null>(null);
 
-const DEFAULT_STUDIO_API_BASE_URL = "http://127.0.0.1:7878";
+// Origin-relative by default. The client appends `/studio/...` paths, so an
+// empty base produces same-origin requests like `/studio/tenants/...`. In dev
+// those hit the Vite `/studio` proxy (see vite.config.ts) which forwards to the
+// backend on :7878 — no cross-origin hop, and a down backend surfaces as a
+// readable proxy error instead of the browser's opaque "Failed to fetch". In a
+// prod build the UI and API are served from the same origin (or a reverse
+// proxy), so relative still works. Set VITE_STUDIO_API_BASE_URL to an absolute
+// URL to target a backend on a different origin. "/" normalizes to "" in the
+// client's normalizeBaseUrl (trailing slash stripped), satisfying its
+// non-empty guard while staying origin-relative.
+const DEFAULT_STUDIO_API_BASE_URL = "/";
 
 export type StudioClientProviderProps = {
   readonly children: ReactNode;

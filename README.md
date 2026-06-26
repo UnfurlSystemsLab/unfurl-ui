@@ -6,6 +6,8 @@ The workspace starts with the host shell and Fabric Studio scaffolding from:
 
 - `docs/HLD-D-fabric-ui-host-shell.md`
 - `docs/LLD-unfurl-studio-visual-composition.md`
+- `docs/SECURITY.md`
+- `docs/RELIABILITY.md`
 
 ## Workspace Model
 
@@ -127,12 +129,16 @@ Run the production bundle preview instead:
 .\scripts\launch-studio.ps1 -Mode preview
 ```
 
-Studio defaults to fixture mode for standalone manual testing, so it will not call `http://127.0.0.1:7878` unless live mode is explicitly requested. To test against a running Fabric Studio API:
+`npm run dev:studio` runs in live mode against a running Fabric Studio backend. Dev requests are origin-relative (`/studio/...`) and go through the Vite `/studio` proxy (see `apps/host-shell/vite.config.ts`), which forwards to the backend on `:7878` — so you do **not** need to set `VITE_STUDIO_API_BASE_URL`, and a down backend shows a readable proxy error instead of the browser's opaque "Failed to fetch":
 
 ```powershell
-$env:VITE_STUDIO_MODE = "live"
-$env:VITE_STUDIO_API_BASE_URL = "http://127.0.0.1:7878"
 npm run dev:studio
+```
+
+Set `VITE_STUDIO_API_BASE_URL` only to target a backend on a different origin (bypasses the proxy; relies on the backend's dev CORS). For offline mock data with no backend, use fixture mode:
+
+```powershell
+npm run dev:studio:fixture
 ```
 
 Useful options:
