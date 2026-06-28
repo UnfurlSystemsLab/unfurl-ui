@@ -30,6 +30,7 @@ desktop.ini
 !.env.example
 
 # Temporary files
+.debug/
 *.tmp
 *.temp
 *.swp

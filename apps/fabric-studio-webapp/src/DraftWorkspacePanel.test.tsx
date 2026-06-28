@@ -20,14 +20,8 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /Substrate target/);
     assert.match(html, /Customer Runtime Substrate/);
     assert.match(html, /profile mode: STRICT/);
-    assert.match(html, /Welcome to Unfurl Studio/);
-    assert.match(html, /governed visual workbench/);
-    assert.match(html, /href="\/components\/fabric-studio\/help#scanned-catalog"/);
-    assert.match(html, /href="\/components\/fabric-studio\/help#component-claims"/);
-    assert.match(html, /href="\/components\/fabric-studio\/help#substrate-profile"/);
-    assert.match(html, /href="\/components\/fabric-studio\/help#trust-policy"/);
-    assert.match(html, /href="\/components\/fabric-studio\/help#deployment-policy"/);
-    assert.match(html, /Step.*1.*of.*8/s);
+    assert.doesNotMatch(html, /Welcome to Unfurl Studio/);
+    assert.doesNotMatch(html, /Step.*1.*of.*8/s);
     assert.match(html, /Assembly/);
     assert.match(html, /Catalog/);
     assert.match(html, /Flow API/);
@@ -46,7 +40,7 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /Replace Component/);
     assert.match(html, /Replacement candidates/);
     assert.match(html, /Assembly Deployment Plan/);
-    assert.match(html, /Compile and save use this policy/);
+    assert.match(html, /Compile and save with this policy/);
     assert.match(html, /In-process library/);
     assert.match(html, /Distributed Worker/);
     assert.match(html, /Trigger Ingress/);
@@ -216,7 +210,8 @@ describe("DraftWorkspacePanel without demo fallbacks (default)", () => {
   it("does not surface local demo replacement options", () => {
     const html = renderToString(<DraftWorkspacePanel client={client()} />);
 
-    assert.match(html, /No replacement options available from Fabric/);
+    assert.match(html, /No component selected/);
+    assert.doesNotMatch(html, /Replace Component/);
     assert.doesNotMatch(html, /using local demo fallback data/);
   });
 

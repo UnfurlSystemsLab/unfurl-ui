@@ -711,6 +711,12 @@ export function DraftWorkspacePanel({
     && selectedPart.surface.startsWith("draft:")
     ? selectedPart.label
     : undefined;
+  const hasInspectableSelection = selected !== undefined || pendingDraftComponentLabel !== undefined;
+  useEffect(() => {
+    if (activeView === "Exploded" && !hasInspectableSelection) {
+      setActiveView("Assembly");
+    }
+  }, [activeView, hasInspectableSelection]);
   const ports = useMemo(() => activePorts(catalog[0]), [catalog]);
   const paletteEntries = catalog.length === 0 && demoFallbacks ? fallbackCatalog() : catalog;
   const deploymentPolicy = useMemo(
@@ -735,10 +741,10 @@ export function DraftWorkspacePanel({
   // yet (e.g. fixture mode without a draft session) so the scene
   // skips the filter and shows everything in the projection.
   const draftCatalogEntryIdSet = useMemo(
-    () => draftComponents === undefined
+    () => draftComponents === undefined || dynamicProjection !== undefined
       ? undefined
       : new Set(draftComponents.map(component => component.catalogEntryId)),
-    [draftComponents]
+    [draftComponents, dynamicProjection]
   );
   const draftComponentCount = draftComponents?.length ?? initialDraftComponentCount;
   const liveConnectionCount = dynamicProjection?.connections?.length ?? 0;
@@ -892,11 +898,10 @@ export function DraftWorkspacePanel({
           <span className="brand-mark" aria-hidden="true">U</span>
           <span className="brand-name">Unfurl Studio</span>
         </div>
-        <nav className="workbench-sections" aria-label="Studio sections">
-          {["Composition", "Catalog", "Deployment", "Signing", "Ports", "Audit", "Help"].map((section, index) => (
-            <span key={section} className={index === 0 ? "section-link active" : "section-link"}>{section}</span>
-          ))}
-        </nav>
+        <div className="workbench-context" aria-label="Workspace context">
+          <span>Composition</span>
+          <strong>{targetApplicationName}</strong>
+        </div>
         <div className="topbar-spacer" />
         <span className="sync-pill"><span className="sync-dot" aria-hidden="true" />Fabric synced</span>
         <span className="assembly-chip">{assemblyId}</span>
@@ -921,8 +926,17 @@ export function DraftWorkspacePanel({
         <div className="workbench-actions">
           <button type="button" className="secondary" onClick={openTutorial}>Guided Tour</button>
           <button type="button" className="secondary" disabled={busy} onClick={openSaveDraft}>Save Draft</button>
-          <button type="button" disabled={busy} onClick={create}>{busy ? "Working..." : "New Draft"}</button>
-          <button type="button" disabled={busy || state?.status !== "READY"} onClick={compile}>Compile & Validate</button>
+          <button type="button" className="secondary" disabled={busy} onClick={create}>{busy ? "Working..." : "New Draft"}</button>
+          <button
+            type="button"
+            className="primary-cta"
+            disabled={busy || state?.status !== "READY"}
+            title={state?.status === "READY" ? "Compile and validate the current draft." : "Start a New Draft before compiling."}
+            onClick={compile}
+          >
+            Compile & Validate
+          </button>
+          {state?.status !== "READY" && <span className="action-hint">Start a draft to compile.</span>}
         </div>
       </div>
 
@@ -1008,7 +1022,7 @@ export function DraftWorkspacePanel({
           <section className="save-draft-panel" aria-label="Assembly deployment planner">
             <div>
               <strong>Assembly Deployment Plan</strong>
-              <span>Compile and save use this policy for the current draft assembly.</span>
+              <span>Compile and save with this policy for the current draft assembly.</span>
             </div>
             <div className="summary-row">
               <span>preferred: {deploymentPolicy.preferredShapes.join(", ") || "none"}</span>
@@ -1394,24 +1408,31 @@ export function DraftWorkspacePanel({
               </button>
             ))}
           </div>
-          <section className="inspector-card">
-            <h2>Selected Scene Part</h2>
-            <dl>
-              <dt>Part</dt><dd>{selectedPart.label}</dd>
-              <dt>Kind</dt><dd>{selectedPart.kind}</dd>
-              <dt>DCP Level</dt><dd>{semanticZoomLabel(semanticZoomLevel)}</dd>
-              <dt>State</dt><dd>{extractedPartId === selectedPart.id ? "Taken out for inspection" : "Installed"}</dd>
-            </dl>
-            <div className="scene-action-row">
-              <button type="button" className="secondary" onClick={toggleTakeOut}>
-                {extractedPartId === selectedPart.id ? "Return to Assembly" : "Take Out"}
-              </button>
-              <button type="button" className="secondary" disabled={busy || state?.status !== "READY" || selectedPart.kind !== "pipe"} onClick={disconnectSelectedPipe}>
-                Disconnect Pipe
-              </button>
-            </div>
-          </section>
-          {selectedPart.kind === "substrate" ? (
+          {hasInspectableSelection ? (
+            <section className="inspector-card">
+              <h2>Selected Scene Part</h2>
+              <dl>
+                <dt>Part</dt><dd>{selectedPart.label}</dd>
+                <dt>Kind</dt><dd>{selectedPart.kind}</dd>
+                <dt>DCP Level</dt><dd>{semanticZoomLabel(semanticZoomLevel)}</dd>
+                <dt>State</dt><dd>{extractedPartId === selectedPart.id ? "Taken out for inspection" : "Installed"}</dd>
+              </dl>
+              <div className="scene-action-row">
+                <button type="button" className="secondary" onClick={toggleTakeOut}>
+                  {extractedPartId === selectedPart.id ? "Return to Assembly" : "Take Out"}
+                </button>
+                <button type="button" className="secondary" disabled={busy || state?.status !== "READY" || selectedPart.kind !== "pipe"} onClick={disconnectSelectedPipe}>
+                  Disconnect Pipe
+                </button>
+              </div>
+            </section>
+          ) : (
+            <section className="inspector-card inspector-empty-card">
+              <h2>Selection</h2>
+              <p>Select a component, pipe, or substrate capability in the assembly to inspect governed details and available actions.</p>
+            </section>
+          )}
+          {hasInspectableSelection && selectedPart.kind === "substrate" ? (
             <section className="inspector-card">
               <h2>Substrate</h2>
               <p className="live-data-notice">
@@ -1420,7 +1441,7 @@ export function DraftWorkspacePanel({
                 profile to change which runtime hosts the assembly.
               </p>
             </section>
-          ) : selectedPart.kind === "pipe" ? (
+          ) : hasInspectableSelection && selectedPart.kind === "pipe" ? (
             <section className="inspector-card">
               <h2>Pipe</h2>
               <p className="live-data-notice">
@@ -1429,7 +1450,7 @@ export function DraftWorkspacePanel({
                 remove the consuming component to drop the pipe.
               </p>
             </section>
-          ) : (
+          ) : hasInspectableSelection ? (
             <section className="inspector-card">
               <h2>Replace Component</h2>
               <p className="live-data-notice">
@@ -1464,7 +1485,7 @@ export function DraftWorkspacePanel({
               {state?.status !== "READY" && <p className="live-data-notice">Create a draft before governed replacements are allowed.</p>}
               {state?.status === "READY" && state.lastResponse?.status === "INVALID" && <p className="studio-error">{state.lastResponse.reason}: {state.lastResponse.details}</p>}
             </section>
-          )}
+          ) : null}
           <section className="inspector-card">
             <h2>{showDraftInventory ? "Draft Inventory" : "Dynamic DCP Projection"}</h2>
             {showDraftInventory ? (
@@ -1529,7 +1550,7 @@ export function DraftWorkspacePanel({
                 </div>
               </>
             ) : (
-              <p className="live-data-notice">{dynamicProjectionError ?? "Loading dynamic DCP projection..."}</p>
+              <p className="live-data-notice">{dynamicProjectionError ? friendlyStudioError(dynamicProjectionError) : "Loading dynamic DCP projection..."}</p>
             )}
           </section>
           {dynamicProjection && dynamicProjection.nodes.length > 0 && (
@@ -1785,13 +1806,23 @@ function PortList({ kind, names }: { readonly kind: "provided" | "required"; rea
 
 function shouldShowTutorial(): boolean {
   if (typeof window === "undefined") {
-    return true;
+    return false;
   }
   try {
-    return window.localStorage.getItem(tutorialStorageKey) !== "true";
+    return window.localStorage.getItem(tutorialStorageKey) === "open";
   } catch {
-    return true;
+    return false;
   }
+}
+
+function friendlyStudioError(message: string): string {
+  if (/HTTP\s+5\d\d|Internal Server Error/i.test(message)) {
+    return "Fabric projection is temporarily unavailable. The workbench is showing the last available local state.";
+  }
+  if (/Failed to fetch|ECONNREFUSED|NetworkError/i.test(message)) {
+    return "Fabric projection cannot be reached. Check that the local Fabric service is running.";
+  }
+  return message;
 }
 
 function paletteLabel(entry: VisualCatalogEntry | undefined): string {

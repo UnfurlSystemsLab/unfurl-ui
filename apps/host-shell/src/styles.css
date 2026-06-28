@@ -33,6 +33,12 @@ button.secondary-active {
   color: #1f2937;
 }
 
+button.primary-cta {
+  border-color: #1d4ed8;
+  background: #2563eb;
+  color: white;
+}
+
 button.secondary-active {
   border-color: #2563eb;
   background: #dbeafe;
@@ -414,8 +420,15 @@ th, td {
 
 .workbench-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
   gap: 8px;
-  white-space: nowrap;
+}
+
+.action-hint {
+  color: #64748b;
+  font-size: 12px;
 }
 
 .tutorial-active .workbench-palette,
@@ -602,8 +615,8 @@ th, td {
 
 .workbench-stage {
   overflow: hidden;
-  display: grid;
-  grid-template-rows: auto auto minmax(560px, 1fr) auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .save-draft-panel {
@@ -629,6 +642,7 @@ th, td {
 .stage-toolbar {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 2px;
   border-bottom: 1px solid #e1e5ec;
   padding: 8px;
@@ -660,6 +674,7 @@ th, td {
 
 .composition-plane {
   position: relative;
+  flex: 1 0 auto;
   min-height: 680px;
   overflow: hidden;
   background:
@@ -1555,6 +1570,14 @@ th, td {
     grid-template-columns: 1fr;
   }
 
+  .authoring-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .authoring-actions {
+    justify-content: flex-start;
+  }
+
   .composition-plane {
     min-height: 620px;
   }
@@ -1641,7 +1664,7 @@ th, td {
   display: flex;
   grid-template-columns: none;
   align-items: center;
-  gap: 22px;
+  gap: 16px;
   background: #fff;
   border: 1px solid #e6e8ec;
   border-radius: 10px;
@@ -1656,9 +1679,24 @@ th, td {
   box-shadow: 0 2px 6px -1px rgba(43, 89, 212, .5);
 }
 .brand-name { font-weight: 600; font-size: 14px; letter-spacing: -.01em; }
-.workbench-sections { display: flex; align-items: center; gap: 2px; color: #5a6372; font-size: 13px; }
-.section-link { padding: 5px 10px; border-radius: 7px; cursor: default; }
-.section-link.active { color: #181b22; font-weight: 500; background: #eef1f6; }
+.workbench-context {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: #5a6372;
+  font-size: 13px;
+}
+.workbench-context strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #181b22;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .topbar-spacer { flex: 1; }
 .sync-pill {
   display: flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px;
@@ -1674,6 +1712,7 @@ th, td {
 
 .workbench-subbar {
   display: flex; align-items: center; gap: 16px;
+  flex-wrap: wrap;
   background: #fff; border: 1px solid #e6e8ec; border-radius: 10px;
   padding: 6px 16px; margin: 8px 0 10px;
 }
@@ -1684,9 +1723,15 @@ th, td {
   margin-left: auto; background: #f1f3f6; border: 1px solid #e6e8ec; border-radius: 9px; padding: 3px; gap: 1px;
 }
 .view-tab.active { border-color: #2b59d4; background: #fff; color: #181b22; box-shadow: 0 1px 2px rgba(20, 28, 46, .08); }
-.workbench-actions button:last-child {
+.workbench-actions .primary-cta {
   background: #2b59d4; border-color: #2b59d4; color: #fff;
   box-shadow: 0 2px 8px -2px rgba(43, 89, 212, .6);
+}
+.workbench-actions .secondary {
+  border-color: #cfd6e2;
+  background: #fff;
+  color: #334155;
+  box-shadow: none;
 }
 
 /* --- panels as cards --- */
@@ -1696,11 +1741,55 @@ th, td {
 .workbench-bottom { border: 1px solid #e6e8ec; background: #fafbfc; border-radius: 12px; }
 
 /* --- AI authoring card re-skin (AuthoringConversationPanel) --- */
-.authoring-panel { background: #fff; border: 1px solid #e6e8ec; border-radius: 12px; padding: 16px 18px; }
-.authoring-copy { color: #5a6372; font-size: 13px; margin: 2px 0 12px; }
+.authoring-panel {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.75fr) minmax(320px, 1.4fr) auto;
+  gap: 14px;
+  align-items: end;
+  background: #fff;
+  border: 1px solid #e6e8ec;
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.authoring-panel .panel-title {
+  display: grid;
+  gap: 4px;
+  align-self: center;
+  margin: 0;
+}
+.authoring-prompt {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+.authoring-prompt textarea {
+  width: 100%;
+  min-height: 88px;
+  box-sizing: border-box;
+  border: 1px solid #cfd6e2;
+  border-radius: 8px;
+  padding: 10px 12px;
+  resize: vertical;
+  color: #0f172a;
+  font: inherit;
+  line-height: 1.35;
+}
 .authoring-actions button:first-child {
   background: #2b59d4; border-color: #2b59d4; color: #fff;
   box-shadow: 0 2px 8px -2px rgba(43, 89, 212, .6);
+}
+.authoring-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.authoring-panel > .live-data-notice,
+.authoring-panel > .authoring-card,
+.authoring-panel > .authoring-status {
+  grid-column: 1 / -1;
 }
 .authoring-card { background: #fbfcfd; border: 1px solid #e2e5ea; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
 
@@ -1736,3 +1825,229 @@ th, td {
 .hierarchy-dot { width: 7px; height: 7px; border-radius: 2px; flex: none; background: #2b59d4; }
 .hierarchy-label { flex: 1; min-width: 0; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hierarchy-sub { font-size: 10px; color: #b3b9c5; text-transform: uppercase; letter-spacing: .04em; }
+
+/* --- first-pass hardening: prevent overflow and keep the workspace task-first --- */
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.app-shell,
+.studio-workbench-page,
+.workbench-grid,
+.workbench-stage,
+.workbench-palette,
+.workbench-inspector,
+.workbench-bottom,
+.authoring-panel,
+.save-draft-panel,
+.dynamic-dcp-table-panel {
+  min-width: 0;
+}
+
+.app-main {
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.workbench-grid {
+  grid-template-columns: 260px minmax(0, 1fr) 340px;
+}
+
+.workbench-subbar .workbench-view-tabs {
+  margin-left: 0;
+}
+
+.workbench-subbar .workbench-breadcrumbs {
+  margin-right: auto;
+}
+
+.save-draft-panel {
+  grid-template-columns: minmax(150px, 0.75fr) minmax(140px, 0.85fr) minmax(180px, 1fr);
+}
+
+.save-draft-panel > .button-row {
+  align-content: start;
+}
+
+.save-draft-panel > .button-row:last-child {
+  grid-column: 3;
+}
+
+.stage-toolbar {
+  row-gap: 4px;
+}
+
+.tool-button {
+  min-width: 48px;
+  padding: 5px;
+}
+
+.dynamic-dcp-table-panel {
+  max-height: 440px;
+  overflow: auto;
+}
+
+.dynamic-dcp-table-panel table {
+  min-width: 620px;
+}
+
+.substrate-tile {
+  min-width: 96px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.substrate-tile strong {
+  max-width: 86px;
+  text-align: center;
+  line-height: 1.15;
+}
+
+.inspector-card .live-data-notice,
+.studio-error {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1340px) {
+  .workbench-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workbench-stage {
+    order: 1;
+  }
+
+  .workbench-palette {
+    order: 2;
+  }
+
+  .workbench-inspector {
+    order: 3;
+  }
+
+  .workbench-palette,
+  .workbench-inspector {
+    max-height: 720px;
+    overflow: auto;
+  }
+
+  .workbench-bottom {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .side-nav {
+    align-items: start;
+  }
+
+  .shell-context {
+    flex-wrap: wrap;
+  }
+
+  .scope-pill,
+  .mode-pill {
+    max-width: none;
+  }
+
+  .workbench-topbar,
+  .workbench-subbar {
+    align-items: flex-start;
+  }
+
+  .workbench-subbar .workbench-view-tabs,
+  .workbench-actions {
+    width: 100%;
+  }
+
+  .workbench-subbar .workbench-view-tabs {
+    overflow-x: auto;
+  }
+
+  .workbench-actions {
+    justify-content: flex-start;
+  }
+
+  .authoring-panel,
+  .save-draft-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .save-draft-panel > .button-row:last-child {
+    grid-column: auto;
+  }
+
+  .dynamic-dcp-table-panel {
+    max-height: 360px;
+  }
+
+  .workbench-palette,
+  .workbench-inspector {
+    max-height: 620px;
+  }
+}
+
+@media (max-width: 520px) {
+  .app-main {
+    padding: 10px 8px 0;
+  }
+
+  .side-nav,
+  .workbench-topbar,
+  .workbench-subbar {
+    padding-inline: 10px;
+  }
+
+  .workbench-grid,
+  .panel-grid,
+  .catalog-search,
+  .compact-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .authoring-actions,
+  .workbench-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stage-toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .authoring-actions button,
+  .workbench-actions button,
+  .authoring-actions button,
+  .workbench-actions button {
+    width: 100%;
+  }
+
+  .tool-button {
+    flex: 0 0 58px;
+    width: 58px;
+  }
+
+  .composition-plane {
+    min-height: 560px;
+  }
+
+  .semantic-zoom-badge {
+    left: 16px;
+    right: 16px;
+    top: 90px;
+    max-width: none;
+  }
+
+  .workbench-bottom {
+    grid-template-columns: 1fr;
+  }
+
+  .workbench-palette,
+  .workbench-inspector {
+    max-height: 560px;
+  }
+}

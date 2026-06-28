@@ -38,6 +38,22 @@ describe("threeAssemblySceneLayout", () => {
     assert.equal(pipes[0]?.capability, "rag.query");
     assert.equal(pipes[1]?.source.kind, "substrate");
   });
+
+  it("keeps aggregation components in the 3D layout", () => {
+    const projectionFixture = projection();
+    const aggregation = child(
+      "component.infinite-aggregation",
+      "Infinite Aggregation",
+      "uploaded:infinite-aggregation-0.1.0-SNAPSHOT.jar"
+    );
+    const layout = layoutNodes({
+      ...projectionFixture,
+      nodes: [...projectionFixture.nodes, aggregation]
+    });
+
+    assert.ok(layout.some(entry => entry.nodeId === "component.infinite-aggregation"));
+    assert.ok(layout.some(entry => entry.label === "Infinite Aggregation"));
+  });
 });
 
 function projection(): DynamicDcpProjectionResponse {

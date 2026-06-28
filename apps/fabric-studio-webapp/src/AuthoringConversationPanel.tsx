@@ -40,6 +40,10 @@ export function AuthoringConversationPanel({
   const proposal = response?.kind === "proposal" ? response.proposal : undefined;
 
   async function sendPrompt() {
+    if (!prompt.trim()) {
+      setStatus("Add a prompt before asking the authoring agent.");
+      return;
+    }
     setStatus("Asking authoring agent...");
     const next = await converseAuthoring(client, session, {
       tenantId,
@@ -78,21 +82,19 @@ export function AuthoringConversationPanel({
         <span>AI Contract Authoring</span>
         <small>server-side foundry agent</small>
       </div>
-      <div className="authoring-copy">
-        <p>Describe the contract you need. Proposals are replayed through the existing Fabric draft and signing path.</p>
-      </div>
-      <label>
-        Prompt
+      <label className="authoring-prompt">
+        <span>Prompt</span>
         <textarea
           value={prompt}
           onChange={event => setPrompt(event.target.value)}
-          rows={3}
+          rows={4}
           aria-label="Authoring prompt"
+          placeholder="Describe the governed component contract you need."
         />
       </label>
       <div className="authoring-actions">
-        <button type="button" disabled={!client.converseAuthoring} onClick={sendPrompt}>Ask Agent</button>
-        <button type="button" disabled={!proposal || state?.status !== "READY"} onClick={acceptProposal}>Accept Proposal</button>
+        <button type="button" disabled={!client.converseAuthoring || !prompt.trim()} onClick={sendPrompt}>Ask Agent</button>
+        <button type="button" className="secondary" disabled={!proposal || state?.status !== "READY"} onClick={acceptProposal}>Accept Proposal</button>
       </div>
       {!client.converseAuthoring && (
         <p className="live-data-notice">Studio authoring endpoint unavailable.</p>
