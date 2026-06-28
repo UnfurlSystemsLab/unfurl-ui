@@ -9,6 +9,11 @@ import type {
 // loop iterates over these and calls createModule + addModulePorts with
 // the given position / scale / accent — geometry stays in
 // ThreeAssemblyScene; this module is pure data.
+/**
+ * Projection value object: layout output for one module slot. The scene's rebuildDynamicModules
+ * loop consumes these entries to create modules and ports while this module stays geometry-free and
+ * deterministic.
+ */
 export type LayoutEntry = {
   readonly nodeId: string;
   readonly label: string;
@@ -172,6 +177,10 @@ export function positionForNodeId(
   return undefined;
 }
 
+/**
+ * Projection value object: one resolved pipe anchor after a DCP connection edge has been mapped to
+ * either a component module port or a substrate base-plate socket.
+ */
 export type PipeEndpoint = {
   readonly nodeId: string;
   readonly portId: string;
@@ -179,6 +188,10 @@ export type PipeEndpoint = {
   readonly position: readonly [number, number, number];
 };
 
+/**
+ * Projection value object: one drawable connection between resolved pipe endpoints. The id is
+ * deterministic so scene reconciliation and tests can compare pipe layouts across runs.
+ */
 export type PipeLayout = {
   readonly id: string;
   readonly source: PipeEndpoint;
@@ -218,6 +231,11 @@ export function layoutPipes(
   return out;
 }
 
+/**
+ * Adapter helper: translates a Fabric connection endpoint into a drawable scene endpoint. Component
+ * endpoints must be present in the current layout; substrate endpoints resolve against the base
+ * plate even though they are not component modules.
+ */
 function endpointFor(
   layout: readonly LayoutEntry[],
   substratePorts: readonly StudioSubstratePort[] | undefined,
@@ -236,6 +254,10 @@ function endpointFor(
   return position ? { nodeId, portId, kind: "component", position } : undefined;
 }
 
+/**
+ * Layout helper: assigns substrate sockets stable x positions along the base plate. Unknown ports
+ * fall back to the first slot so partially loaded projections can still draw deterministic pipes.
+ */
 function substratePortPosition(
   substratePorts: readonly StudioSubstratePort[],
   portId: string

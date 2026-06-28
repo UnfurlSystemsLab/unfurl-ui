@@ -12,6 +12,11 @@ import {
   type AuthoringSessionState
 } from "./authoringSession.js";
 
+/**
+ * Props contract for the AI authoring panel. The component intentionally receives only the Fabric
+ * client methods needed to converse, validate intents, compile, and resolve deployment so browser UI
+ * never owns model/provider credentials or bypasses Fabric validation.
+ */
 export type AuthoringConversationPanelProps = {
   readonly client: Pick<
     StudioFabricClient,
@@ -24,6 +29,11 @@ export type AuthoringConversationPanelProps = {
   readonly onDeploymentPolicy?: (proposal: AuthoringProposal) => void;
 };
 
+/**
+ * Adapter component: renders the conversational authoring surface over the existing governed draft
+ * workspace pipeline. User prompts go to the server-side authoring endpoint, accepted proposals are
+ * replayed as Fabric intents, and every state change flows back through the caller-owned workspace.
+ */
 export function AuthoringConversationPanel({
   client,
   tenantId,
@@ -39,6 +49,11 @@ export function AuthoringConversationPanel({
   const response = session.status === "READY" ? session.response : undefined;
   const proposal = response?.kind === "proposal" ? response.proposal : undefined;
 
+  /**
+   * Event handler: sends the current prompt to the server-side Foundry-backed authoring endpoint.
+   * Empty prompts short-circuit locally; failures stay in panel status rather than mutating draft
+   * state because Fabric has not validated anything yet.
+   */
   async function sendPrompt() {
     if (!prompt.trim()) {
       setStatus("Add a prompt before asking the authoring agent.");
@@ -55,6 +70,11 @@ export function AuthoringConversationPanel({
     setStatus(next.status === "FAILED" ? next.message : undefined);
   }
 
+  /**
+   * Event handler: applies an accepted proposal through Fabric validation and then finalizes the
+   * deployment/compile path. Partial validation failure is surfaced as status instead of fabricating
+   * a complete contract from UI state.
+   */
   async function acceptProposal() {
     if (!proposal || !state) {
       return;

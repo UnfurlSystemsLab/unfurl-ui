@@ -37,6 +37,11 @@ const ThreeAssemblyScene = lazy(async () => {
   return { default: module.ThreeAssemblyScene };
 });
 
+/**
+ * Props contract for the governed draft workspace panel. The client is narrowed to Fabric Studio
+ * operations that validate, persist, project, and compile drafts so the UI cannot bypass Fabric's
+ * source-of-truth APIs.
+ */
 export type DraftWorkspacePanelProps = {
   readonly client: Pick<
     StudioFabricClient,
@@ -69,6 +74,10 @@ export type DraftWorkspacePanelProps = {
 
 type SelectedSurfaceId = ThreeAssemblySurfaceId;
 
+/**
+ * View-model record: inspector details shown for the selected scene surface. Projection-backed
+ * details are preferred; static values are only used when demo fallbacks are explicitly enabled.
+ */
 type InspectorDetails = {
   readonly name: string;
   readonly icon: string;
@@ -86,6 +95,10 @@ type InspectorDetails = {
   readonly requiredPorts: readonly string[];
 };
 
+/**
+ * View-model record: local replacement candidate state after Fabric candidates and catalog-derived
+ * options are normalized into the same UI table shape.
+ */
 type ReplacementCandidate = {
   readonly catalogEntryId: string;
   readonly label: string;
@@ -95,6 +108,10 @@ type ReplacementCandidate = {
   readonly reason: string;
 };
 
+/**
+ * View-model record: one guided tutorial step. Actions are optional because most steps only explain
+ * an existing workbench region while a few can drive the view to a safer starting point.
+ */
 type TutorialStep = {
   readonly id: string;
   readonly title: string;
@@ -103,6 +120,10 @@ type TutorialStep = {
   readonly action?: () => void;
 };
 
+/**
+ * Persistence record: minimal draft inventory stored in browser localStorage so route remounts can
+ * preserve visual draft chips while Fabric remains the authoritative composition state.
+ */
 type DraftComponentItem = {
   readonly catalogEntryId: string;
   readonly label: string;
@@ -111,6 +132,11 @@ type DraftComponentItem = {
 
 const tutorialStorageKey = "unfurl-studio-workbench-tutorial-dismissed";
 
+/**
+ * Facade component: coordinates Fabric-backed draft creation, dynamic DCP projection, semantic zoom,
+ * deployment planning, and visual selection state. It stores only layout/convenience UI state locally;
+ * contract truth and validation stay behind the Fabric client.
+ */
 export function DraftWorkspacePanel({
   client,
   initialTenantId = DEFAULT_STUDIO_TENANT_ID,
@@ -335,6 +361,10 @@ export function DraftWorkspacePanel({
     };
   }, [client, readySession?.tenantId, readySession?.assemblyId, readySession?.sessionId, selectedComponent]);
 
+  /**
+   * State adapter: applies server/browser layout state into React view, zoom, and selection state.
+   * The selection is rebuilt from layout values so the inspector and scene stay synchronized.
+   */
   function applyLayoutState(layout: LayoutState) {
     setActiveView(layout.activeView);
     setRequestedSemanticZoomLevel(layout.semanticZoomLevel);
@@ -383,6 +413,10 @@ export function DraftWorkspacePanel({
     writeDraftInventoryState(tenantId, assemblyId, { components: draftComponents });
   }, [tenantId, assemblyId, draftComponents]);
 
+  /**
+   * Command handler: creates a new Fabric-backed draft workspace and resets local draft-only UI
+   * affordances to an empty assembly base plate.
+   */
   async function create() {
     setBusy(true);
     try {
@@ -399,12 +433,20 @@ export function DraftWorkspacePanel({
     }
   }
 
+  /**
+   * Dialog handler: seeds the save-draft dialog from the current deployment planner so the operator
+   * edits the same policy that will be sent to Fabric.
+   */
   function openSaveDraft() {
     setSaveDeploymentTarget(targetDeploymentTarget);
     setSaveDeploymentShape(deploymentPolicy.preferredShapes[0] ?? saveDeploymentShape);
     setSaveDraftOpen(true);
   }
 
+  /**
+   * Command handler: persists the current draft through Fabric when available, otherwise records an
+   * honest local status for demos where the save endpoint is absent.
+   */
   async function saveDraft() {
     if (client.saveDraft) {
       const readySession = state?.status === "READY" ? state.session : undefined;
@@ -425,6 +467,10 @@ export function DraftWorkspacePanel({
     setSaveDraftOpen(false);
   }
 
+  /**
+   * Command handler: submits an ADD_COMPONENT intent through Fabric validation and mirrors the
+   * accepted draft component into local inventory for selection continuity.
+   */
   async function addComponent(entryId = catalogEntryId) {
     if (!state) {
       return;
@@ -454,6 +500,10 @@ export function DraftWorkspacePanel({
     }
   }
 
+  /**
+   * Command handler: adds a catalog component and immediately connects its first offer port to a
+   * validated target port, surfacing partial success if the component has no offer to connect.
+   */
   async function addComponentAndConnect(entryId: string, targetPortId: string) {
     if (!state) {
       return;
@@ -495,6 +545,10 @@ export function DraftWorkspacePanel({
   // it resolves and discards stale responses (operator may have moved on
   // before the network round-trip finished).
 
+  /**
+   * Hover-preview lifecycle helper: cancels pending compatibility lookups, invalidates stale
+   * generations, and clears the scene highlight state.
+   */
   function clearPreview() {
     if (hoverDebounceRef.current !== undefined) {
       clearTimeout(hoverDebounceRef.current);
@@ -504,6 +558,10 @@ export function DraftWorkspacePanel({
     setPreview(undefined);
   }
 
+  /**
+   * Hover-preview command: debounces Fabric connection-candidate lookups and applies only the latest
+   * generation so slow network responses cannot overwrite newer operator intent.
+   */
   function hoverCandidate(entryId: string) {
     if (!entryId || !knownCatalogEntryIds.has(entryId)) {
       // Skip hover lookups for unknown / blank entries — backend would
@@ -550,6 +608,10 @@ export function DraftWorkspacePanel({
     }, 150);
   }
 
+  /**
+   * Command handler: submits a CONNECT intent through Fabric and returns focus to the substrate base
+   * so the scene reflects that the connection has been validated.
+   */
   async function connectPorts() {
     if (!state) {
       return;
@@ -564,6 +626,10 @@ export function DraftWorkspacePanel({
     }
   }
 
+  /**
+   * Command handler: compiles the ready draft through Fabric using the current signing and deployment
+   * planner state; UI state is updated only with Fabric's response.
+   */
   async function compile() {
     if (!state) {
       return;
@@ -576,6 +642,10 @@ export function DraftWorkspacePanel({
     }
   }
 
+  /**
+   * Adapter helper: folds an accepted authoring proposal's deployment policy into the local planner
+   * without applying any unvalidated composition intent.
+   */
   function applyAuthoringDeploymentPolicy(proposal: { readonly deploymentPolicy?: DeploymentPolicyDraft }) {
     const policy = proposal.deploymentPolicy;
     if (!policy) {
@@ -594,16 +664,28 @@ export function DraftWorkspacePanel({
     }
   }
 
+  /**
+   * Planner command: marks a deployment shape as preferred in both the planner and save-draft dialog
+   * so later compile/save commands share the same operator choice.
+   */
   function preferAssemblyDeploymentShape(shape: DeploymentShape) {
     setDeploymentPlanner(current => preferDeploymentShape(current, shape));
     setSaveDeploymentShape(shape);
   }
 
+  /**
+   * Selection command: synchronizes the selected scene surface and full selection object used by the
+   * inspector, replacement panel, and semantic scene.
+   */
   function selectScenePart(selection: ThreeAssemblySelection) {
     setSelectedComponent(selection.surface);
     setSelectedPart(selection);
   }
 
+  /**
+   * Navigation command: updates semantic DCP zoom and chooses a supporting visual view that makes the
+   * selected projection depth visible.
+   */
   function drillTo(level: SemanticZoomLevel) {
     setRequestedSemanticZoomLevel(level);
     setSemanticZoomLevel(level);
@@ -615,10 +697,17 @@ export function DraftWorkspacePanel({
     }
   }
 
+  /**
+   * View command: toggles exploded/take-out focus for the currently selected scene part.
+   */
   function toggleTakeOut() {
     setExtractedPartId(current => current === selectedPart.id ? undefined : selectedPart.id);
   }
 
+  /**
+   * Command handler: validates a DISCONNECT intent for the selected pipe and clears extracted focus
+   * once Fabric accepts the change.
+   */
   async function disconnectSelectedPipe() {
     if (state?.status !== "READY" || selectedPart.kind !== "pipe") {
       return;
@@ -632,6 +721,10 @@ export function DraftWorkspacePanel({
     }
   }
 
+  /**
+   * Command handler: replaces the selected component through Fabric only when the selected candidate
+   * is allowed and present in the live catalog.
+   */
   async function replaceSelectedComponent() {
     if (state?.status !== "READY" || selectedPart.kind !== "component" || selectedReplacement?.status !== "ALLOWED") {
       return;
@@ -655,6 +748,10 @@ export function DraftWorkspacePanel({
     }
   }
 
+  /**
+   * Command handler: replaces a component identified by a projection node, used by drag/drop targets
+   * after hover compatibility has identified a valid replacement.
+   */
   async function replaceComponentAtNode(entryId: string, nodeId: string) {
     if (state?.status !== "READY") {
       return;
@@ -675,6 +772,10 @@ export function DraftWorkspacePanel({
     }
   }
 
+  /**
+   * Drag/drop dispatcher: routes catalog drops to add, connect, or replace commands based on the
+   * scene target and the latest Fabric compatibility preview.
+   */
   function handleCatalogEntryDrop(entryId: string, target: SceneDropTarget) {
     if (busy) {
       return;
@@ -866,11 +967,18 @@ export function DraftWorkspacePanel({
     activeTutorialStep?.action?.();
   }, [activeTutorialStep]);
 
+  /**
+   * Tutorial command: restarts the guided tour at the first step for the current render.
+   */
   function openTutorial() {
     setTutorialStepIndex(0);
     setTutorialOpen(true);
   }
 
+  /**
+   * Tutorial command: closes the guided tour and optionally persists dismissal as local-only UI
+   * preference, leaving Fabric draft state untouched.
+   */
   function closeTutorial(persist: boolean) {
     setTutorialOpen(false);
     setExtractedPartId(undefined);
@@ -883,10 +991,16 @@ export function DraftWorkspacePanel({
     }
   }
 
+  /**
+   * Tutorial navigation helper: advances the guided tour without exceeding the available steps.
+   */
   function nextTutorialStep() {
     setTutorialStepIndex(current => Math.min(current + 1, tutorialSteps.length - 1));
   }
 
+  /**
+   * Tutorial navigation helper: moves the guided tour backward without underflowing the first step.
+   */
   function previousTutorialStep() {
     setTutorialStepIndex(current => Math.max(current - 1, 0));
   }
@@ -1715,6 +1829,10 @@ export function DraftWorkspacePanel({
   );
 }
 
+/**
+ * Presentational component: renders one catalog section with drag/select/hover hooks. Hover callbacks
+ * are intentionally external so the parent can debounce Fabric compatibility lookups.
+ */
 function CatalogGroup({
   title,
   entries,
@@ -1777,6 +1895,10 @@ function CatalogGroup({
   );
 }
 
+/**
+ * Presentational component: renders non-interactive fallback catalog labels used for static guidance
+ * and empty-state scaffolding when no live catalog entries are available.
+ */
 function StaticCatalogGroup({ title, names }: { readonly title: string; readonly names: readonly string[] }) {
   return (
     <section className="catalog-group">
@@ -1791,6 +1913,10 @@ function StaticCatalogGroup({ title, names }: { readonly title: string; readonly
   );
 }
 
+/**
+ * Presentational component: renders provided/required port chips with stable styling so inspector
+ * sections can compare component offers and needs without duplicating chip markup.
+ */
 function PortList({ kind, names }: { readonly kind: "provided" | "required"; readonly names: readonly string[] }) {
   return (
     <div className="port-list">
@@ -1804,6 +1930,10 @@ function PortList({ kind, names }: { readonly kind: "provided" | "required"; rea
   );
 }
 
+/**
+ * Browser-state helper: decides whether to open the workbench tutorial. Server-side rendering and
+ * storage failures safely suppress the tutorial because it is purely local guidance.
+ */
 function shouldShowTutorial(): boolean {
   if (typeof window === "undefined") {
     return false;
@@ -1815,6 +1945,10 @@ function shouldShowTutorial(): boolean {
   }
 }
 
+/**
+ * Error-message adapter: turns low-level transport/server failures into operator-facing Studio copy
+ * while preserving unknown messages for debugging.
+ */
 function friendlyStudioError(message: string): string {
   if (/HTTP\s+5\d\d|Internal Server Error/i.test(message)) {
     return "Fabric projection is temporarily unavailable. The workbench is showing the last available local state.";
@@ -1825,6 +1959,10 @@ function friendlyStudioError(message: string): string {
   return message;
 }
 
+/**
+ * Label helper: derives a compact catalog palette label from a Maven-like catalog id. Undefined
+ * entries return an empty label so disabled UI rows do not fabricate component identity.
+ */
 function paletteLabel(entry: VisualCatalogEntry | undefined): string {
   if (!entry) {
     return "";
@@ -1832,6 +1970,10 @@ function paletteLabel(entry: VisualCatalogEntry | undefined): string {
   return entry.catalogEntryId.split(":").slice(1).join(":") || entry.catalogEntryId;
 }
 
+/**
+ * Label helper: converts a catalog entry id into a human-readable component name for draft chips and
+ * pending projection selections.
+ */
 function labelForCatalogEntry(catalogEntryId: string): string {
   const parts = catalogEntryId.split(":").filter(Boolean);
   const raw = (parts.length >= 3 ? parts.at(-2) : parts.at(-1)) ?? catalogEntryId;
@@ -1843,16 +1985,28 @@ function labelForCatalogEntry(catalogEntryId: string): string {
     .join(" ");
 }
 
+/**
+ * Projection helper: extracts the active visual port ids from a catalog entry. Missing manifests
+ * produce an empty list because Fabric, not the UI, decides component validity.
+ */
 function activePorts(entry: VisualCatalogEntry | undefined): readonly string[] {
   return entry?.visualManifest?.ports.map(port => port.id) ?? [];
 }
 
+/**
+ * Catalog lookup helper: finds the first offer port for a component so drag/drop connection flows can
+ * seed a sensible default without inventing ports outside the visual manifest.
+ */
 function firstOfferPortId(catalogEntryId: string, catalogEntries: readonly VisualCatalogEntry[]): string | undefined {
   const entry = catalogEntries.find(entry => entry.catalogEntryId === catalogEntryId);
   const offer = entry?.visualManifest?.ports.find(port => port.kind === "OFFER");
   return offer?.id;
 }
 
+/**
+ * Adapter helper: merges static demo replacement options and live catalog entries into one candidate
+ * list while marking substrate replacement as blocked because the base plate is profile-derived.
+ */
 function buildReplacementCandidates(
   surface: ThreeAssemblySurfaceId,
   catalogEntries: readonly VisualCatalogEntry[]
@@ -1887,6 +2041,10 @@ function buildReplacementCandidates(
   return [...byId.values()];
 }
 
+/**
+ * Adapter helper: normalizes Fabric replacement-candidate responses into the panel's local view-model
+ * shape without changing Fabric's allow/block decision.
+ */
 function toReplacementCandidates(candidates: readonly FabricReplacementCandidate[]): readonly ReplacementCandidate[] {
   return candidates.map(candidate => ({
     catalogEntryId: candidate.catalogEntryId,
@@ -1898,6 +2056,10 @@ function toReplacementCandidates(candidates: readonly FabricReplacementCandidate
   }));
 }
 
+/**
+ * Projection lookup helper: maps a scene selection back to a dynamic DCP projection node so hover,
+ * replacement, and inspector behavior operate on Fabric-provided identities.
+ */
 function projectionNodeIdForSelection(
   selection: ThreeAssemblySelection,
   projection: DynamicDcpProjectionResponse
@@ -1913,10 +2075,18 @@ function projectionNodeIdForSelection(
   return projection.nodes.find(node => node.level === "CHILD" && normalizeLabel(node.label) === normalizedLabel)?.nodeId;
 }
 
+/**
+ * CSS helper: appends the selected class when a module surface matches the currently selected
+ * inspector surface.
+ */
 function moduleClass(baseClass: string, selected: SelectedSurfaceId, surface: SelectedSurfaceId): string {
   return selected === surface ? `${baseClass} selected` : baseClass;
 }
 
+/**
+ * Projection lookup helper: finds the CHILD-level projection node for a catalog entry id, returning
+ * undefined when the draft has not yet been reflected in Fabric's dynamic projection.
+ */
 function projectionNodeIdForCatalogEntry(
   projection: DynamicDcpProjectionResponse | undefined,
   catalogEntryId: string
@@ -1936,6 +2106,10 @@ function projectionNodeIdForCatalogEntry(
 // pending state instead of the misleading "No component selected" (or a
 // fabricated identity). Replaces the old hardcoded `surface: "validation"`,
 // which always resolved to the demo Flow Orchestrator.
+/**
+ * Selection builder: creates a scene selection for a draft component, preferring live projection node
+ * ids and falling back to a draft sentinel when Fabric has not projected the component yet.
+ */
 function draftComponentSelection(
   catalogEntryId: string,
   label: string,
@@ -1951,6 +2125,10 @@ function draftComponentSelection(
   };
 }
 
+/**
+ * Demo-data factory: provides a minimal catalog only when demo fallbacks are explicitly enabled.
+ * Governed runtime paths must prefer real Fabric catalog responses or honest empty states.
+ */
 function fallbackCatalog(): readonly VisualCatalogEntry[] {
   return [
     {
@@ -2131,6 +2309,10 @@ const inspectorDetails: Record<SelectedSurfaceId, InspectorDetails> = {
   }
 };
 
+/**
+ * Adapter helper: resolves inspector data from the live DCP projection or, in demo mode only, from
+ * static sample metadata. Undefined means the UI should render an honest empty inspector state.
+ */
 function inspectorDetailsFor(
   surface: SelectedSurfaceId,
   projection: DynamicDcpProjectionResponse | undefined,
@@ -2177,6 +2359,10 @@ function inspectorDetailsFor(
   };
 }
 
+/**
+ * Label helper: maps workbench tool names to compact button glyphs while keeping unknown tools
+ * visibly neutral.
+ */
 function toolGlyph(tool: string): string {
   return {
     Select: "SEL",
@@ -2193,10 +2379,16 @@ function toolGlyph(tool: string): string {
   }[tool] ?? "DOT";
 }
 
+/**
+ * CSS helper: derives the active-view class name used by the workbench chrome.
+ */
 function viewClassName(view: string): string {
   return `view-${view.toLowerCase()}`;
 }
 
+/**
+ * Copy helper: provides a short operator-facing description for each supported visual view.
+ */
 function viewDescription(view: string): string {
   return {
     Assembly: "complete governed composition",
@@ -2207,6 +2399,9 @@ function viewDescription(view: string): string {
   }[view] ?? "composition surface";
 }
 
+/**
+ * Copy helper: maps semantic zoom ids to labels shown in the zoom navigator and layout status.
+ */
 function semanticZoomLabel(level: SemanticZoomLevel): string {
   return {
     PARENT_DCP: "Parent DCP",
@@ -2215,6 +2410,9 @@ function semanticZoomLabel(level: SemanticZoomLevel): string {
   }[level];
 }
 
+/**
+ * Copy helper: explains what level of the recursive DCP projection is visible at each zoom depth.
+ */
 function semanticZoomDescription(level: SemanticZoomLevel): string {
   return {
     PARENT_DCP: "zoomed out to tenant/application composition context",
@@ -2223,16 +2421,28 @@ function semanticZoomDescription(level: SemanticZoomLevel): string {
   }[level];
 }
 
+/**
+ * Persistence record: stores layout-only choices restored across route remounts. It deliberately
+ * excludes contract or validation data because Fabric remains the source of semantic truth.
+ */
 type LayoutState = {
   readonly activeView: string;
   readonly semanticZoomLevel: SemanticZoomLevel;
   readonly selectedSurface: SelectedSurfaceId;
 };
 
+/**
+ * Persistence record: stores the local draft chip inventory restored across route remounts. Fabric
+ * remains authoritative for validation; this cache only preserves operator context between renders.
+ */
 type DraftInventoryState = {
   readonly components: readonly DraftComponentItem[];
 };
 
+/**
+ * Browser persistence helper: restores locally cached draft inventory and validates each item shape
+ * before exposing it to the UI.
+ */
 function readDraftInventoryState(tenantId: string, assemblyId: string): DraftInventoryState | undefined {
   if (typeof window === "undefined") {
     return undefined;
@@ -2258,6 +2468,10 @@ function readDraftInventoryState(tenantId: string, assemblyId: string): DraftInv
   }
 }
 
+/**
+ * Browser persistence helper: writes draft inventory as a convenience cache and silently ignores
+ * storage failures because Fabric can always reload authoritative draft state.
+ */
 function writeDraftInventoryState(tenantId: string, assemblyId: string, state: DraftInventoryState): void {
   if (typeof window === "undefined") {
     return;
@@ -2269,10 +2483,16 @@ function writeDraftInventoryState(tenantId: string, assemblyId: string, state: D
   }
 }
 
+/**
+ * Key helper: scopes draft inventory by tenant and assembly with safe defaults for local Studio use.
+ */
 function draftInventoryStateKey(tenantId: string, assemblyId: string): string {
   return `unfurl-studio-draft-inventory:${tenantId.trim() || DEFAULT_STUDIO_TENANT_ID}:${assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID}`;
 }
 
+/**
+ * Type guard: validates browser-deserialized draft inventory items before they influence UI state.
+ */
 function isDraftComponentItem(value: unknown): value is DraftComponentItem {
   if (value === null || typeof value !== "object") {
     return false;
@@ -2283,6 +2503,10 @@ function isDraftComponentItem(value: unknown): value is DraftComponentItem {
     && (candidate.status === "ADDED" || candidate.status === "VALIDATED");
 }
 
+/**
+ * Browser persistence helper: restores layout-only state for a tenant assembly and rejects malformed
+ * values rather than applying broken view/selection state.
+ */
 function readLayoutState(tenantId: string, assemblyId: string): LayoutState | undefined {
   if (typeof window === "undefined") {
     return undefined;
@@ -2306,6 +2530,10 @@ function readLayoutState(tenantId: string, assemblyId: string): LayoutState | un
   }
 }
 
+/**
+ * Browser persistence helper: saves local view/zoom/selection state without treating that state as
+ * contract input.
+ */
 function writeLayoutState(tenantId: string, assemblyId: string, state: LayoutState): void {
   if (typeof window === "undefined") {
     return;
@@ -2317,10 +2545,17 @@ function writeLayoutState(tenantId: string, assemblyId: string, state: LayoutSta
   }
 }
 
+/**
+ * Key helper: scopes layout state by tenant and assembly with local defaults for empty route params.
+ */
 function layoutStateKey(tenantId: string, assemblyId: string): string {
   return `unfurl-studio-layout:${tenantId.trim() || DEFAULT_STUDIO_TENANT_ID}:${assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID}`;
 }
 
+/**
+ * Adapter helper: converts Fabric layout state into the panel's local layout shape while normalizing
+ * unsupported values to safe defaults.
+ */
 function toLayoutState(layout: StudioLayoutState): LayoutState {
   return {
     activeView: validView(layout.activeView),
@@ -2329,26 +2564,44 @@ function toLayoutState(layout: StudioLayoutState): LayoutState {
   };
 }
 
+/**
+ * Validation helper: clamps persisted or server-provided view names to the supported workbench views.
+ */
 function validView(value: string): string {
   return ["Assembly", "Exploded", "Ports", "Substrate", "Validation"].includes(value) ? value : "Assembly";
 }
 
+/**
+ * Validation helper: clamps persisted or server-provided semantic zoom levels to the supported DCP
+ * projection depths.
+ */
 function validSemanticZoomLevel(value: string): SemanticZoomLevel {
   return value === "PARENT_DCP" || value === "CHILD_DCP" || value === "ASSEMBLY_DCP"
     ? value
     : "ASSEMBLY_DCP";
 }
 
+/**
+ * Validation helper: clamps persisted selected surfaces to known static surfaces until a live
+ * projection selection replaces them.
+ */
 function validSurface(value: string): SelectedSurfaceId {
   return Object.prototype.hasOwnProperty.call(inspectorDetails, value)
     ? value as SelectedSurfaceId
     : "validation";
 }
 
+/**
+ * Projection helper: resolves a node label from the current dynamic projection and falls back to the
+ * id so missing labels remain inspectable.
+ */
 function nodeLabel(projection: DynamicDcpProjectionResponse | undefined, nodeId: string): string {
   return projection?.nodes.find(node => node.nodeId === nodeId)?.label ?? nodeId;
 }
 
+/**
+ * Copy helper: summarizes deployment runtime knobs for compact display in the planner panel.
+ */
 function deploymentRuntimeSummary(runtime: Record<string, unknown>): string {
   const entries = Object.entries(runtime)
     .filter(([, value]) => value !== undefined && value !== false && value !== "")
@@ -2356,6 +2609,10 @@ function deploymentRuntimeSummary(runtime: Record<string, unknown>): string {
   return entries.length === 0 ? "default" : entries.join(", ");
 }
 
+/**
+ * Projector: converts Fabric's recursive DCP projection into the small semantic scene projection
+ * consumed by the ThreeAssemblyScene zoom controls.
+ */
 function toSemanticSceneProjection(projection: DynamicDcpProjectionResponse): SemanticDcpSceneProjection {
   const root = projection.nodes.find(node => node.nodeId === projection.rootNodeId)
     ?? projection.nodes.find(node => node.level === "PARENT");
@@ -2375,6 +2632,10 @@ function toSemanticSceneProjection(projection: DynamicDcpProjectionResponse): Se
   };
 }
 
+/**
+ * Identity helper: derives a stable key for semantic scene projections so React/Three transitions
+ * can detect meaningful projection changes.
+ */
 function semanticSceneProjectionKey(projection: SemanticDcpSceneProjection | undefined): string {
   if (!projection) {
     return "semantic:fallback";
@@ -2386,10 +2647,17 @@ function semanticSceneProjectionKey(projection: SemanticDcpSceneProjection | und
   ].join("::");
 }
 
+/**
+ * Matching helper: normalizes labels for projection-selection fallback matching where exact ids are
+ * unavailable.
+ */
 function normalizeLabel(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+/**
+ * Copy helper: formats active collaborator counts for the workbench presence footer.
+ */
 function collaboratorLabel(count: number): string {
   if (count <= 0) {
     return "solo";
@@ -2397,6 +2665,9 @@ function collaboratorLabel(count: number): string {
   return count === 1 ? "1 active" : `${count} active`;
 }
 
+/**
+ * Label helper: derives a compact two-letter substrate badge from a longer capability label.
+ */
 function shortSubstrateLabel(label: string): string {
   const words = label.split(/\s+/).filter(Boolean);
   if (words.length >= 2) {
