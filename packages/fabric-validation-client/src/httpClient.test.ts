@@ -82,22 +82,30 @@ describe("HTTP Studio Fabric client", () => {
         tenantId: "tenant-local",
         assemblyId: "assembly-demo",
         status: "VERIFIED",
-        results: [],
+        results: [{
+          fileName: "payment.yaml",
+          status: "VERIFIED",
+          catalogEntryId: "uploaded:payment.yaml",
+          claimHash: "sha256:claim-payment",
+          warnings: [],
+          diagnostics: []
+        }],
         catalog: { catalogHash: "sha256:catalog", entries: [] }
       })
     });
 
     const response = await client.admitCatalogArtifacts?.({
       assemblyId: "assembly-demo",
-      artifacts: [{ fileName: "payment.jar" }]
+      artifacts: [{ fileName: "payment.yaml", claimYaml: "identity:\n  name: payment\n" }]
     });
 
     assert.equal(response?.status, "VERIFIED");
+    assert.deepEqual(response?.results[0]?.diagnostics, []);
     assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-local/catalog/admissions");
     assert.deepEqual(JSON.parse(calls[0]?.body ?? "{}"), {
       tenantId: "tenant-local",
       assemblyId: "assembly-demo",
-      artifacts: [{ fileName: "payment.jar" }]
+      artifacts: [{ fileName: "payment.yaml", claimYaml: "identity:\n  name: payment\n" }]
     });
   });
 

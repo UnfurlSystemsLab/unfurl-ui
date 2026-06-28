@@ -326,25 +326,34 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
       return ok<CreateDraftCompositionResponse>({ session });
     }
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog/admissions`) {
-      const body = parseJson<{ readonly assemblyId?: string; readonly artifacts?: readonly { readonly fileName: string }[] }>(init?.body);
+      const body = parseJson<{ readonly assemblyId?: string; readonly artifacts?: readonly { readonly fileName: string; readonly claimYaml?: string }[] }>(init?.body);
       const results = (body?.artifacts ?? []).map(artifact => ({
         fileName: artifact.fileName,
-        status: "VERIFIED",
-        catalogEntryId: `uploaded:${artifact.fileName}`,
-        claimHash: `sha256:claim-${artifact.fileName}`,
-        warnings: []
+        status: artifact.claimYaml ? "VERIFIED" : "REJECTED",
+        catalogEntryId: artifact.claimYaml ? `uploaded:${artifact.fileName}` : "",
+        claimHash: artifact.claimYaml ? `sha256:claim-${artifact.fileName}` : "",
+        warnings: artifact.claimYaml ? [] : ["claim: DCP claim YAML is required for catalog admission"],
+        diagnostics: artifact.claimYaml
+          ? []
+          : [{
+              severity: "ERROR",
+              code: "CLAIM_MALFORMED",
+              path: "claim",
+              message: "DCP claim YAML is required for catalog admission"
+            }]
       }));
+      const verifiedResults = results.filter(result => result.status === "VERIFIED");
       catalog = {
-        catalogHash: `sha256:catalog-${[...catalog.entries.map(entry => entry.catalogEntryId), ...results.map(result => result.catalogEntryId)].sort().join("|")}`,
+        catalogHash: `sha256:catalog-${[...catalog.entries.map(entry => entry.catalogEntryId), ...verifiedResults.map(result => result.catalogEntryId)].sort().join("|")}`,
         entries: [
-          ...catalog.entries.filter(entry => !results.some(result => result.catalogEntryId === entry.catalogEntryId)),
-          ...results.map(result => uploadedCatalogEntry(result.catalogEntryId, result.claimHash))
+          ...catalog.entries.filter(entry => !verifiedResults.some(result => result.catalogEntryId === entry.catalogEntryId)),
+          ...verifiedResults.map(result => uploadedCatalogEntry(result.catalogEntryId, result.claimHash))
         ].sort((left, right) => left.catalogEntryId.localeCompare(right.catalogEntryId))
       };
       return ok(fixtures.admissionResponse ?? {
         tenantId: session.tenantId,
         assemblyId: body?.assemblyId ?? session.assemblyId,
-        status: "VERIFIED",
+        status: results.every(result => result.status === "VERIFIED") ? "VERIFIED" : "REJECTED",
         results,
         catalog
       });

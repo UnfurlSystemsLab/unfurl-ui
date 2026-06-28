@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import type { StudioFabricClient } from "@unfurl/fabric-validation-client";
+import type {
+  StudioClaimVerificationResult,
+  StudioComponentArtifactDraft,
+  StudioFabricClient
+} from "@unfurl/fabric-validation-client";
 import { buildCatalogPalette, loadCatalogPalette, type CatalogPaletteState } from "./catalogPalette.js";
 
 export type CatalogPalettePanelProps = {
@@ -31,8 +35,9 @@ export function CatalogPalettePanel({
   const [tenantId, setTenantId] = useState(initialTenantId);
   const [query, setQuery] = useState("");
   const [warningsOnly, setWarningsOnly] = useState(false);
-  const [selectedArtifactNames, setSelectedArtifactNames] = useState<readonly string[]>([]);
-  const [claimVerification, setClaimVerification] = useState<"IDLE" | "READY_TO_VERIFY" | "VERIFIED">("IDLE");
+  const [selectedArtifacts, setSelectedArtifacts] = useState<readonly StudioComponentArtifactDraft[]>([]);
+  const [admissionResults, setAdmissionResults] = useState<readonly StudioClaimVerificationResult[]>([]);
+  const [claimVerification, setClaimVerification] = useState<"IDLE" | "READY_TO_VERIFY" | "VERIFIED" | "REJECTED">("IDLE");
   const [state, setState] = useState<CatalogPaletteState>({ status: "FAILED", message: "catalog not loaded" });
 
   useEffect(() => {
@@ -47,21 +52,44 @@ export function CatalogPalettePanel({
     };
   }, [client, tenantId, assemblyId, query, warningsOnly]);
 
+  /**
+   * Adapter: converts browser File objects into Studio admission drafts. YAML files carry
+   * their DCP claim content; archive uploads without readable claim YAML remain drafts and
+   * Fabric will return a structured diagnostic instead of silently verifying them.
+   */
   function selectArtifacts(files: FileList | null) {
-    const names = files ? Array.from(files).map(file => file.name) : [];
-    setSelectedArtifactNames(names);
-    setClaimVerification(names.length === 0 ? "IDLE" : "READY_TO_VERIFY");
+    const selected = files ? Array.from(files) : [];
+    setAdmissionResults([]);
+    setClaimVerification(selected.length === 0 ? "IDLE" : "READY_TO_VERIFY");
+    void Promise.all(selected.map(toAdmissionDraft)).then(setSelectedArtifacts);
   }
 
+  /**
+   * Adapter helper: reads YAML-like files as text while preserving unsupported archive uploads
+   * as filename-only drafts so backend validation owns the final admission decision.
+   */
+  async function toAdmissionDraft(file: File): Promise<StudioComponentArtifactDraft> {
+    const lowerName = file.name.toLowerCase();
+    if (lowerName.endsWith(".yaml") || lowerName.endsWith(".yml")) {
+      return { fileName: file.name, claimYaml: await file.text() };
+    }
+    return { fileName: file.name };
+  }
+
+  /**
+   * Command handler: submits selected artifacts for Fabric-side DCP validation and mirrors
+   * structured diagnostics into the admission panel.
+   */
   async function verifyClaims() {
-    if (selectedArtifactNames.length > 0) {
+    if (selectedArtifacts.length > 0) {
       if (client.admitCatalogArtifacts) {
         const response = await client.admitCatalogArtifacts({
           tenantId,
           assemblyId,
-          artifacts: selectedArtifactNames.map(fileName => ({ fileName }))
+          artifacts: selectedArtifacts
         });
-        setClaimVerification(response.status === "VERIFIED" ? "VERIFIED" : "READY_TO_VERIFY");
+        setAdmissionResults(response.results);
+        setClaimVerification(response.status === "VERIFIED" ? "VERIFIED" : "REJECTED");
         setState({
           status: "READY",
           palette: buildCatalogPalette(response.catalog.catalogHash, response.catalog.entries, {
@@ -129,16 +157,17 @@ export function CatalogPalettePanel({
           />
         </label>
         <div className="summary-row">
-          <span>selected: {selectedArtifactNames.length}</span>
+          <span>selected: {selectedArtifacts.length}</span>
           <span>claim status: {claimVerificationText(claimVerification)}</span>
           <span>admission: {claimVerification === "VERIFIED" ? "ready for catalog" : "blocked until verified"}</span>
         </div>
-        {selectedArtifactNames.length > 0 && (
+        {selectedArtifacts.length > 0 && (
           <ul className="catalog-admission-list">
-            {selectedArtifactNames.map(name => <li key={name}>{name}</li>)}
+            {selectedArtifacts.map(artifact => <li key={artifact.fileName}>{artifact.fileName}</li>)}
           </ul>
         )}
-        <button type="button" disabled={selectedArtifactNames.length === 0} onClick={() => void verifyClaims()}>
+        <AdmissionResults results={admissionResults} />
+        <button type="button" disabled={selectedArtifacts.length === 0} onClick={() => void verifyClaims()}>
           Verify Component Claims
         </button>
       </section>
@@ -187,7 +216,46 @@ export function CatalogPalettePanel({
   );
 }
 
-function claimVerificationText(status: "IDLE" | "READY_TO_VERIFY" | "VERIFIED"): string {
+export type AdmissionResultsProps = {
+  readonly results: readonly StudioClaimVerificationResult[];
+};
+
+/**
+ * Presenter: renders Fabric's structured DCP claim diagnostics without collapsing them
+ * into a generic admission failure. Exported so the contract can be tested without a DOM.
+ */
+export function AdmissionResults({ results }: AdmissionResultsProps) {
+  if (results.length === 0) {
+    return null;
+  }
+  return (
+    <div className="catalog-admission-results">
+      {results.map(result => (
+        <article className="catalog-admission-result" key={result.fileName}>
+          <div className="summary-row">
+            <span>{result.fileName}</span>
+            <span>{result.status}</span>
+            {result.claimHash && <span>{result.claimHash}</span>}
+          </div>
+          {result.diagnostics.length > 0 && (
+            <ul className="catalog-diagnostic-list">
+              {result.diagnostics.map((diagnostic, index) => (
+                <li key={`${result.fileName}-${diagnostic.code}-${diagnostic.path}-${index}`}>
+                  <strong>{diagnostic.severity}</strong> {diagnostic.code} at {diagnostic.path || "claim"}: {diagnostic.message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Presenter: converts admission state into compact operator-facing copy.
+ */
+function claimVerificationText(status: "IDLE" | "READY_TO_VERIFY" | "VERIFIED" | "REJECTED"): string {
   switch (status) {
     case "IDLE":
       return "waiting for artifact";
@@ -195,5 +263,7 @@ function claimVerificationText(status: "IDLE" | "READY_TO_VERIFY" | "VERIFIED"):
       return "verification required";
     case "VERIFIED":
       return "claims verified";
+    case "REJECTED":
+      return "claim errors found";
   }
 }

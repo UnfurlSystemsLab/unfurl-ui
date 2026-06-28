@@ -78,12 +78,28 @@ describe("mock Studio API contract", () => {
     });
 
     const admission = await client.admitCatalogArtifacts?.({
-      artifacts: [{ fileName: "payment.jar" }]
+      artifacts: [{ fileName: "payment.yaml", claimYaml: "identity:\n  name: payment\n" }]
     });
     const catalog = await client.listCatalogVisuals();
 
     assert.equal(admission?.status, "VERIFIED");
-    assert.ok(admission?.catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.jar"));
-    assert.ok(catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.jar"));
+    assert.ok(admission?.catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.yaml"));
+    assert.ok(catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.yaml"));
+  });
+
+  it("returns DCP diagnostics for filename-only catalog admission drafts", async () => {
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: createMockStudioApiFetch()
+    });
+
+    const admission = await client.admitCatalogArtifacts?.({
+      artifacts: [{ fileName: "payment.jar" }]
+    });
+
+    assert.equal(admission?.status, "REJECTED");
+    assert.equal(admission?.results[0]?.diagnostics[0]?.code, "CLAIM_MALFORMED");
+    assert.equal(admission?.results[0]?.diagnostics[0]?.path, "claim");
+    assert.match(admission?.results[0]?.diagnostics[0]?.message ?? "", /DCP claim YAML is required/);
   });
 });

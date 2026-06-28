@@ -98,6 +98,7 @@ export type ListCatalogVisualsRequest = {
 export type StudioComponentArtifactDraft = {
   readonly fileName: string;
   readonly sha256?: string;
+  readonly claimYaml?: string;
 };
 
 export type AdmitCatalogArtifactsRequest = {
@@ -106,12 +107,20 @@ export type AdmitCatalogArtifactsRequest = {
   readonly artifacts: readonly StudioComponentArtifactDraft[];
 };
 
+export type StudioDcpDiagnostic = {
+  readonly severity: "ERROR" | "WARNING" | "INFO" | string;
+  readonly code: string;
+  readonly path: string;
+  readonly message: string;
+};
+
 export type StudioClaimVerificationResult = {
   readonly fileName: string;
   readonly status: "VERIFIED" | "REJECTED" | string;
   readonly catalogEntryId: string;
   readonly claimHash: string;
   readonly warnings: readonly string[];
+  readonly diagnostics: readonly StudioDcpDiagnostic[];
 };
 
 export type AdmitCatalogArtifactsResponse = {
