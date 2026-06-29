@@ -6,6 +6,7 @@ import type {
   StudioFabricClient
 } from "@unfurl/fabric-validation-client";
 import { buildCatalogPalette, loadCatalogPalette, type CatalogPaletteState } from "./catalogPalette.js";
+import { DiagnosticArtifactsPanel } from "./DiagnosticArtifactsPanel.js";
 
 export type CatalogPalettePanelProps = {
   readonly client: Pick<StudioFabricClient, "listCatalogVisuals" | "admitCatalogArtifacts">;
@@ -39,6 +40,7 @@ export function CatalogPalettePanel({
   const [selectedArtifacts, setSelectedArtifacts] = useState<readonly StudioComponentArtifactDraft[]>([]);
   const [admissionResults, setAdmissionResults] = useState<readonly StudioClaimVerificationResult[]>([]);
   const [claimBundleArtifact, setClaimBundleArtifact] = useState<StudioExportArtifact | undefined>(undefined);
+  const [diagnosticArtifacts, setDiagnosticArtifacts] = useState<readonly StudioExportArtifact[]>([]);
   const [claimVerification, setClaimVerification] = useState<"IDLE" | "READY_TO_VERIFY" | "VERIFIED" | "REJECTED">("IDLE");
   const [state, setState] = useState<CatalogPaletteState>({ status: "FAILED", message: "catalog not loaded" });
 
@@ -63,6 +65,7 @@ export function CatalogPalettePanel({
     const selected = files ? Array.from(files) : [];
     setAdmissionResults([]);
     setClaimBundleArtifact(undefined);
+    setDiagnosticArtifacts([]);
     setClaimVerification(selected.length === 0 ? "IDLE" : "READY_TO_VERIFY");
     void Promise.all(selected.map(toAdmissionDraft)).then(setSelectedArtifacts);
   }
@@ -81,6 +84,7 @@ export function CatalogPalettePanel({
         });
         setAdmissionResults(response.results);
         setClaimBundleArtifact(response.claimBundleArtifact);
+        setDiagnosticArtifacts(response.diagnosticArtifacts ?? []);
         setClaimVerification(response.status === "VERIFIED" ? "VERIFIED" : "REJECTED");
         setState({
           status: "READY",
@@ -158,7 +162,11 @@ export function CatalogPalettePanel({
             {selectedArtifacts.map(artifact => <li key={artifact.fileName}>{artifact.fileName}</li>)}
           </ul>
         )}
-        <AdmissionResults results={admissionResults} claimBundleArtifact={claimBundleArtifact} />
+        <AdmissionResults
+          results={admissionResults}
+          claimBundleArtifact={claimBundleArtifact}
+          diagnosticArtifacts={diagnosticArtifacts}
+        />
         <button type="button" disabled={selectedArtifacts.length === 0} onClick={() => void verifyClaims()}>
           Verify Component Claims
         </button>
@@ -211,14 +219,19 @@ export function CatalogPalettePanel({
 export type AdmissionResultsProps = {
   readonly results: readonly StudioClaimVerificationResult[];
   readonly claimBundleArtifact?: StudioExportArtifact | undefined;
+  readonly diagnosticArtifacts?: readonly StudioExportArtifact[] | undefined;
 };
 
 /**
  * Presenter: renders Fabric's structured DCP claim diagnostics without collapsing them
  * into a generic admission failure. Exported so the contract can be tested without a DOM.
  */
-export function AdmissionResults({ results, claimBundleArtifact }: AdmissionResultsProps) {
-  if (results.length === 0 && !claimBundleArtifact) {
+export function AdmissionResults({ results, claimBundleArtifact, diagnosticArtifacts = [] }: AdmissionResultsProps) {
+  const artifacts = [
+    ...(claimBundleArtifact ? [claimBundleArtifact] : []),
+    ...diagnosticArtifacts
+  ];
+  if (results.length === 0 && artifacts.length === 0) {
     return null;
   }
   return (
@@ -241,11 +254,7 @@ export function AdmissionResults({ results, claimBundleArtifact }: AdmissionResu
           )}
         </article>
       ))}
-      {claimBundleArtifact && (
-        <a href={claimBundleArtifact.url} download>
-          Download Claims Bundle
-        </a>
-      )}
+      <DiagnosticArtifactsPanel artifacts={artifacts} />
     </div>
   );
 }

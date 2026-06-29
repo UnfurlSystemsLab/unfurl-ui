@@ -19,6 +19,7 @@ export * from "./deploymentPlanner.js";
 export * from "./deploymentPlannerView.js";
 export * from "./DeploymentPlannerPanel.js";
 export * from "./CatalogPalettePanel.js";
+export * from "./DiagnosticArtifactsPanel.js";
 export * from "./DraftWorkspacePanel.js";
 export * from "./SemanticZoomNavigator.js";
 export * from "./AuthoringConversationPanel.js";

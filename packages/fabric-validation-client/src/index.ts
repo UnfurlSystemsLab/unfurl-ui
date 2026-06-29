@@ -89,6 +89,7 @@ export type IntentResponse =
 export type ListCatalogVisualsResponse = {
   readonly catalogHash: string;
   readonly entries: readonly VisualCatalogEntry[];
+  readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
 };
 
 export type ListCatalogVisualsRequest = {
@@ -131,6 +132,7 @@ export type AdmitCatalogArtifactsResponse = {
   readonly results: readonly StudioClaimVerificationResult[];
   readonly catalog: ListCatalogVisualsResponse;
   readonly claimBundleArtifact?: StudioExportArtifact;
+  readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
 };
 
 export type ExtractNeedsRequest = {
@@ -149,6 +151,7 @@ export type ExtractNeedsResponse = {
   readonly suggestedNeedsYaml: string;
   readonly defaultDeploymentTarget: string;
   readonly warnings: readonly string[];
+  readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
 };
 
 export type StudioAssemblySummary = {
@@ -193,6 +196,7 @@ export type SaveDraftResponse = {
   readonly status: "SAVED" | string;
   readonly assembly: StudioAssemblySummary;
   readonly warnings: readonly string[];
+  readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
 };
 
 export type StudioLayoutState = {
@@ -242,6 +246,7 @@ export type DynamicDcpProjectionResponse = {
   // mock responses; absent ⇒ treat as empty list.
   readonly connections?: readonly StudioPortConnectionEdge[];
   readonly warnings: readonly string[];
+  readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
 };
 
 export type DynamicDcpNode = {
@@ -367,6 +372,7 @@ export type CreateDraftCompositionRequest = {
 
 export type CreateDraftCompositionResponse = {
   readonly session: StudioDraftSession;
+  readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
 };
 
 export type HeartbeatCollaboratorRequest = {
@@ -496,12 +502,14 @@ export type ResolveDeploymentResponse =
       readonly candidateId: string;
       readonly selections: readonly DeploymentShapeSelection[];
       readonly warnings: readonly string[];
+      readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
     }
   | {
       readonly status: "INVALID";
       readonly reason: string;
       readonly details: string;
       readonly rejectedShapes: readonly string[];
+      readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
     };
 
 export type CompileDraftCandidateResponse =
@@ -513,16 +521,19 @@ export type CompileDraftCandidateResponse =
       readonly signedContractArtifact?: StudioExportArtifact;
       readonly decisionAudit?: StudioDecisionAudit;
       readonly warnings: readonly string[];
+      readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
     }
   | {
       readonly status: "STALE_REVISION";
       readonly expectedRevision: number;
       readonly receivedRevision: number;
+      readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
     }
   | {
       readonly status: "INVALID";
       readonly reason: string;
       readonly details: string;
+      readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
     };
 
 export type StudioExportArtifact = {

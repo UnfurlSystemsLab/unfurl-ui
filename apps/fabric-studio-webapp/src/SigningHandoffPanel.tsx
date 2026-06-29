@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CompileDraftCandidateResponse, StudioFabricClient } from "@unfurl/fabric-validation-client";
 import { signingHandoffFromCompile } from "./signingHandoff.js";
+import { DiagnosticArtifactsPanel } from "./DiagnosticArtifactsPanel.js";
 
 export type SigningHandoffPanelProps = {
   readonly client: Pick<StudioFabricClient, "compileCandidate">;
@@ -75,6 +76,16 @@ export function SigningHandoffPanel({
         )}
         {handoff.status === "REQUEST_SIGNED_COMPILE" && <p>{handoff.message}</p>}
         {handoff.status === "UNAVAILABLE" && <p>{handoff.reason}</p>}
+        <DiagnosticArtifactsPanel
+          artifacts={response?.diagnosticArtifacts}
+          localArtifact={response
+            ? {
+                label: "download compile response",
+                fileName: "compile-response.json",
+                value: response
+              }
+            : undefined}
+        />
       </section>
     </div>
   );

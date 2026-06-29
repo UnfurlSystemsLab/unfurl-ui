@@ -28,6 +28,7 @@ import {
   type DeploymentPlannerState
 } from "./deploymentPlanner.js";
 import { buildSigningHandoff } from "./signingHandoff.js";
+import { DiagnosticArtifactsPanel } from "./DiagnosticArtifactsPanel.js";
 import { AuthoringConversationPanel } from "./AuthoringConversationPanel.js";
 import { SemanticZoomNavigator } from "./SemanticZoomNavigator.js";
 import type { SceneDropTarget, SemanticDcpSceneProjection, SemanticZoomLevel, ThreeAssemblySelection, ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
@@ -1053,6 +1054,25 @@ export function DraftWorkspacePanel({
           {state?.status !== "READY" && <span className="action-hint">Start a draft to compile.</span>}
         </div>
       </div>
+      {(Boolean(dynamicProjection?.diagnosticArtifacts?.length)
+        || (state?.status === "READY" && Boolean(state.lastCompile))) && (
+        <section className="studio-panel">
+          <h2>Diagnostics</h2>
+          <DiagnosticArtifactsPanel
+            artifacts={[
+              ...(dynamicProjection?.diagnosticArtifacts ?? []),
+              ...(state?.status === "READY" ? state.lastCompile?.diagnosticArtifacts ?? [] : [])
+            ]}
+            localArtifact={state?.status === "READY"
+              ? {
+                  label: "download draft session",
+                  fileName: "draft-session.json",
+                  value: state.session
+                }
+              : undefined}
+          />
+        </section>
+      )}
 
       <div className="workbench-grid">
         <aside className="workbench-palette" aria-label="Catalog palette">

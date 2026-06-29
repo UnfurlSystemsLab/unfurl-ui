@@ -16,6 +16,7 @@ import { RejectedShapesPanel } from "./RejectedShapesPanel.js";
 import { IsolationMatchesPanel } from "./IsolationMatchesPanel.js";
 import { FallbackAttemptsPanel } from "./FallbackAttemptsPanel.js";
 import { RequiredPortsPanel } from "./RequiredPortsPanel.js";
+import { DiagnosticArtifactsPanel } from "./DiagnosticArtifactsPanel.js";
 
 export type DeploymentPlannerPanelProps = {
   readonly client: Pick<StudioFabricClient, "resolveDeployment">;
@@ -197,6 +198,19 @@ export function DeploymentPlannerPanel({
         {busy ? "Resolving..." : "Resolve Deployment"}
       </button>
       {error && <p className="studio-error">{error}</p>}
+      {response && (
+        <section className="studio-panel">
+          <h2>Diagnostics</h2>
+          <DiagnosticArtifactsPanel
+            artifacts={response.diagnosticArtifacts}
+            localArtifact={{
+              label: "download deployment resolution",
+              fileName: "deployment-resolution.json",
+              value: response
+            }}
+          />
+        </section>
+      )}
 
       <div className="panel-grid">
         <SelectedShapesPanel response={response} />

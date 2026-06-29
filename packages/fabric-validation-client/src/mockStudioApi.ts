@@ -91,7 +91,8 @@ export const studioApiExampleCatalog: ListCatalogVisualsResponse = {
       },
       warnings: []
     }
-  ]
+  ],
+  diagnosticArtifacts: [artifact("catalog-snapshot", "application/json")]
 };
 
 export const studioApiExampleSession: StudioDraftSession = {
@@ -195,7 +196,8 @@ export const studioApiExampleDynamicDcpProjection: DynamicDcpProjectionResponse 
       reason: "Unfurl substrate offers event-sink required by Flow Orchestrator"
     }
   ],
-  warnings: []
+  warnings: [],
+  diagnosticArtifacts: [artifact("dynamic-dcp", "application/json")]
 };
 
 export const studioApiExampleReplacementCandidates: ReplacementCandidatesResponse = {
@@ -281,7 +283,8 @@ export const studioApiExampleCompileResponse: CompileDraftCandidateResponse = {
     ],
     planningWarnings: []
   },
-  warnings: []
+  warnings: [],
+  diagnosticArtifacts: [artifact("compile-response", "application/json")]
 };
 
 export const studioApiExampleResolveDeploymentResponse: ResolveDeploymentResponse = {
@@ -351,7 +354,8 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
         entries: [
           ...catalog.entries.filter(entry => !verifiedResults.some(result => result.catalogEntryId === entry.catalogEntryId)),
           ...verifiedResults.map(result => uploadedCatalogEntry(result.catalogEntryId, result.claimHash))
-        ].sort((left, right) => left.catalogEntryId.localeCompare(right.catalogEntryId))
+        ].sort((left, right) => left.catalogEntryId.localeCompare(right.catalogEntryId)),
+        diagnosticArtifacts: [artifact("catalog-snapshot", "application/json")]
       };
       return ok(fixtures.admissionResponse ?? {
         tenantId: session.tenantId,
@@ -373,7 +377,8 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
         targetApplicationName: body?.targetApplicationName ?? "target application",
         suggestedNeedsYaml: "requiredCapabilities:\n  - capability: target.application.run\n    capabilityVersion: ^1\n",
         defaultDeploymentTarget: "",
-        warnings: []
+        warnings: [],
+        diagnosticArtifacts: [artifact("needs-extraction", "application/json")]
       });
     }
     if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies`) {
@@ -415,7 +420,8 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
           needsId: body?.needsId ?? "",
           deploymentShape: body?.deploymentShape ?? "CONTAINERIZED_SERVICE"
         },
-        warnings: []
+        warnings: [],
+        diagnosticArtifacts: [artifact("saved-draft", "application/json")]
       });
     }
     if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/layout`) {
