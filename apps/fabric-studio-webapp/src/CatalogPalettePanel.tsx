@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type {
   StudioClaimVerificationResult,
   StudioComponentArtifactDraft,
+  StudioExportArtifact,
   StudioFabricClient
 } from "@unfurl/fabric-validation-client";
 import { buildCatalogPalette, loadCatalogPalette, type CatalogPaletteState } from "./catalogPalette.js";
@@ -37,6 +38,7 @@ export function CatalogPalettePanel({
   const [warningsOnly, setWarningsOnly] = useState(false);
   const [selectedArtifacts, setSelectedArtifacts] = useState<readonly StudioComponentArtifactDraft[]>([]);
   const [admissionResults, setAdmissionResults] = useState<readonly StudioClaimVerificationResult[]>([]);
+  const [claimBundleArtifact, setClaimBundleArtifact] = useState<StudioExportArtifact | undefined>(undefined);
   const [claimVerification, setClaimVerification] = useState<"IDLE" | "READY_TO_VERIFY" | "VERIFIED" | "REJECTED">("IDLE");
   const [state, setState] = useState<CatalogPaletteState>({ status: "FAILED", message: "catalog not loaded" });
 
@@ -60,20 +62,9 @@ export function CatalogPalettePanel({
   function selectArtifacts(files: FileList | null) {
     const selected = files ? Array.from(files) : [];
     setAdmissionResults([]);
+    setClaimBundleArtifact(undefined);
     setClaimVerification(selected.length === 0 ? "IDLE" : "READY_TO_VERIFY");
     void Promise.all(selected.map(toAdmissionDraft)).then(setSelectedArtifacts);
-  }
-
-  /**
-   * Adapter helper: reads YAML-like files as text while preserving unsupported archive uploads
-   * as filename-only drafts so backend validation owns the final admission decision.
-   */
-  async function toAdmissionDraft(file: File): Promise<StudioComponentArtifactDraft> {
-    const lowerName = file.name.toLowerCase();
-    if (lowerName.endsWith(".yaml") || lowerName.endsWith(".yml")) {
-      return { fileName: file.name, claimYaml: await file.text() };
-    }
-    return { fileName: file.name };
   }
 
   /**
@@ -89,6 +80,7 @@ export function CatalogPalettePanel({
           artifacts: selectedArtifacts
         });
         setAdmissionResults(response.results);
+        setClaimBundleArtifact(response.claimBundleArtifact);
         setClaimVerification(response.status === "VERIFIED" ? "VERIFIED" : "REJECTED");
         setState({
           status: "READY",
@@ -166,7 +158,7 @@ export function CatalogPalettePanel({
             {selectedArtifacts.map(artifact => <li key={artifact.fileName}>{artifact.fileName}</li>)}
           </ul>
         )}
-        <AdmissionResults results={admissionResults} />
+        <AdmissionResults results={admissionResults} claimBundleArtifact={claimBundleArtifact} />
         <button type="button" disabled={selectedArtifacts.length === 0} onClick={() => void verifyClaims()}>
           Verify Component Claims
         </button>
@@ -218,14 +210,15 @@ export function CatalogPalettePanel({
 
 export type AdmissionResultsProps = {
   readonly results: readonly StudioClaimVerificationResult[];
+  readonly claimBundleArtifact?: StudioExportArtifact | undefined;
 };
 
 /**
  * Presenter: renders Fabric's structured DCP claim diagnostics without collapsing them
  * into a generic admission failure. Exported so the contract can be tested without a DOM.
  */
-export function AdmissionResults({ results }: AdmissionResultsProps) {
-  if (results.length === 0) {
+export function AdmissionResults({ results, claimBundleArtifact }: AdmissionResultsProps) {
+  if (results.length === 0 && !claimBundleArtifact) {
     return null;
   }
   return (
@@ -248,6 +241,11 @@ export function AdmissionResults({ results }: AdmissionResultsProps) {
           )}
         </article>
       ))}
+      {claimBundleArtifact && (
+        <a href={claimBundleArtifact.url} download>
+          Download Claims Bundle
+        </a>
+      )}
     </div>
   );
 }
@@ -266,4 +264,33 @@ function claimVerificationText(status: "IDLE" | "READY_TO_VERIFY" | "VERIFIED" |
     case "REJECTED":
       return "claim errors found";
   }
+}
+
+/**
+ * Adapter helper: reads YAML-like files as claim text and JAR files as base64 archive
+ * drafts so Fabric can extract META-INF/unfurl-catalog.yaml during DCP admission.
+ */
+export async function toAdmissionDraft(file: File): Promise<StudioComponentArtifactDraft> {
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.endsWith(".yaml") || lowerName.endsWith(".yml")) {
+    return { fileName: file.name, claimYaml: await file.text() };
+  }
+  if (lowerName.endsWith(".jar")) {
+    return { fileName: file.name, artifactBase64: await fileToBase64(file) };
+  }
+  return { fileName: file.name };
+}
+
+/**
+ * Encoding helper: converts a browser File into transport-safe base64 without relying
+ * on Node-only Buffer APIs, keeping Studio uploads usable in browser and test runtimes.
+ */
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 8192;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
 }

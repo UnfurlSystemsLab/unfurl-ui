@@ -326,22 +326,25 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
       return ok<CreateDraftCompositionResponse>({ session });
     }
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog/admissions`) {
-      const body = parseJson<{ readonly assemblyId?: string; readonly artifacts?: readonly { readonly fileName: string; readonly claimYaml?: string }[] }>(init?.body);
-      const results = (body?.artifacts ?? []).map(artifact => ({
-        fileName: artifact.fileName,
-        status: artifact.claimYaml ? "VERIFIED" : "REJECTED",
-        catalogEntryId: artifact.claimYaml ? `uploaded:${artifact.fileName}` : "",
-        claimHash: artifact.claimYaml ? `sha256:claim-${artifact.fileName}` : "",
-        warnings: artifact.claimYaml ? [] : ["claim: DCP claim YAML is required for catalog admission"],
-        diagnostics: artifact.claimYaml
-          ? []
-          : [{
-              severity: "ERROR",
-              code: "CLAIM_MALFORMED",
-              path: "claim",
-              message: "DCP claim YAML is required for catalog admission"
-            }]
-      }));
+      const body = parseJson<{ readonly assemblyId?: string; readonly artifacts?: readonly { readonly fileName: string; readonly claimYaml?: string; readonly artifactBase64?: string }[] }>(init?.body);
+      const results = (body?.artifacts ?? []).map(artifact => {
+        const hasClaimSource = hasAdmissionClaimSource(artifact);
+        return {
+          fileName: artifact.fileName,
+          status: hasClaimSource ? "VERIFIED" : "REJECTED",
+          catalogEntryId: hasClaimSource ? `uploaded:${artifact.fileName}` : "",
+          claimHash: hasClaimSource ? `sha256:claim-${artifact.fileName}` : "",
+          warnings: hasClaimSource ? [] : ["claim: DCP claim YAML is required for catalog admission"],
+          diagnostics: hasClaimSource
+            ? []
+            : [{
+                severity: "ERROR",
+                code: "CLAIM_MALFORMED",
+                path: "claim",
+                message: "DCP claim YAML is required for catalog admission"
+              }]
+        };
+      });
       const verifiedResults = results.filter(result => result.status === "VERIFIED");
       catalog = {
         catalogHash: `sha256:catalog-${[...catalog.entries.map(entry => entry.catalogEntryId), ...verifiedResults.map(result => result.catalogEntryId)].sort().join("|")}`,
@@ -355,7 +358,10 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
         assemblyId: body?.assemblyId ?? session.assemblyId,
         status: results.every(result => result.status === "VERIFIED") ? "VERIFIED" : "REJECTED",
         results,
-        catalog
+        catalog,
+        ...(verifiedResults.length > 0
+          ? { claimBundleArtifact: claimBundleArtifact(session.tenantId) }
+          : {})
       });
     }
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/needs/extract`) {
@@ -544,12 +550,27 @@ function ok<T>(body: T): FetchResponseLike {
   };
 }
 
-function artifact(name: string) {
+function artifact(name: string, mediaType = "application/yaml") {
   return {
     artifactId: name,
-    mediaType: "application/yaml",
+    mediaType,
     sha256: `sha256:${name}`,
     url: `/studio/assets/${name}`
+  };
+}
+
+/**
+ * Fixture factory: mirrors the backend's tenant-scoped, hash-pinned claim bundle
+ * artifact returned from catalog admission.
+ */
+function claimBundleArtifact(tenantId: string) {
+  const artifactId = `catalog-admission-${tenantId}-claims`;
+  const sha256 = `sha256:${artifactId}`;
+  return {
+    artifactId,
+    mediaType: "application/zip",
+    sha256,
+    url: `/studio/tenants/${encodeURIComponent(tenantId)}/catalog/admissions/${artifactId}/claims.zip?sha256=${sha256}`
   };
 }
 
@@ -611,6 +632,14 @@ function uploadedCatalogEntry(catalogEntryId: string, claimHash: string): Visual
     },
     warnings: []
   };
+}
+
+/**
+ * Predicate: mirrors the real Studio admission contract by accepting either explicit
+ * claim YAML or JAR bytes that the backend can inspect for an embedded catalog manifest.
+ */
+function hasAdmissionClaimSource(artifact: { readonly claimYaml?: string; readonly artifactBase64?: string }): boolean {
+  return Boolean(artifact.claimYaml || artifact.artifactBase64);
 }
 
 function parseJson<T>(body: string | undefined): T | undefined {

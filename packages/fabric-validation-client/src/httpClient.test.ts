@@ -90,22 +90,35 @@ describe("HTTP Studio Fabric client", () => {
           warnings: [],
           diagnostics: []
         }],
-        catalog: { catalogHash: "sha256:catalog", entries: [] }
+        catalog: { catalogHash: "sha256:catalog", entries: [] },
+        claimBundleArtifact: {
+          artifactId: "adm-123",
+          mediaType: "application/zip",
+          sha256: "sha256:bundle",
+          url: "/studio/tenants/tenant-local/catalog/admissions/adm-123/claims.zip?sha256=sha256:bundle"
+        }
       })
     });
 
     const response = await client.admitCatalogArtifacts?.({
       assemblyId: "assembly-demo",
-      artifacts: [{ fileName: "payment.yaml", claimYaml: "identity:\n  name: payment\n" }]
+      artifacts: [
+        { fileName: "payment.yaml", claimYaml: "identity:\n  name: payment\n" },
+        { fileName: "payment.jar", artifactBase64: "UEsDBA==" }
+      ]
     });
 
     assert.equal(response?.status, "VERIFIED");
+    assert.equal(response?.claimBundleArtifact?.mediaType, "application/zip");
     assert.deepEqual(response?.results[0]?.diagnostics, []);
     assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-local/catalog/admissions");
     assert.deepEqual(JSON.parse(calls[0]?.body ?? "{}"), {
       tenantId: "tenant-local",
       assemblyId: "assembly-demo",
-      artifacts: [{ fileName: "payment.yaml", claimYaml: "identity:\n  name: payment\n" }]
+      artifacts: [
+        { fileName: "payment.yaml", claimYaml: "identity:\n  name: payment\n" },
+        { fileName: "payment.jar", artifactBase64: "UEsDBA==" }
+      ]
     });
   });
 

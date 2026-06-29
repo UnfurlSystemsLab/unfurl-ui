@@ -83,8 +83,26 @@ describe("mock Studio API contract", () => {
     const catalog = await client.listCatalogVisuals();
 
     assert.equal(admission?.status, "VERIFIED");
+    assert.equal(admission?.claimBundleArtifact?.mediaType, "application/zip");
+    assert.match(admission?.claimBundleArtifact?.url ?? "", /claims\.zip\?sha256=/);
     assert.ok(admission?.catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.yaml"));
     assert.ok(catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.yaml"));
+  });
+
+  it("adds JAR artifacts with base64 content to the mock catalog", async () => {
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: createMockStudioApiFetch()
+    });
+
+    const admission = await client.admitCatalogArtifacts?.({
+      artifacts: [{ fileName: "payment.jar", artifactBase64: "UEsDBA==" }]
+    });
+    const catalog = await client.listCatalogVisuals();
+
+    assert.equal(admission?.status, "VERIFIED");
+    assert.ok(admission?.catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.jar"));
+    assert.ok(catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.jar"));
   });
 
   it("returns DCP diagnostics for filename-only catalog admission drafts", async () => {

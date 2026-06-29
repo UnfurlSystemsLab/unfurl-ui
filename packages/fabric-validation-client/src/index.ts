@@ -99,6 +99,7 @@ export type StudioComponentArtifactDraft = {
   readonly fileName: string;
   readonly sha256?: string;
   readonly claimYaml?: string;
+  readonly artifactBase64?: string;
 };
 
 export type AdmitCatalogArtifactsRequest = {
@@ -129,6 +130,7 @@ export type AdmitCatalogArtifactsResponse = {
   readonly status: "VERIFIED" | "REJECTED" | string;
   readonly results: readonly StudioClaimVerificationResult[];
   readonly catalog: ListCatalogVisualsResponse;
+  readonly claimBundleArtifact?: StudioExportArtifact;
 };
 
 export type ExtractNeedsRequest = {
