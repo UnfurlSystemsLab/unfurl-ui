@@ -853,10 +853,13 @@ function createChildDcpConstructs(
   return group;
 }
 
-function sceneChildNodes(semanticProjection: SemanticDcpSceneProjection): readonly SemanticDcpSceneNode[] {
-  return semanticProjection.childNodes.length === 0
-    ? defaultSemanticProjection.childNodes
-    : semanticProjection.childNodes.slice(0, 5);
+/**
+ * Projector: limits semantic child DCP render nodes to the compact set the scene can display.
+ * An empty projection stays empty because Fabric/draft state is authoritative; demo defaults are
+ * only used when the entire semantic projection is absent.
+ */
+export function sceneChildNodes(semanticProjection: SemanticDcpSceneProjection): readonly SemanticDcpSceneNode[] {
+  return semanticProjection.childNodes.slice(0, 5);
 }
 
 function childPosition(index: number, count: number): readonly [number, number] {

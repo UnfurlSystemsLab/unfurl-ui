@@ -285,6 +285,7 @@ Studio supports:
 - Inspect component
 - Connect ports with pipes
 - Disconnect pipes
+- Remove component from draft
 - Replace one component with another
 - Hide or show substrate layer
 - Run compatibility check
@@ -434,8 +435,17 @@ Examples:
 
 ```json
 {
+  "type": "REMOVE_COMPONENT",
+  "componentId": "storage-s3",
+  "catalogEntryId": "com.unfurl:unfurl-storage-s3:1.2.0"
+}
+```
+
+```json
+{
   "type": "REPLACE_COMPONENT",
   "oldComponentId": "storage-s3",
+  "oldCatalogEntryId": "com.unfurl:unfurl-storage-s3:1.2.0",
   "newCatalogEntryId": "com.unfurl:unfurl-storage-blob:1.1.0"
 }
 ```
@@ -918,6 +928,14 @@ copies it.
 
 Only composition state participates in compile/export. View state may be saved
 as Studio layout metadata, but it must never be treated as a contract source.
+
+When Fabric returns a dynamic DCP projection that contains broader catalog or
+candidate read-model nodes, Studio must adapt that projection before rendering
+assembly-specific surfaces. The 3D assembly, semantic zoom navigator, hierarchy,
+and table display only CHILD nodes whose `catalogEntryId` is present in the
+current draft session inventory, while retaining the real parent and assembly
+DCP context. Empty drafts therefore render as an empty governed assembly even if
+the projection endpoint can also describe available catalog components.
 
 ---
 

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { renderToString } from "react-dom/server";
 import { createHttpStudioFabricClient, createMockStudioApiFetch } from "@unfurl/fabric-validation-client";
 import type { DynamicDcpProjectionResponse } from "@unfurl/fabric-validation-client";
-import { DraftWorkspacePanel } from "./DraftWorkspacePanel.js";
+import { DraftWorkspacePanel, filterProjectionForDraftDisplay, replayDraftInventoryIntents } from "./DraftWorkspacePanel.js";
 
 describe("DraftWorkspacePanel", () => {
   it("renders the governed composition workbench", () => {
@@ -109,6 +109,98 @@ describe("DraftWorkspacePanel", () => {
     assert.doesNotMatch(html, /Flow API/);
     assert.doesNotMatch(html, /Keyboard-accessible projection synchronized with the 3D assembly/);    assert.doesNotMatch(html, /Dynamic DCP Projection/);
     assert.doesNotMatch(html, /Java 21/);
+  });
+
+  it("renders a governed remove action for draft components", () => {
+    const html = renderToString(
+      <DraftWorkspacePanel
+        client={client()}
+        initialDraftComponentCatalogEntryIds={["com.unfurl.flow:orchestrator:0.1.0"]}
+        initialDynamicProjection={projection()}
+      />
+    );
+
+    assert.match(html, /Draft Inventory/);
+    assert.match(html, /Remove Component/);
+  });
+
+  it("replays accepted authoring proposal intents into the draft inventory", () => {
+    const afterAdd = replayDraftInventoryIntents([], [
+      { type: "ADD_COMPONENT", catalogEntryId: "com.unfurl.flow:orchestrator:0.1.0" },
+      {
+        type: "REPLACE_COMPONENT",
+        oldComponentId: "component.flow-orchestrator",
+        oldCatalogEntryId: "com.unfurl.flow:orchestrator:0.1.0",
+        newCatalogEntryId: "com.unfurl:storage-s3:1.2.0"
+      },
+      {
+        type: "REMOVE_COMPONENT",
+        componentId: "draft:com.unfurl:storage-s3:1.2.0",
+        catalogEntryId: "com.unfurl:storage-s3:1.2.0"
+      }
+    ]);
+
+    assert.deepEqual(afterAdd, []);
+  });
+
+  it("filters broad dynamic projections to the current draft inventory for assembly display", () => {
+    const projectionFixture = {
+      ...projection(),
+      nodes: [
+        ...projection().nodes,
+        {
+          nodeId: "component.catalog-only",
+          label: "Catalog Only Component",
+          dcpType: "COMPONENT",
+          level: "CHILD",
+          catalogEntryId: "com.unfurl:catalog-only:1.0.0",
+          capabilities: ["catalog.only"],
+          compatibleDescendants: [],
+          replacementAllowed: true
+        }
+      ],
+      edges: [
+        ...projection().edges,
+        { fromNodeId: "assembly:unfurl-flow", toNodeId: "component.catalog-only", relationship: "CONTAINS" }
+      ],
+      substratePorts: [
+        {
+          portId: "substrate:runtime",
+          capability: "runtime",
+          label: "Runtime",
+          provider: "substrate",
+          status: "AVAILABLE"
+        }
+      ],
+      connections: [
+        {
+          sourceNodeId: "substrate:runtime",
+          sourcePortId: "substrate:runtime",
+          targetNodeId: "component.catalog-only",
+          targetPortId: "need-runtime",
+          capability: "runtime",
+          status: "ALLOWED",
+          reason: "catalog-only component needs runtime"
+        }
+      ]
+    } satisfies DynamicDcpProjectionResponse;
+
+    const emptyDisplay = filterProjectionForDraftDisplay(projectionFixture, []);
+    assert.deepEqual(
+      emptyDisplay?.nodes.map(node => node.nodeId),
+      ["runtime:unfurl", "assembly:unfurl-flow"]
+    );
+    assert.deepEqual(emptyDisplay?.edges, [
+      { fromNodeId: "runtime:unfurl", toNodeId: "assembly:unfurl-flow", relationship: "CONTAINS" }
+    ]);
+    assert.deepEqual(emptyDisplay?.connections, []);
+    assert.deepEqual(emptyDisplay?.substratePorts, []);
+
+    const draftDisplay = filterProjectionForDraftDisplay(projectionFixture, [
+      { catalogEntryId: "com.unfurl.flow:orchestrator:0.1.0" }
+    ]);
+    assert.ok(draftDisplay?.nodes.some(node => node.nodeId === "component.flow-orchestrator"));
+    assert.ok(!draftDisplay?.nodes.some(node => node.nodeId === "component.catalog-only"));
   });
 
   it("restores draft inventory after the workspace route remounts", () => {

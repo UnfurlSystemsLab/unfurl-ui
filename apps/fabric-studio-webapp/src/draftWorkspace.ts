@@ -30,8 +30,14 @@ export type DraftIntentCommand =
       readonly pipeId: string;
     }
   | {
+      readonly type: "REMOVE_COMPONENT";
+      readonly componentId: string;
+      readonly catalogEntryId?: string;
+    }
+  | {
       readonly type: "REPLACE_COMPONENT";
       readonly oldComponentId: string;
+      readonly oldCatalogEntryId?: string;
       readonly newCatalogEntryId: string;
     };
 
@@ -186,11 +192,19 @@ function toStudioIntent(session: StudioDraftSession, baseRevision: number, comma
       return { ...scope, type: "CONNECT", fromPort: command.fromPort, toPort: command.toPort };
     case "DISCONNECT":
       return { ...scope, type: "DISCONNECT", pipeId: command.pipeId };
+    case "REMOVE_COMPONENT":
+      return {
+        ...scope,
+        type: "REMOVE_COMPONENT",
+        componentId: command.componentId,
+        ...(command.catalogEntryId === undefined ? {} : { catalogEntryId: command.catalogEntryId })
+      };
     case "REPLACE_COMPONENT":
       return {
         ...scope,
         type: "REPLACE_COMPONENT",
         oldComponentId: command.oldComponentId,
+        ...(command.oldCatalogEntryId === undefined ? {} : { oldCatalogEntryId: command.oldCatalogEntryId }),
         newCatalogEntryId: command.newCatalogEntryId
       };
   }

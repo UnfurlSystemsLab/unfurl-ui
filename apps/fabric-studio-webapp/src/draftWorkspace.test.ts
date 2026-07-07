@@ -76,6 +76,61 @@ describe("draft workspace", () => {
     assert.equal(state.status === "READY" ? currentRevision(state.history) : undefined, 7);
   });
 
+  it("applies remove component as a governed session intent", async () => {
+    const calls: unknown[] = [];
+    const client = fakeClient({
+      session: session({ sceneRevision: 11 }),
+      refreshedSession: session({ sceneRevision: 12 }),
+      calls
+    });
+    const created = await createDraftWorkspace(client, { baseCatalogHash: "sha256:catalog" });
+
+    const state = await applyDraftIntent(client, created, {
+      type: "REMOVE_COMPONENT",
+      componentId: "component.flow-orchestrator",
+      catalogEntryId: "com.unfurl.flow:orchestrator:0.1.0"
+    });
+
+    assert.equal(state.status, "READY");
+    assert.deepEqual(calls[0], {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      sessionId: "studio-session-123",
+      baseRevision: 11,
+      type: "REMOVE_COMPONENT",
+      componentId: "component.flow-orchestrator",
+      catalogEntryId: "com.unfurl.flow:orchestrator:0.1.0"
+    });
+  });
+
+  it("passes replacement old-catalog metadata through the governed intent payload", async () => {
+    const calls: unknown[] = [];
+    const client = fakeClient({
+      session: session({ sceneRevision: 2 }),
+      refreshedSession: session({ sceneRevision: 3 }),
+      calls
+    });
+    const created = await createDraftWorkspace(client, { baseCatalogHash: "sha256:catalog" });
+
+    await applyDraftIntent(client, created, {
+      type: "REPLACE_COMPONENT",
+      oldComponentId: "component.flow-orchestrator",
+      oldCatalogEntryId: "com.unfurl.flow:orchestrator:0.1.0",
+      newCatalogEntryId: "com.unfurl:storage-s3:1.2.0"
+    });
+
+    assert.deepEqual(calls[0], {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      sessionId: "studio-session-123",
+      baseRevision: 2,
+      type: "REPLACE_COMPONENT",
+      oldComponentId: "component.flow-orchestrator",
+      oldCatalogEntryId: "com.unfurl.flow:orchestrator:0.1.0",
+      newCatalogEntryId: "com.unfurl:storage-s3:1.2.0"
+    });
+  });
+
   it("refreshes session and resets local history when Fabric reports a stale revision", async () => {
     const client = fakeClient({
       session: session({ sceneRevision: 7 }),

@@ -11,7 +11,9 @@ import {
   type StudioReplacementCandidate as FabricReplacementCandidate,
   type StudioLayoutState,
   type StudioFabricClient,
-  type ConnectionCandidatesResponse
+  type ConnectionCandidatesResponse,
+  type AuthoringProposal,
+  type AuthoringProposedIntent
 } from "@unfurl/fabric-validation-client";
 import type { VisualCatalogEntry } from "@unfurl/visual-manifest";
 import {
@@ -538,17 +540,20 @@ export function DraftWorkspacePanel({
     setBusy(true);
     try {
       setCatalogEntryId(entryId);
-      setState(await applyDraftIntent(client, state, { type: "ADD_COMPONENT", catalogEntryId: entryId }));
-      setDraftComponents(current => [
-        ...(current ?? []),
-        {
-          catalogEntryId: entryId,
-          label: labelForCatalogEntry(entryId),
-          status: "ADDED"
-        }
-      ]);
-      selectScenePart(draftComponentSelection(entryId, labelForCatalogEntry(entryId), dynamicProjection));
-      clearPreview();
+      const next = await applyDraftIntent(client, state, { type: "ADD_COMPONENT", catalogEntryId: entryId });
+      setState(next);
+      if (intentAccepted(next)) {
+        setDraftComponents(current => [
+          ...(current ?? []),
+          {
+            catalogEntryId: entryId,
+            label: labelForCatalogEntry(entryId),
+            status: "ADDED"
+          }
+        ]);
+        selectScenePart(draftComponentSelection(entryId, labelForCatalogEntry(entryId), dynamicProjection));
+        clearPreview();
+      }
     } finally {
       setBusy(false);
     }
@@ -569,22 +574,23 @@ export function DraftWorkspacePanel({
         setState(added);
         return;
       }
+      setState(added);
+      if (!intentAccepted(added)) {
+        return;
+      }
+      setDraftComponents(current => appendDraftComponentItem(current ?? [], entryId));
+      selectScenePart(draftComponentSelection(entryId, labelForCatalogEntry(entryId), dynamicProjection));
       const sourcePortId = firstOfferPortId(entryId, catalog);
       if (!sourcePortId) {
         setState(added);
+        setCatalogEntryId(entryId);
         setCatalogError(`Added ${labelForCatalogEntry(entryId)}, but no offer port was available to connect.`);
+        clearPreview();
         return;
       }
-      setState(await applyDraftIntent(client, added, { type: "CONNECT", fromPort: sourcePortId, toPort: targetPortId }));
+      const connected = await applyDraftIntent(client, added, { type: "CONNECT", fromPort: sourcePortId, toPort: targetPortId });
+      setState(connected);
       setCatalogEntryId(entryId);
-      setDraftComponents(current => [
-        ...(current ?? []),
-        {
-          catalogEntryId: entryId,
-          label: labelForCatalogEntry(entryId),
-          status: "ADDED"
-        }
-      ]);
       clearPreview();
     } finally {
       setBusy(false);
@@ -672,9 +678,12 @@ export function DraftWorkspacePanel({
     }
     setBusy(true);
     try {
-      setState(await applyDraftIntent(client, state, { type: "CONNECT", fromPort, toPort }));
-      selectScenePart({ id: "substrate:base", kind: "substrate", surface: "substrate", label: "Substrate base plate" });
-      clearPreview();
+      const next = await applyDraftIntent(client, state, { type: "CONNECT", fromPort, toPort });
+      setState(next);
+      if (intentAccepted(next)) {
+        selectScenePart({ id: "substrate:base", kind: "substrate", surface: "substrate", label: "Substrate base plate" });
+        clearPreview();
+      }
     } finally {
       setBusy(false);
     }
@@ -768,11 +777,55 @@ export function DraftWorkspacePanel({
     }
     setBusy(true);
     try {
-      setState(await applyDraftIntent(client, state, { type: "DISCONNECT", pipeId: selectedPart.id }));
-      setExtractedPartId(undefined);
+      const next = await applyDraftIntent(client, state, { type: "DISCONNECT", pipeId: selectedPart.id });
+      setState(next);
+      if (intentAccepted(next)) {
+        setExtractedPartId(undefined);
+      }
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * Command handler: removes a draft component through Fabric's governed intent API, then mirrors
+   * the accepted removal into the local draft-inventory cache used for display continuity.
+   */
+  async function removeDraftComponent(component: DraftComponentItem) {
+    if (state?.status !== "READY") {
+      return;
+    }
+    const componentId = projectionNodeIdForCatalogEntry(dynamicProjection, component.catalogEntryId)
+      ?? selectedComponentIdForDraftItem(component, selectedPart);
+    setBusy(true);
+    try {
+      const next = await applyDraftIntent(client, state, {
+        type: "REMOVE_COMPONENT",
+        componentId,
+        catalogEntryId: component.catalogEntryId
+      });
+      setState(next);
+      if (intentAccepted(next)) {
+        setDraftComponents(current => removeDraftComponentItem(current ?? [], component.catalogEntryId));
+        if (selectedPart.kind === "component" && selectedPartMatchesDraftItem(selectedPart, component, dynamicProjection)) {
+          selectScenePart({ id: "substrate:base", kind: "substrate", surface: "substrate", label: "Substrate base plate" });
+        }
+        setExtractedPartId(undefined);
+        clearPreview();
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Adapter command: mirrors Fabric-accepted AI proposal intents into the local draft inventory so
+   * the visual assembly uses the same validated intent subset that the authoring flow applied.
+   */
+  function applyAuthoringDraftInventory(proposal: AuthoringProposal, appliedIntentCount: number) {
+    setDraftComponents(current =>
+      replayDraftInventoryIntents(current ?? [], proposal.intents.slice(0, appliedIntentCount))
+    );
   }
 
   /**
@@ -789,14 +842,21 @@ export function DraftWorkspacePanel({
     }
     setBusy(true);
     try {
-      setState(await applyDraftIntent(client, state, {
+      const oldComponent = selectedDraftComponent;
+      const next = await applyDraftIntent(client, state, {
         type: "REPLACE_COMPONENT",
         oldComponentId: selectedPart.surface,
+        ...(oldComponent === undefined ? {} : { oldCatalogEntryId: oldComponent.catalogEntryId }),
         newCatalogEntryId: replacementEntryId
-      }));
-      setCatalogEntryId(replacementEntryId);
-      setExtractedPartId(undefined);
-      clearPreview();
+      });
+      setState(next);
+      if (intentAccepted(next)) {
+        setDraftComponents(current => replaceDraftComponentItem(current ?? [], oldComponent, replacementEntryId));
+        setCatalogEntryId(replacementEntryId);
+        selectScenePart(draftComponentSelection(replacementEntryId, labelForCatalogEntry(replacementEntryId), dynamicProjection));
+        setExtractedPartId(undefined);
+        clearPreview();
+      }
     } finally {
       setBusy(false);
     }
@@ -812,15 +872,22 @@ export function DraftWorkspacePanel({
     }
     setBusy(true);
     try {
-      setState(await applyDraftIntent(client, state, {
+      const oldComponent = draftComponentForNodeId(nodeId, dynamicProjection, draftComponents);
+      const next = await applyDraftIntent(client, state, {
         type: "REPLACE_COMPONENT",
         oldComponentId: nodeId,
+        ...(oldComponent === undefined ? {} : { oldCatalogEntryId: oldComponent.catalogEntryId }),
         newCatalogEntryId: entryId
-      }));
-      setReplacementEntryId(entryId);
-      setCatalogEntryId(entryId);
-      setExtractedPartId(undefined);
-      clearPreview();
+      });
+      setState(next);
+      if (intentAccepted(next)) {
+        setDraftComponents(current => replaceDraftComponentItem(current ?? [], oldComponent, entryId));
+        setReplacementEntryId(entryId);
+        setCatalogEntryId(entryId);
+        selectScenePart(draftComponentSelection(entryId, labelForCatalogEntry(entryId), dynamicProjection));
+        setExtractedPartId(undefined);
+        clearPreview();
+      }
     } finally {
       setBusy(false);
     }
@@ -857,7 +924,11 @@ export function DraftWorkspacePanel({
   }
 
   const handoff = state ? buildSigningHandoff(state, { signingRequested: sign }) : undefined;
-  const selected = inspectorDetailsFor(selectedComponent, dynamicProjection, demoFallbacks);
+  const displayDynamicProjection = useMemo(
+    () => filterProjectionForDraftDisplay(dynamicProjection, draftComponents),
+    [dynamicProjection, draftComponents]
+  );
+  const selected = inspectorDetailsFor(selectedComponent, displayDynamicProjection, demoFallbacks);
   // A draft component the operator selected that the projection has no
   // governed node for yet (surface carries the `draft:` sentinel). We show
   // its real label with a "pending" note rather than "No component selected".
@@ -866,6 +937,9 @@ export function DraftWorkspacePanel({
     && selectedPart.surface.startsWith("draft:")
     ? selectedPart.label
     : undefined;
+  const selectedDraftComponent = draftComponents?.find(component =>
+    selectedPartMatchesDraftItem(selectedPart, component, dynamicProjection)
+  );
   const hasInspectableSelection = selected !== undefined || pendingDraftComponentLabel !== undefined;
   useEffect(() => {
     if (activeView === "Exploded" && !hasInspectableSelection) {
@@ -896,14 +970,14 @@ export function DraftWorkspacePanel({
   // yet (e.g. fixture mode without a draft session) so the scene
   // skips the filter and shows everything in the projection.
   const draftCatalogEntryIdSet = useMemo(
-    () => draftComponents === undefined || dynamicProjection !== undefined
+    () => draftComponents === undefined
       ? undefined
       : new Set(draftComponents.map(component => component.catalogEntryId)),
-    [draftComponents, dynamicProjection]
+    [draftComponents]
   );
   const draftComponentCount = draftComponents?.length ?? initialDraftComponentCount;
-  const liveConnectionCount = dynamicProjection?.connections?.length ?? 0;
-  const liveSubstratePorts = dynamicProjection?.substratePorts ?? [];
+  const liveConnectionCount = displayDynamicProjection?.connections?.length ?? 0;
+  const liveSubstratePorts = displayDynamicProjection?.substratePorts ?? [];
   const visibleSubstrateCapabilities = liveSubstratePorts.length > 0
     ? liveSubstratePorts.map(port => ({
       name: port.label,
@@ -924,8 +998,8 @@ export function DraftWorkspacePanel({
   const showEmptyAssembly = draftComponents !== undefined && draftComponents.length === 0;
   const showDraftInventory = draftComponents !== undefined;
   const semanticSceneProjection = useMemo(
-    () => dynamicProjection ? toSemanticSceneProjection(dynamicProjection) : undefined,
-    [dynamicProjection]
+    () => displayDynamicProjection ? toSemanticSceneProjection(displayDynamicProjection) : undefined,
+    [displayDynamicProjection]
   );
   const replacementCandidates = useMemo(
     () => fabricReplacementCandidates
@@ -1205,6 +1279,7 @@ export function DraftWorkspacePanel({
             state={state}
             onStateChange={setState}
             onDeploymentPolicy={applyAuthoringDeploymentPolicy}
+            onProposalApplied={applyAuthoringDraftInventory}
           />
           <section className="save-draft-panel" aria-label="Assembly deployment planner">
             <div>
@@ -1315,17 +1390,17 @@ export function DraftWorkspacePanel({
           </div>
 
           <SemanticZoomNavigator
-            projection={dynamicProjection}
+            projection={displayDynamicProjection}
             onSelectNode={nodeId => selectScenePart({
               id: `component:${nodeId}`,
               kind: "component",
               surface: nodeId,
-              label: nodeLabel(dynamicProjection, nodeId)
+              label: nodeLabel(displayDynamicProjection, nodeId)
             })}
           />
 
             <div className={`composition-plane ${viewClassName(activeView)} ${showEmptyAssembly || showNoAssemblyData ? "empty-assembly-plane" : ""}`}>
-              {(showFallbackAssembly || draftComponents !== undefined || dynamicProjection !== undefined) && (
+              {(showFallbackAssembly || draftComponents !== undefined || displayDynamicProjection !== undefined) && (
                 <Suspense fallback={<div className="three-assembly-scene" aria-label="3D assembly scene" />}>
                 <ThreeAssemblyScene
                   // No `key` prop here: ThreeAssemblyScene's effect is
@@ -1339,7 +1414,7 @@ export function DraftWorkspacePanel({
                   extractedPartId={extractedPartId}
                   semanticProjection={semanticSceneProjection}
                   requestedSemanticZoomLevel={requestedSemanticZoomLevel}
-                  dynamicProjection={dynamicProjection}
+                  dynamicProjection={displayDynamicProjection}
                   // Restrict the scene to ONLY render modules for
                   // components the operator has actually added to the
                   // draft. Without this filter, the dynamicProjection
@@ -1501,6 +1576,7 @@ export function DraftWorkspacePanel({
                     <th scope="col">Name</th>
                     <th scope="col">Catalog / Port</th>
                     <th scope="col">Status</th>
+                    <th scope="col">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1511,12 +1587,14 @@ export function DraftWorkspacePanel({
                         <td>No components added</td>
                         <td>select a catalog entry and add it to the draft</td>
                         <td>empty</td>
+                        <td>none</td>
                       </tr>
                       <tr>
                         <td>Substrate</td>
                         <td>No substrate ports used</td>
                         <td>validated connections will appear here</td>
                         <td>empty</td>
+                        <td>none</td>
                       </tr>
                     </>
                   ) : (
@@ -1526,13 +1604,23 @@ export function DraftWorkspacePanel({
                         <td>{component.label}</td>
                         <td>{component.catalogEntryId}</td>
                         <td>{component.status.toLowerCase()}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={busy || state?.status !== "READY"}
+                            onClick={() => void removeDraftComponent(component)}
+                          >
+                            Remove Component
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
             </section>
-          ) : dynamicProjection && (
+          ) : displayDynamicProjection && (
             <section className="dynamic-dcp-table-panel" aria-label="Accessible dynamic DCP table view">
               <div>
                 <strong>2D / Table View</strong>
@@ -1548,7 +1636,7 @@ export function DraftWorkspacePanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {dynamicProjection.nodes.map(node => (
+                  {displayDynamicProjection.nodes.map(node => (
                     <tr key={node.nodeId}>
                       <td>{node.level}</td>
                       <td>{node.label}</td>
@@ -1712,12 +1800,12 @@ export function DraftWorkspacePanel({
                   )}
                 </ul>
               </>
-            ) : dynamicProjection ? (
+            ) : displayDynamicProjection ? (
               <>
                 <dl>
-                  <dt>Mode</dt><dd>{dynamicProjection.compositionMode}</dd>
-                  <dt>Root</dt><dd>{nodeLabel(dynamicProjection, dynamicProjection.rootNodeId)}</dd>
-                  <dt>Focus</dt><dd>{nodeLabel(dynamicProjection, dynamicProjection.focusNodeId)}</dd>
+                  <dt>Mode</dt><dd>{displayDynamicProjection.compositionMode}</dd>
+                  <dt>Root</dt><dd>{nodeLabel(displayDynamicProjection, displayDynamicProjection.rootNodeId)}</dd>
+                  <dt>Focus</dt><dd>{nodeLabel(displayDynamicProjection, displayDynamicProjection.focusNodeId)}</dd>
                   <dt>Substrate Ports</dt><dd>{liveSubstratePorts.length}</dd>
                   <dt>Connections</dt><dd>{liveConnectionCount}</dd>
                 </dl>
@@ -1739,7 +1827,7 @@ export function DraftWorkspacePanel({
                     <div key={level}>
                       <strong>{level}</strong>
                       <ul>
-                        {dynamicProjection.nodes.filter(node => node.level === level).map(node => (
+                        {displayDynamicProjection.nodes.filter(node => node.level === level).map(node => (
                           <li key={node.nodeId}>
                             <span>{node.label}</span>
                             <small>{node.dcpType}{node.replacementAllowed ? " / replaceable" : ""}</small>
@@ -1754,14 +1842,14 @@ export function DraftWorkspacePanel({
               <p className="live-data-notice">{dynamicProjectionError ? friendlyStudioError(dynamicProjectionError) : "Loading dynamic DCP projection..."}</p>
             )}
           </section>
-          {dynamicProjection && dynamicProjection.nodes.length > 0 && (
+          {displayDynamicProjection && displayDynamicProjection.nodes.length > 0 && (
             <section className="inspector-card">
               <div className="card-head-row">
                 <h2>Component Hierarchy</h2>
-                <small className="mono-muted">{dynamicProjection.nodes.length}</small>
+                <small className="mono-muted">{displayDynamicProjection.nodes.length}</small>
               </div>
               <div className="hierarchy-tree">
-                {dynamicProjection.nodes.map(node => {
+                {displayDynamicProjection.nodes.map(node => {
                   // Indent by the projection's real recursive depth when present
                   // (arbitrary-depth composition); fall back to the legacy
                   // PARENT/ASSEMBLY/CHILD ranking for flat 3-level projections.
@@ -1795,9 +1883,31 @@ export function DraftWorkspacePanel({
                   <dt>Status</dt><dd><span className="included-dot" /> {selected.status}</dd>
                 </dl>
                 <p>{selected.description}</p>
+                {selectedDraftComponent && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy || state?.status !== "READY"}
+                    onClick={() => void removeDraftComponent(selectedDraftComponent)}
+                  >
+                    Remove Component
+                  </button>
+                )}
               </>
             ) : pendingDraftComponentLabel ? (
-              <p className="live-data-notice">{pendingDraftComponentLabel} is in this draft; governed details appear once the projection includes it.</p>
+              <>
+                <p className="live-data-notice">{pendingDraftComponentLabel} is in this draft; governed details appear once the projection includes it.</p>
+                {selectedDraftComponent && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy || state?.status !== "READY"}
+                    onClick={() => void removeDraftComponent(selectedDraftComponent)}
+                  >
+                    Remove Component
+                  </button>
+                )}
+              </>
             ) : (
               <p className="live-data-notice">Select a component in the assembly to inspect its governed details.</p>
             )}
@@ -1818,6 +1928,9 @@ export function DraftWorkspacePanel({
               Catalog entry intent
               <input value={catalogEntryId} onChange={event => setCatalogEntryId(event.target.value)} />
             </label>
+            <button type="button" disabled={busy || state?.status !== "READY"} onClick={() => void addComponent()}>
+              Add Component
+            </button>
             <label>
               From port
               <input value={fromPort} onChange={event => setFromPort(event.target.value)} />
@@ -1951,10 +2064,11 @@ function CatalogGroup({
         return (
           <button
             type="button"
+            aria-label={`Add ${paletteLabel(entry)}`}
             className={isHovered ? `${baseClass} previewing` : baseClass}
+            draggable={inCatalog}
             key={entry.catalogEntryId}
             onClick={() => onSelect(entry.catalogEntryId)}
-            draggable={inCatalog}
             onDragStart={event => {
               if (!inCatalog || !ready || busy) {
                 return;
@@ -1974,7 +2088,8 @@ function CatalogGroup({
             title={inCatalog ? undefined : "Not in the live catalog; admit it before assembly"}
           >
             <span className="catalog-glyph purple">{entry.visualManifest?.fallbackShape.kind.slice(0, 1) ?? "C"}</span>
-            {paletteLabel(entry)}
+            <span>{paletteLabel(entry)}</span>
+            <span className="catalog-row-action">Add</span>
           </button>
         );
       })}
@@ -2144,6 +2259,66 @@ function toReplacementCandidates(candidates: readonly FabricReplacementCandidate
 }
 
 /**
+ * Projector: narrows Fabric's dynamic projection to the operator's current draft inventory for
+ * display-only surfaces. Fabric may return a broader catalog-derived projection, but the workbench
+ * assembly, semantic zoom, hierarchy, and table must only show components that are actually in the
+ * governed draft; parent/assembly context is retained so the DCP frame remains navigable.
+ */
+export function filterProjectionForDraftDisplay(
+  projection: DynamicDcpProjectionResponse | undefined,
+  draftComponents: readonly Pick<DraftComponentItem, "catalogEntryId">[] | undefined
+): DynamicDcpProjectionResponse | undefined {
+  if (!projection || draftComponents === undefined) {
+    return projection;
+  }
+  const draftCatalogEntryIds = new Set(draftComponents.map(component => component.catalogEntryId));
+  const keptNodeIds = new Set<string>();
+  const nodes = projection.nodes.filter(node => {
+    const keep = node.level !== "CHILD"
+      || (node.catalogEntryId !== undefined && draftCatalogEntryIds.has(node.catalogEntryId));
+    if (keep) {
+      keptNodeIds.add(node.nodeId);
+    }
+    return keep;
+  });
+  const connections = (projection.connections ?? []).filter(edge =>
+    endpointVisibleInDraft(edge.sourceNodeId, keptNodeIds)
+    && endpointVisibleInDraft(edge.targetNodeId, keptNodeIds)
+  );
+  const usedSubstratePortIds = new Set(
+    connections.flatMap(edge => [
+      isSubstrateEndpoint(edge.sourceNodeId) ? edge.sourcePortId : undefined,
+      isSubstrateEndpoint(edge.targetNodeId) ? edge.targetPortId : undefined
+    ]).filter((portId): portId is string => typeof portId === "string" && portId.length > 0)
+  );
+  return {
+    ...projection,
+    nodes,
+    edges: (projection.edges ?? []).filter(edge =>
+      keptNodeIds.has(edge.fromNodeId) && keptNodeIds.has(edge.toNodeId)
+    ),
+    connections,
+    substratePorts: (projection.substratePorts ?? []).filter(port => usedSubstratePortIds.has(port.portId)),
+    warnings: projection.warnings
+  };
+}
+
+/**
+ * Guard helper: treats substrate pseudo-nodes as visible pipe endpoints while requiring real
+ * component endpoints to survive the draft display filter.
+ */
+function endpointVisibleInDraft(nodeId: string, keptNodeIds: ReadonlySet<string>): boolean {
+  return isSubstrateEndpoint(nodeId) || keptNodeIds.has(nodeId);
+}
+
+/**
+ * Predicate helper: recognizes runtime substrate pseudo-node ids used by Fabric connection edges.
+ */
+function isSubstrateEndpoint(nodeId: string): boolean {
+  return nodeId === "substrate" || nodeId === "substrate:runtime";
+}
+
+/**
  * Projection lookup helper: maps a scene selection back to a dynamic DCP projection node so hover,
  * replacement, and inspector behavior operate on Fabric-provided identities.
  */
@@ -2181,6 +2356,148 @@ function projectionNodeIdForCatalogEntry(
   return projection?.nodes.find(
     node => node.level === "CHILD" && node.catalogEntryId === catalogEntryId
   )?.nodeId;
+}
+
+/**
+ * Predicate helper: confirms whether a scene component selection represents the given draft item.
+ * Projection node ids and pending draft sentinel ids are both accepted so removal works before and
+ * after Fabric's dynamic projection has reflected a newly added component.
+ */
+function selectedPartMatchesDraftItem(
+  selection: ThreeAssemblySelection,
+  component: DraftComponentItem,
+  projection: DynamicDcpProjectionResponse | undefined
+): boolean {
+  if (selection.kind !== "component") {
+    return false;
+  }
+  const projectionNodeId = projectionNodeIdForCatalogEntry(projection, component.catalogEntryId);
+  return selection.surface === projectionNodeId
+    || selection.surface === `draft:${component.catalogEntryId}`
+    || selection.label === component.label;
+}
+
+/**
+ * Projection lookup helper: resolves a projection node id back to the matching draft inventory item
+ * so replacement intents can keep the local draft display synchronized with Fabric's accepted edit.
+ */
+function draftComponentForNodeId(
+  nodeId: string,
+  projection: DynamicDcpProjectionResponse | undefined,
+  components: readonly DraftComponentItem[] | undefined
+): DraftComponentItem | undefined {
+  const catalogEntryId = projection?.nodes.find(node => node.nodeId === nodeId)?.catalogEntryId;
+  return components?.find(component => component.catalogEntryId === catalogEntryId);
+}
+
+/**
+ * Identity helper: chooses the best available component identity for REMOVE_COMPONENT intents. The
+ * DCP projection node id wins; pending local draft items fall back to their draft sentinel/catalog id
+ * so Fabric still receives a stable identifier instead of a display label.
+ */
+function selectedComponentIdForDraftItem(
+  component: DraftComponentItem,
+  selection: ThreeAssemblySelection
+): string {
+  if (selection.kind === "component" && selection.surface.startsWith("draft:")) {
+    return selection.surface;
+  }
+  return `draft:${component.catalogEntryId}`;
+}
+
+/**
+ * Collection helper: appends a validated draft component to the local inventory cache.
+ */
+function appendDraftComponentItem(
+  components: readonly DraftComponentItem[],
+  catalogEntryId: string
+): readonly DraftComponentItem[] {
+  return [
+    ...components,
+    {
+      catalogEntryId,
+      label: labelForCatalogEntry(catalogEntryId),
+      status: "ADDED"
+    }
+  ];
+}
+
+/**
+ * Collection helper: removes the first matching draft inventory item so duplicate catalog entries
+ * can still be represented as separate operator additions.
+ */
+function removeDraftComponentItem(
+  components: readonly DraftComponentItem[],
+  catalogEntryId: string
+): readonly DraftComponentItem[] {
+  let removed = false;
+  return components.filter(component => {
+    if (!removed && component.catalogEntryId === catalogEntryId) {
+      removed = true;
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Collection helper: replaces one draft inventory item after Fabric accepts a REPLACE_COMPONENT
+ * intent, falling back to append semantics when the old item is not present in local cache.
+ */
+function replaceDraftComponentItem(
+  components: readonly DraftComponentItem[],
+  oldComponent: DraftComponentItem | undefined,
+  newCatalogEntryId: string
+): readonly DraftComponentItem[] {
+  const replacement: DraftComponentItem = {
+    catalogEntryId: newCatalogEntryId,
+    label: labelForCatalogEntry(newCatalogEntryId),
+    status: "ADDED"
+  };
+  if (!oldComponent) {
+    return [...components, replacement];
+  }
+  let replaced = false;
+  const next = components.map(component => {
+    if (!replaced && component.catalogEntryId === oldComponent.catalogEntryId) {
+      replaced = true;
+      return replacement;
+    }
+    return component;
+  });
+  return replaced ? next : [...next, replacement];
+}
+
+/**
+ * Projector: replays the subset of authoring proposal intents Fabric accepted into the local draft
+ * inventory cache. This mirrors only validated intents; rejected proposal suffixes remain invisible.
+ */
+export function replayDraftInventoryIntents(
+  components: readonly DraftComponentItem[],
+  intents: readonly AuthoringProposedIntent[]
+): readonly DraftComponentItem[] {
+  let next = components;
+  for (const intent of intents) {
+    if (intent.type === "ADD_COMPONENT") {
+      next = appendDraftComponentItem(next, intent.catalogEntryId);
+    }
+    if (intent.type === "REMOVE_COMPONENT") {
+      next = removeDraftComponentItem(next, intent.catalogEntryId ?? catalogEntryIdFromComponentId(intent.componentId));
+    }
+    if (intent.type === "REPLACE_COMPONENT") {
+      const oldCatalogEntryId = intent.oldCatalogEntryId ?? catalogEntryIdFromComponentId(intent.oldComponentId);
+      const oldComponent = next.find(component => component.catalogEntryId === oldCatalogEntryId);
+      next = replaceDraftComponentItem(next, oldComponent, intent.newCatalogEntryId);
+    }
+  }
+  return next;
+}
+
+/**
+ * Intent response guard: detects the ready state produced after Fabric accepted a semantic intent.
+ */
+function intentAccepted(state: DraftWorkspaceState): boolean {
+  return state.status === "READY" && state.lastResponse?.status === "VALID";
 }
 
 // Build the scene selection for a draft component (palette add or Draft
@@ -2786,18 +3103,47 @@ function safeFilePart(value: string) {
 
 /**
  * Projector: rebuilds the local draft inventory chips from Fabric's restored
- * intent log after an assembly snapshot load.
+ * intent log after an assembly snapshot load. Supports add/remove/replace so
+ * deleted components are not resurrected by replaying only ADD_COMPONENT records.
  */
 function draftComponentsFromSession(session: StudioAssemblySnapshot["sessions"][number]): readonly DraftComponentItem[] {
-  const components = (session.intentLog ?? [])
-    .filter(intent => intent.type === "ADD_COMPONENT")
-    .map(intent => String(intent.payload.catalogEntryId ?? ""))
-    .filter(Boolean);
-  return components.map(catalogEntryId => ({
-    catalogEntryId,
-    label: labelForCatalogEntry(catalogEntryId),
-    status: "VALIDATED" as const
-  }));
+  let components: readonly DraftComponentItem[] = [];
+  for (const intent of session.intentLog ?? []) {
+    if (intent.type === "ADD_COMPONENT") {
+      const catalogEntryId = String(intent.payload.catalogEntryId ?? "");
+      if (catalogEntryId) {
+        components = [
+          ...components,
+          { catalogEntryId, label: labelForCatalogEntry(catalogEntryId), status: "VALIDATED" as const }
+        ];
+      }
+    }
+    if (intent.type === "REMOVE_COMPONENT") {
+      const catalogEntryId = String(intent.payload.catalogEntryId ?? "");
+      const componentId = String(intent.payload.componentId ?? "");
+      components = removeDraftComponentItem(components, catalogEntryId || catalogEntryIdFromComponentId(componentId));
+    }
+    if (intent.type === "REPLACE_COMPONENT") {
+      const oldCatalogEntryId = String(intent.payload.oldCatalogEntryId ?? "");
+      const oldComponentId = String(intent.payload.oldComponentId ?? "");
+      const newCatalogEntryId = String(intent.payload.newCatalogEntryId ?? "");
+      components = removeDraftComponentItem(components, oldCatalogEntryId || catalogEntryIdFromComponentId(oldComponentId));
+      if (newCatalogEntryId) {
+        components = [
+          ...components,
+          { catalogEntryId: newCatalogEntryId, label: labelForCatalogEntry(newCatalogEntryId), status: "VALIDATED" as const }
+        ];
+      }
+    }
+  }
+  return components;
+}
+
+/**
+ * Identity parser: converts pending draft component ids back into catalog ids for local replay.
+ */
+function catalogEntryIdFromComponentId(componentId: string): string {
+  return componentId.startsWith("draft:") ? componentId.slice("draft:".length) : componentId;
 }
 
 const projectionSurfaceNodeIds: Partial<Record<ThreeAssemblySurfaceId, string>> = {

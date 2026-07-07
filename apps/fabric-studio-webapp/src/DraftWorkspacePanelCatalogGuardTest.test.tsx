@@ -5,19 +5,15 @@ import { DraftWorkspacePanel } from "./DraftWorkspacePanel.js";
 import type { StudioFabricClient } from "@unfurl/fabric-validation-client";
 
 describe("DraftWorkspacePanel catalog guard", () => {
-  // The initial SSR render has an empty live catalog (useEffect hasn't
-  // fired yet). knownCatalogEntryIds is therefore empty, so the palette
-  // buttons rendered from fallbackCatalog() should all be disabled —
-  // that's the guard's at-rest invariant: nothing is assemblable until
-  // the live catalog confirms membership.
-  it("renders Flow Components as disabled-but-draggable before a draft is ready", () => {
+  /**
+   * Regression test: initial SSR has no live catalog yet, so fallback Add buttons can render for
+   * orientation but must remain disabled until live catalog membership is known.
+   */
+  it("renders Flow Components as disabled add actions before a draft is ready", () => {
     const html = renderToString(<DraftWorkspacePanel client={fakeFabricClient()} demoFallbacks />);
 
     assert.match(html, /Flow Components/);
 
-    // Extract the Flow Components <section> and assert every <button>
-    // inside it carries the disabled attribute. The class name on the
-    // section is `catalog-group`; the title text identifies which one.
     const flowSection = extractSectionByTitle(html, "Flow Components");
     const buttons = collectButtons(flowSection);
     assert.ok(buttons.length > 0, "expected fallback palette entries to render");
@@ -36,6 +32,9 @@ describe("DraftWorkspacePanel catalog guard", () => {
   });
 });
 
+/**
+ * Fixture factory: exposes only the Studio client methods DraftWorkspacePanel needs during SSR.
+ */
 function fakeFabricClient(): DraftWorkspacePanelClient {
   return {
     listCatalogVisuals: async () => ({ catalogHash: "sha256:empty", entries: [] }),
@@ -70,8 +69,7 @@ type DraftWorkspacePanelClient = Pick<
 >;
 
 /**
- * Pull the `<section class="catalog-group">...</section>` element whose
- * `<h3>` matches the given title. Returns just that section's substring.
+ * HTML test helper: pulls the catalog group section whose heading matches the given title.
  */
 function extractSectionByTitle(html: string, title: string): string {
   const sectionRegex = /<section[^>]*class="[^"]*catalog-group[^"]*"[^>]*>[\s\S]*?<\/section>/g;
@@ -83,6 +81,9 @@ function extractSectionByTitle(html: string, title: string): string {
   throw new Error(`section titled '${title}' not found in render`);
 }
 
+/**
+ * HTML test helper: extracts rendered button fragments from a section substring.
+ */
 function collectButtons(fragment: string): readonly string[] {
   const buttonRegex = /<button[^>]*>[\s\S]*?<\/button>/g;
   return Array.from(fragment.matchAll(buttonRegex)).map(match => match[0]);

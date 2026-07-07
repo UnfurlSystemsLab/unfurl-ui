@@ -27,6 +27,7 @@ export type AuthoringConversationPanelProps = {
   readonly state: DraftWorkspaceState | undefined;
   readonly onStateChange: (state: DraftWorkspaceState) => void;
   readonly onDeploymentPolicy?: (proposal: AuthoringProposal) => void;
+  readonly onProposalApplied?: (proposal: AuthoringProposal, appliedIntentCount: number) => void;
 };
 
 /**
@@ -40,7 +41,8 @@ export function AuthoringConversationPanel({
   assemblyId,
   state,
   onStateChange,
-  onDeploymentPolicy
+  onDeploymentPolicy,
+  onProposalApplied
 }: AuthoringConversationPanelProps) {
   const [session, setSession] = useState<AuthoringSessionState>(() => initialAuthoringSession());
   const [prompt, setPrompt] = useState("Build a docs chatbot that answers from approved content and escalates to a human.");
@@ -82,6 +84,7 @@ export function AuthoringConversationPanel({
     setStatus("Applying proposal through Fabric validation...");
     const applied = await applyAuthoringProposal(client, state, proposal);
     onStateChange(applied.state);
+    onProposalApplied?.(proposal, applied.appliedIntentCount);
     onDeploymentPolicy?.(proposal);
     if (applied.state.status !== "READY") {
       setStatus("Proposal could not be applied.");

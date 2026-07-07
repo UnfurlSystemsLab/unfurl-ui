@@ -7,6 +7,7 @@ export type StudioIntent =
   | AddComponentIntent
   | ConnectPortsIntent
   | DisconnectIntent
+  | RemoveComponentIntent
   | ReplaceComponentIntent;
 
 export type AuthoringProposedIntent =
@@ -24,8 +25,14 @@ export type AuthoringProposedIntent =
       readonly pipeId: string;
     }
   | {
+      readonly type: "REMOVE_COMPONENT";
+      readonly componentId: string;
+      readonly catalogEntryId?: string;
+    }
+  | {
       readonly type: "REPLACE_COMPONENT";
       readonly oldComponentId: string;
+      readonly oldCatalogEntryId?: string;
       readonly newCatalogEntryId: string;
     };
 
@@ -59,9 +66,16 @@ export type DisconnectIntent = BaseIntent & {
   readonly pipeId: string;
 };
 
+export type RemoveComponentIntent = BaseIntent & {
+  readonly type: "REMOVE_COMPONENT";
+  readonly componentId: string;
+  readonly catalogEntryId?: string;
+};
+
 export type ReplaceComponentIntent = BaseIntent & {
   readonly type: "REPLACE_COMPONENT";
   readonly oldComponentId: string;
+  readonly oldCatalogEntryId?: string;
   readonly newCatalogEntryId: string;
 };
 

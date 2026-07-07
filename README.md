@@ -135,6 +135,11 @@ Run the production bundle preview instead:
 npm run dev:studio
 ```
 
+VS Code live debug compounds use `scripts/wait-studio-backend.ps1` to wait for
+`http://127.0.0.1:7878/health` before opening the browser. If that wait times
+out, start `Studio: backend (:7878)` / `Studio: authoring backend (:7878)` or
+switch to fixture mode instead of continuing into Vite proxy errors.
+
 Set `VITE_STUDIO_API_BASE_URL` only to target a backend on a different origin (bypasses the proxy; relies on the backend's dev CORS). For offline mock data with no backend, use fixture mode:
 
 ```powershell
