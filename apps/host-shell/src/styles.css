@@ -27,7 +27,8 @@ button:disabled {
 }
 
 button.secondary,
-button.secondary-active {
+button.secondary-active,
+.file-action-button {
   border-color: #9aa6b8;
   background: white;
   color: #1f2937;
@@ -234,6 +235,77 @@ th, td {
   gap: 16px;
 }
 
+.catalog-tree {
+  display: grid;
+  gap: 10px;
+}
+
+.catalog-tree-item {
+  border: 1px solid #e1e5ec;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 10px;
+}
+
+.catalog-entry-cell {
+  position: relative;
+  padding-right: 34px;
+}
+
+.catalog-entry-id {
+  display: block;
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.catalog-remove-button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-color: #cbd5e1;
+  border-radius: 50%;
+  background: white;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.catalog-remove-button:hover:not(:disabled),
+.catalog-remove-button:focus-visible:not(:disabled) {
+  border-color: #dc2626;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.catalog-entry-properties {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.catalog-entry-properties div {
+  min-width: 0;
+}
+
+.catalog-entry-properties dt {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.catalog-entry-properties dd {
+  margin: 2px 0 0;
+  overflow-wrap: break-word;
+}
+
 .catalog-admission-panel {
   display: grid;
   gap: 12px;
@@ -319,6 +391,19 @@ th, td {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
+}
+
+.file-action-button {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #9aa6b8;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.file-action-button input {
+  display: none;
 }
 
 .graph-svg {

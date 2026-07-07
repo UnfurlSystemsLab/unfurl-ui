@@ -7,6 +7,9 @@ import type {
   CreateDraftCompositionResponse,
   AdmitCatalogArtifactsRequest,
   AdmitCatalogArtifactsResponse,
+  RemoveCatalogEntryResponse,
+  SaveCatalogSnapshotRequest,
+  LoadCatalogSnapshotRequest,
   ExtractNeedsRequest,
   ExtractNeedsResponse,
   CreateAssemblyRequest,
@@ -14,6 +17,8 @@ import type {
   ListAssembliesResponse,
   SaveDraftRequest,
   SaveDraftResponse,
+  SaveAssemblySnapshotRequest,
+  LoadAssemblySnapshotRequest,
   SessionEventsRequest,
   LoadLayoutStateRequest,
   SaveLayoutStateRequest,
@@ -34,6 +39,8 @@ import type {
   StudioDraftSession,
   StudioFabricClient,
   StudioIntent,
+  StudioCatalogSnapshot,
+  StudioAssemblySnapshot,
   StudioVisualAsset
 } from "./index.js";
 
@@ -108,6 +115,39 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         tenantHeaders(scope.tenantId, authContext)
       );
     },
+    removeCatalogEntry: async body => {
+      const tenantId = body.tenantId ?? defaultScope.tenantId;
+      return request<RemoveCatalogEntryResponse>(
+        fetchImpl,
+        baseUrl,
+        "DELETE",
+        `/studio/tenants/${encodeURIComponent(tenantId)}/catalog/${encodeURIComponent(body.catalogEntryId)}`,
+        undefined,
+        tenantHeaders(tenantId, authContext)
+      );
+    },
+    saveCatalogSnapshot: async (body?: SaveCatalogSnapshotRequest) => {
+      const tenantId = body?.tenantId ?? defaultScope.tenantId;
+      return request<StudioCatalogSnapshot>(
+        fetchImpl,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(tenantId)}/catalog/snapshot`,
+        undefined,
+        tenantHeaders(tenantId, authContext)
+      );
+    },
+    loadCatalogSnapshot: async (body: LoadCatalogSnapshotRequest) => {
+      const tenantId = body.tenantId ?? defaultScope.tenantId;
+      return request<ListCatalogVisualsResponse>(
+        fetchImpl,
+        baseUrl,
+        "POST",
+        `/studio/tenants/${encodeURIComponent(tenantId)}/catalog/snapshot`,
+        body.snapshot,
+        tenantHeaders(tenantId, authContext)
+      );
+    },
     extractNeeds: async body => {
       const scope = resolveScope(defaultScope, body);
       return request<ExtractNeedsResponse>(
@@ -149,6 +189,28 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/drafts/save`,
         { ...body, ...scope },
+        tenantHeaders(scope.tenantId, authContext)
+      );
+    },
+    saveAssemblySnapshot: async (body?: SaveAssemblySnapshotRequest) => {
+      const scope = resolveScope(defaultScope, body ?? {});
+      return request<StudioAssemblySnapshot>(
+        fetchImpl,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/snapshot`,
+        undefined,
+        tenantHeaders(scope.tenantId, authContext)
+      );
+    },
+    loadAssemblySnapshot: async (body: LoadAssemblySnapshotRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      return request<StudioAssemblySnapshot>(
+        fetchImpl,
+        baseUrl,
+        "POST",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/snapshot`,
+        body.snapshot,
         tenantHeaders(scope.tenantId, authContext)
       );
     },
@@ -301,7 +363,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
 async function request<T>(
   fetchImpl: FetchLike,
   baseUrl: string,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   path: string,
   body?: unknown,
   headers?: Record<string, string>

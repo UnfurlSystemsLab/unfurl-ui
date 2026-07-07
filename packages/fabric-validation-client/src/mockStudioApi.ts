@@ -10,6 +10,8 @@ import type {
   ExtractNeedsResponse,
   ListAssembliesResponse,
   SaveDraftResponse,
+  StudioCatalogSnapshot,
+  StudioAssemblySnapshot,
   StudioLayoutState,
   ReplacementCandidatesResponse,
   StudioAssemblySummary,
@@ -33,6 +35,8 @@ export type MockStudioApiFixtures = {
   readonly needsResponse?: ExtractNeedsResponse;
   readonly assembliesResponse?: ListAssembliesResponse;
   readonly saveDraftResponse?: SaveDraftResponse;
+  readonly catalogSnapshot?: StudioCatalogSnapshot;
+  readonly assemblySnapshot?: StudioAssemblySnapshot;
   readonly layoutState?: StudioLayoutState;
   readonly intentResponse?: IntentResponse;
   readonly compileResponse?: CompileDraftCandidateResponse;
@@ -321,6 +325,42 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     if (method === "GET" && (path === "/studio/catalog" || path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog`)) {
       return ok(catalog);
     }
+    if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog/snapshot`) {
+      return ok(fixtures.catalogSnapshot ?? {
+        tenantId: session.tenantId,
+        catalogHash: catalog.catalogHash,
+        entries: catalog.entries,
+        diagnosticArtifacts: [artifact("catalog-snapshot", "application/json")]
+      });
+    }
+    if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog/snapshot`) {
+      const body = parseJson<StudioCatalogSnapshot>(init?.body);
+      catalog = {
+        catalogHash: body?.catalogHash ?? "sha256:catalog-loaded",
+        entries: body?.entries ?? [],
+        diagnosticArtifacts: [artifact("catalog-snapshot-load", "application/json")]
+      };
+      return ok(catalog);
+    }
+    if (method === "DELETE" && path.startsWith(`/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog/`)) {
+      const catalogEntryId = decodeURIComponent(path.substring(`/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog/`.length));
+      catalog = {
+        catalogHash: `sha256:catalog-${catalog.entries
+          .filter(entry => entry.catalogEntryId !== catalogEntryId)
+          .map(entry => entry.catalogEntryId)
+          .sort()
+          .join("|")}`,
+        entries: catalog.entries.filter(entry => entry.catalogEntryId !== catalogEntryId),
+        diagnosticArtifacts: [artifact("catalog-snapshot", "application/json")]
+      };
+      return ok({
+        tenantId: session.tenantId,
+        catalogEntryId,
+        status: "REMOVED",
+        catalog,
+        diagnosticArtifacts: [artifact("catalog-removal", "application/json")]
+      });
+    }
     if (method === "POST" && path === "/studio/composition-view") {
       return ok(fixtures.compositionView ?? studioApiExampleCompositionView);
     }
@@ -394,6 +434,27 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
       return ok(fixtures.replacementCandidates ?? {
         ...studioApiExampleReplacementCandidates,
         componentNodeId: url.searchParams.get("componentNodeId") ?? studioApiExampleReplacementCandidates.componentNodeId
+      });
+    }
+    if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/snapshot`) {
+      return ok(fixtures.assemblySnapshot ?? {
+        tenantId: session.tenantId,
+        assemblyId: session.assemblyId,
+        assembly: assembly(session),
+        layout: fixtures.layoutState ?? layout(session),
+        sessions: [session],
+        diagnosticArtifacts: [artifact("assembly-snapshot", "application/json")]
+      });
+    }
+    if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/snapshot`) {
+      const body = parseJson<StudioAssemblySnapshot>(init?.body);
+      return ok({
+        tenantId: session.tenantId,
+        assemblyId: session.assemblyId,
+        assembly: body?.assembly ?? assembly(session),
+        layout: body?.layout ?? layout(session),
+        sessions: body?.sessions ?? [session],
+        diagnosticArtifacts: [artifact("assembly-snapshot-load", "application/json")]
       });
     }
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies`) {

@@ -122,6 +122,49 @@ describe("HTTP Studio Fabric client", () => {
     });
   });
 
+  it("removes catalog entries through the tenant catalog endpoint", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: fakeFetch(calls, {
+        tenantId: "tenant-local",
+        catalogEntryId: "com.unfurl:storage-s3:1.2.0",
+        status: "REMOVED",
+        catalog: { catalogHash: "sha256:catalog-after-remove", entries: [] }
+      })
+    });
+
+    const response = await client.removeCatalogEntry?.({
+      catalogEntryId: "com.unfurl:storage-s3:1.2.0"
+    });
+
+    assert.equal(response?.status, "REMOVED");
+    assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-local/catalog/com.unfurl%3Astorage-s3%3A1.2.0");
+    assert.equal(calls[0]?.method, "DELETE");
+    assert.equal(calls[0]?.body, undefined);
+  });
+
+  it("saves and loads catalog snapshots through tenant endpoints", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: fakeFetch(calls, { tenantId: "tenant-local", catalogHash: "sha256:snapshot", entries: [] })
+    });
+    const snapshot = await client.saveCatalogSnapshot?.();
+
+    await client.loadCatalogSnapshot?.({ snapshot: snapshot ?? { tenantId: "tenant-local", catalogHash: "sha256:snapshot", entries: [] } });
+
+    assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-local/catalog/snapshot");
+    assert.equal(calls[0]?.method, "GET");
+    assert.equal(calls[1]?.input, "http://fabric.local/studio/tenants/tenant-local/catalog/snapshot");
+    assert.equal(calls[1]?.method, "POST");
+    assert.deepEqual(JSON.parse(calls[1]?.body ?? "{}"), {
+      tenantId: "tenant-local",
+      catalogHash: "sha256:snapshot",
+      entries: []
+    });
+  });
+
   it("extracts needs through the tenant assembly endpoint", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({
@@ -236,6 +279,47 @@ describe("HTTP Studio Fabric client", () => {
       camera: { distance: 5.5 },
       annotations: ["inspect payment replacement"]
     });
+  });
+
+  it("saves and loads assembly snapshots through tenant assembly endpoints", async () => {
+    const calls: FetchCall[] = [];
+    const snapshot = {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      assembly: {
+        tenantId: "tenant-local",
+        assemblyId: "assembly-demo",
+        targetApplicationName: "Checkout Platform",
+        defaultDeploymentTarget: "kubernetes-prod",
+        needsId: "",
+        deploymentShape: "CONTAINERIZED_SERVICE",
+        currentCandidateId: "cand-abc123",
+        sceneRevision: 4
+      },
+      layout: {
+        tenantId: "tenant-local",
+        assemblyId: "assembly-demo",
+        activeView: "Assembly",
+        semanticZoomLevel: "ASSEMBLY_DCP",
+        selectedSurface: "validation",
+        camera: {},
+        annotations: []
+      },
+      sessions: []
+    };
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: fakeFetch(calls, snapshot)
+    });
+
+    await client.saveAssemblySnapshot?.();
+    await client.loadAssemblySnapshot?.({ snapshot });
+
+    assert.equal(calls[0]?.input, "http://fabric.local/studio/tenants/tenant-local/assemblies/assembly-demo/snapshot");
+    assert.equal(calls[0]?.method, "GET");
+    assert.equal(calls[1]?.input, "http://fabric.local/studio/tenants/tenant-local/assemblies/assembly-demo/snapshot");
+    assert.equal(calls[1]?.method, "POST");
+    assert.deepEqual(JSON.parse(calls[1]?.body ?? "{}"), snapshot);
   });
 
   it("loads the dynamic DCP projection for a tenant assembly", async () => {

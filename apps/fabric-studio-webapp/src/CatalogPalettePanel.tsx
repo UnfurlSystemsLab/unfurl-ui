@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type {
   StudioClaimVerificationResult,
+  StudioCatalogSnapshot,
   StudioComponentArtifactDraft,
   StudioExportArtifact,
   StudioFabricClient
@@ -9,7 +10,7 @@ import { buildCatalogPalette, loadCatalogPalette, type CatalogPaletteState } fro
 import { DiagnosticArtifactsPanel } from "./DiagnosticArtifactsPanel.js";
 
 export type CatalogPalettePanelProps = {
-  readonly client: Pick<StudioFabricClient, "listCatalogVisuals" | "admitCatalogArtifacts">;
+  readonly client: Pick<StudioFabricClient, "listCatalogVisuals" | "admitCatalogArtifacts" | "removeCatalogEntry" | "saveCatalogSnapshot" | "loadCatalogSnapshot">;
   /**
    * Initial tenant id. Hydrated from the URL search param at route level;
    * the panel manages its own state thereafter and notifies the parent
@@ -41,6 +42,7 @@ export function CatalogPalettePanel({
   const [admissionResults, setAdmissionResults] = useState<readonly StudioClaimVerificationResult[]>([]);
   const [claimBundleArtifact, setClaimBundleArtifact] = useState<StudioExportArtifact | undefined>(undefined);
   const [diagnosticArtifacts, setDiagnosticArtifacts] = useState<readonly StudioExportArtifact[]>([]);
+  const [catalogActionMessage, setCatalogActionMessage] = useState("");
   const [claimVerification, setClaimVerification] = useState<"IDLE" | "READY_TO_VERIFY" | "VERIFIED" | "REJECTED">("IDLE");
   const [state, setState] = useState<CatalogPaletteState>({ status: "FAILED", message: "catalog not loaded" });
 
@@ -98,6 +100,70 @@ export function CatalogPalettePanel({
         setClaimVerification("VERIFIED");
       }
     }
+  }
+
+  /**
+   * Command handler: removes a tenant-scoped catalog entry through Fabric and
+   * replaces the palette with the returned catalog snapshot.
+   */
+  async function removeCatalogEntry(catalogEntryId: string) {
+    if (!client.removeCatalogEntry) {
+      setCatalogActionMessage("catalog removal is not available from this client");
+      return;
+    }
+    const response = await client.removeCatalogEntry({ tenantId, catalogEntryId });
+    setDiagnosticArtifacts(response.diagnosticArtifacts ?? []);
+    setCatalogActionMessage(`removed ${response.catalogEntryId}`);
+    setState({
+      status: "READY",
+      palette: buildCatalogPalette(response.catalog.catalogHash, response.catalog.entries, {
+        tenantId,
+        query,
+        includeWarningsOnly: warningsOnly
+      })
+    });
+  }
+
+  /**
+   * Command handler: asks Fabric for a tenant-scoped catalog snapshot and downloads
+   * the returned DCP-backed read model as JSON.
+   */
+  async function saveCatalogSnapshot() {
+    if (!client.saveCatalogSnapshot) {
+      setCatalogActionMessage("catalog save is not available from this client");
+      return;
+    }
+    const snapshot = await client.saveCatalogSnapshot({ tenantId });
+    downloadJson(`catalog-${safeFilePart(tenantId)}.json`, snapshot);
+    setDiagnosticArtifacts(snapshot.diagnosticArtifacts ?? []);
+    setCatalogActionMessage("catalog snapshot saved");
+  }
+
+  /**
+   * Command handler: reads a JSON catalog snapshot and asks Fabric to load it into
+   * the active tenant before rebuilding the palette from Fabric's response.
+   */
+  async function loadCatalogSnapshot(files: FileList | null) {
+    if (!client.loadCatalogSnapshot) {
+      setCatalogActionMessage("catalog load is not available from this client");
+      return;
+    }
+    const file = files?.[0];
+    if (!file) {
+      return;
+    }
+    const snapshot = JSON.parse(await file.text()) as StudioCatalogSnapshot;
+    const response = await client.loadCatalogSnapshot({ tenantId, snapshot });
+    setDiagnosticArtifacts(response.diagnosticArtifacts ?? []);
+    setCatalogActionMessage(`loaded ${response.entries.length} catalog entries`);
+    setState({
+      status: "READY",
+      palette: buildCatalogPalette(response.catalogHash, response.entries, {
+        tenantId,
+        query,
+        includeWarningsOnly: warningsOnly
+      })
+    });
   }
 
   return (
@@ -182,31 +248,60 @@ export function CatalogPalettePanel({
               <span>warnings: {state.palette.warningCount}</span>
               <span>groups: {state.palette.groups.length}</span>
             </div>
+            <div className="button-row">
+              <button type="button" className="secondary" disabled={!client.saveCatalogSnapshot} onClick={() => void saveCatalogSnapshot()}>
+                Save Catalog
+              </button>
+              <label className="file-action-button">
+                Load Catalog
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  disabled={!client.loadCatalogSnapshot}
+                  onChange={event => void loadCatalogSnapshot(event.currentTarget.files)}
+                />
+              </label>
+            </div>
+            {catalogActionMessage && <p className="studio-status">{catalogActionMessage}</p>}
+            <DiagnosticArtifactsPanel artifacts={diagnosticArtifacts} />
           </section>
           <div className="panel-grid">
             {state.palette.groups.map(group => (
               <section className="studio-panel" key={group.category}>
                 <h2>{group.category}</h2>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Entry</th>
-                      <th>Shape</th>
-                      <th>Visual</th>
-                      <th>Warnings</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.items.map(item => (
-                      <tr key={item.catalogEntryId}>
-                        <td>{item.catalogEntryId}</td>
-                        <td>{item.shape}</td>
-                        <td>{item.visualMode}</td>
-                        <td>{item.warningCount}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="catalog-tree" role="list">
+                  {group.items.map(item => (
+                    <article className="catalog-tree-item" key={item.catalogEntryId} role="listitem">
+                      <div className="catalog-entry-cell">
+                        <span className="catalog-entry-id" title={item.catalogEntryId}>{item.catalogEntryId}</span>
+                        <button
+                          type="button"
+                          className="catalog-remove-button"
+                          disabled={!client.removeCatalogEntry}
+                          aria-label={`Remove ${item.catalogEntryId} from catalog`}
+                          title="Remove from catalog"
+                          onClick={() => void removeCatalogEntry(item.catalogEntryId)}
+                        >
+                          X
+                        </button>
+                      </div>
+                      <dl className="catalog-entry-properties">
+                        <div>
+                          <dt>Shape</dt>
+                          <dd>{item.shape}</dd>
+                        </div>
+                        <div>
+                          <dt>Visual</dt>
+                          <dd>{item.visualMode}</dd>
+                        </div>
+                        <div>
+                          <dt>Warnings</dt>
+                          <dd>{item.warningCount}</dd>
+                        </div>
+                      </dl>
+                    </article>
+                  ))}
+                </div>
               </section>
             ))}
           </div>
@@ -288,6 +383,27 @@ export async function toAdmissionDraft(file: File): Promise<StudioComponentArtif
     return { fileName: file.name, artifactBase64: await fileToBase64(file) };
   }
   return { fileName: file.name };
+}
+
+/**
+ * Browser adapter: downloads Studio snapshot objects as formatted JSON.
+ */
+function downloadJson(fileName: string, value: unknown) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Filename normalizer: keeps tenant ids readable while avoiding path characters
+ * in generated snapshot file names.
+ */
+function safeFilePart(value: string) {
+  return value.trim().replace(/[^a-zA-Z0-9._-]+/g, "-") || "tenant-local";
 }
 
 /**

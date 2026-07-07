@@ -947,13 +947,24 @@ catalog, trust, or version constraints.
 The initial API can be HTTP or service methods. The boundary is stable either
 way.
 
+Studio may expose save/load controls for portable JSON snapshots, but the browser
+must route those operations through Fabric. Catalog snapshots are tenant-scoped
+catalog read-model state. Assembly snapshots are tenant/assembly-scoped workspace
+state containing the assembly summary, saved layout, and draft sessions. Loading a
+snapshot must call Fabric so the route tenant/assembly remain authoritative and
+subsequent edits still flow through governed DCP intent validation.
+
 HTTP-shaped version:
 
 ```text
 GET  /studio/tenants/{tenantId}/catalog
+GET  /studio/tenants/{tenantId}/catalog/snapshot
+POST /studio/tenants/{tenantId}/catalog/snapshot
 GET  /studio/tenants/{tenantId}/catalog/{entryId}/visual
 GET  /studio/tenants/{tenantId}/assemblies
 POST /studio/tenants/{tenantId}/assemblies
+GET  /studio/tenants/{tenantId}/assemblies/{assemblyId}/snapshot
+POST /studio/tenants/{tenantId}/assemblies/{assemblyId}/snapshot
 POST /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions
 POST /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions/{id}/intents
 GET  /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions/{id}
@@ -965,9 +976,13 @@ Service-method version:
 
 ```text
 listCatalogVisuals(tenantId)
+saveCatalogSnapshot(tenantId)
+loadCatalogSnapshot(tenantId, snapshot)
 getCatalogVisual(tenantId, entryId)
 listAssemblies(tenantId)
 createAssembly(tenantId, request)
+saveAssemblySnapshot(tenantId, assemblyId)
+loadAssemblySnapshot(tenantId, assemblyId, snapshot)
 createDraftComposition(tenantId, assemblyId, request)
 applyIntent(tenantId, assemblyId, sessionId, intent)
 getDraftSession(tenantId, assemblyId, sessionId)

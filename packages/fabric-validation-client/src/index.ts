@@ -96,6 +96,11 @@ export type ListCatalogVisualsRequest = {
   readonly tenantId?: string;
 };
 
+export type RemoveCatalogEntryRequest = {
+  readonly tenantId?: string;
+  readonly catalogEntryId: string;
+};
+
 export type StudioComponentArtifactDraft = {
   readonly fileName: string;
   readonly sha256?: string;
@@ -133,6 +138,30 @@ export type AdmitCatalogArtifactsResponse = {
   readonly catalog: ListCatalogVisualsResponse;
   readonly claimBundleArtifact?: StudioExportArtifact;
   readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
+};
+
+export type RemoveCatalogEntryResponse = {
+  readonly tenantId: string;
+  readonly catalogEntryId: string;
+  readonly status: "REMOVED" | string;
+  readonly catalog: ListCatalogVisualsResponse;
+  readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
+};
+
+export type StudioCatalogSnapshot = {
+  readonly tenantId: string;
+  readonly catalogHash: string;
+  readonly entries: readonly VisualCatalogEntry[];
+  readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
+};
+
+export type SaveCatalogSnapshotRequest = {
+  readonly tenantId?: string;
+};
+
+export type LoadCatalogSnapshotRequest = {
+  readonly tenantId?: string;
+  readonly snapshot: StudioCatalogSnapshot;
 };
 
 export type ExtractNeedsRequest = {
@@ -197,6 +226,26 @@ export type SaveDraftResponse = {
   readonly assembly: StudioAssemblySummary;
   readonly warnings: readonly string[];
   readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
+};
+
+export type StudioAssemblySnapshot = {
+  readonly tenantId: string;
+  readonly assemblyId: string;
+  readonly assembly: StudioAssemblySummary;
+  readonly layout: StudioLayoutState;
+  readonly sessions: readonly StudioDraftSession[];
+  readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
+};
+
+export type SaveAssemblySnapshotRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+};
+
+export type LoadAssemblySnapshotRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly snapshot: StudioAssemblySnapshot;
 };
 
 export type StudioLayoutState = {
@@ -574,10 +623,15 @@ export type StudioScoreBreakdown = {
 export interface StudioFabricClient {
   readonly listCatalogVisuals: (request?: ListCatalogVisualsRequest) => Promise<ListCatalogVisualsResponse>;
   readonly admitCatalogArtifacts?: (request: AdmitCatalogArtifactsRequest) => Promise<AdmitCatalogArtifactsResponse>;
+  readonly removeCatalogEntry?: (request: RemoveCatalogEntryRequest) => Promise<RemoveCatalogEntryResponse>;
+  readonly saveCatalogSnapshot?: (request?: SaveCatalogSnapshotRequest) => Promise<StudioCatalogSnapshot>;
+  readonly loadCatalogSnapshot?: (request: LoadCatalogSnapshotRequest) => Promise<ListCatalogVisualsResponse>;
   readonly extractNeeds?: (request: ExtractNeedsRequest) => Promise<ExtractNeedsResponse>;
   readonly listAssemblies?: (request?: ListAssembliesRequest) => Promise<ListAssembliesResponse>;
   readonly createAssembly?: (request: CreateAssemblyRequest) => Promise<StudioAssemblySummary>;
   readonly saveDraft?: (request: SaveDraftRequest) => Promise<SaveDraftResponse>;
+  readonly saveAssemblySnapshot?: (request?: SaveAssemblySnapshotRequest) => Promise<StudioAssemblySnapshot>;
+  readonly loadAssemblySnapshot?: (request: LoadAssemblySnapshotRequest) => Promise<StudioAssemblySnapshot>;
   readonly loadLayoutState?: (request?: LoadLayoutStateRequest) => Promise<StudioLayoutState>;
   readonly saveLayoutState?: (request: SaveLayoutStateRequest) => Promise<StudioLayoutState>;
   readonly loadDynamicDcpProjection?: (request?: DynamicDcpProjectionRequest) => Promise<DynamicDcpProjectionResponse>;

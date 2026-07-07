@@ -7,6 +7,7 @@ import {
   type DeploymentPolicyDraft,
   type DeploymentShape,
   type StudioSessionEvent,
+  type StudioAssemblySnapshot,
   type StudioReplacementCandidate as FabricReplacementCandidate,
   type StudioLayoutState,
   type StudioFabricClient,
@@ -28,6 +29,7 @@ import {
   type DeploymentPlannerState
 } from "./deploymentPlanner.js";
 import { buildSigningHandoff } from "./signingHandoff.js";
+import { createIntentHistory } from "./intentHistory.js";
 import { DiagnosticArtifactsPanel } from "./DiagnosticArtifactsPanel.js";
 import { AuthoringConversationPanel } from "./AuthoringConversationPanel.js";
 import { SemanticZoomNavigator } from "./SemanticZoomNavigator.js";
@@ -47,6 +49,8 @@ export type DraftWorkspacePanelProps = {
   readonly client: Pick<
     StudioFabricClient,
     "saveDraft" |
+    "saveAssemblySnapshot" |
+    "loadAssemblySnapshot" |
     "loadLayoutState" |
     "saveLayoutState" |
     "loadDynamicDcpProjection" |
@@ -466,6 +470,55 @@ export function DraftWorkspacePanel({
       setSaveDraftStatus(`Draft saved for ${saveDeploymentTarget} using ${saveDeploymentShape}.`);
     }
     setSaveDraftOpen(false);
+  }
+
+  /**
+   * Command handler: downloads a Fabric-authored assembly workspace snapshot so
+   * operators can move or archive Studio state without serializing scene truth in
+   * the browser.
+   */
+  async function saveAssemblySnapshot() {
+    if (!client.saveAssemblySnapshot) {
+      setSaveDraftStatus("Assembly snapshot save is not available from this client.");
+      return;
+    }
+    const snapshot = await client.saveAssemblySnapshot({
+      tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
+      assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID
+    });
+    downloadJson(`assembly-${safeFilePart(snapshot.tenantId)}-${safeFilePart(snapshot.assemblyId)}.json`, snapshot);
+    setSaveDraftStatus(`Assembly snapshot saved for ${snapshot.assemblyId}.`);
+  }
+
+  /**
+   * Command handler: loads a portable assembly snapshot through Fabric, then
+   * applies the returned layout and active draft session to the workspace view.
+   */
+  async function loadAssemblySnapshot(files: FileList | null) {
+    if (!client.loadAssemblySnapshot) {
+      setSaveDraftStatus("Assembly snapshot load is not available from this client.");
+      return;
+    }
+    const file = files?.[0];
+    if (!file) {
+      return;
+    }
+    const input = JSON.parse(await file.text()) as StudioAssemblySnapshot;
+    const snapshot = await client.loadAssemblySnapshot({
+      tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
+      assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID,
+      snapshot: input
+    });
+    applyLayoutState(toLayoutState(snapshot.layout));
+    if (snapshot.sessions[0]) {
+      setState({
+        status: "READY",
+        session: snapshot.sessions[0],
+        history: createIntentHistory(snapshot.sessions[0].sceneRevision)
+      });
+      setDraftComponents(draftComponentsFromSession(snapshot.sessions[0]));
+    }
+    setSaveDraftStatus(`Assembly snapshot loaded for ${snapshot.assemblyId}.`);
   }
 
   /**
@@ -1238,6 +1291,20 @@ export function DraftWorkspacePanel({
             </section>
           )}
           {saveDraftStatus && <p className="live-data-notice">{saveDraftStatus}</p>}
+          <div className="button-row">
+            <button type="button" className="secondary" disabled={!client.saveAssemblySnapshot} onClick={() => void saveAssemblySnapshot()}>
+              Save Assembly
+            </button>
+            <label className="file-action-button">
+              Load Assembly
+              <input
+                type="file"
+                accept="application/json,.json"
+                disabled={!client.loadAssemblySnapshot}
+                onChange={event => void loadAssemblySnapshot(event.currentTarget.files)}
+              />
+            </label>
+          </div>
           <div className="stage-toolbar" aria-label="Workbench tools">
             {["Select", "Move", "Rotate", "Pan", "Zoom", "Isolate", "Hide", "Show All", "Connections", "Measure", "Reset View"].map(tool => (
               <button type="button" className={tool === "Select" ? "tool-button active" : "tool-button"} key={tool}>
@@ -2694,6 +2761,43 @@ function shortSubstrateLabel(label: string): string {
     return words.slice(0, 2).map(word => word.charAt(0).toUpperCase()).join("");
   }
   return label.slice(0, 2).toUpperCase() || "S";
+}
+
+/**
+ * Browser adapter: downloads Studio snapshot objects as formatted JSON.
+ */
+function downloadJson(fileName: string, value: unknown) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Filename normalizer: keeps tenant and assembly ids readable while avoiding
+ * path characters in generated snapshot file names.
+ */
+function safeFilePart(value: string) {
+  return value.trim().replace(/[^a-zA-Z0-9._-]+/g, "-") || "studio";
+}
+
+/**
+ * Projector: rebuilds the local draft inventory chips from Fabric's restored
+ * intent log after an assembly snapshot load.
+ */
+function draftComponentsFromSession(session: StudioAssemblySnapshot["sessions"][number]): readonly DraftComponentItem[] {
+  const components = (session.intentLog ?? [])
+    .filter(intent => intent.type === "ADD_COMPONENT")
+    .map(intent => String(intent.payload.catalogEntryId ?? ""))
+    .filter(Boolean);
+  return components.map(catalogEntryId => ({
+    catalogEntryId,
+    label: labelForCatalogEntry(catalogEntryId),
+    status: "VALIDATED" as const
+  }));
 }
 
 const projectionSurfaceNodeIds: Partial<Record<ThreeAssemblySurfaceId, string>> = {

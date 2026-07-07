@@ -105,6 +105,83 @@ describe("mock Studio API contract", () => {
     assert.ok(catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.jar"));
   });
 
+  it("removes entries from the mock catalog", async () => {
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: createMockStudioApiFetch()
+    });
+    const before = await client.listCatalogVisuals();
+    const removedEntry = before.entries[0]?.catalogEntryId ?? "";
+
+    const removal = await client.removeCatalogEntry?.({ catalogEntryId: removedEntry });
+    const after = await client.listCatalogVisuals();
+
+    assert.equal(removal?.status, "REMOVED");
+    assert.equal(removal?.catalogEntryId, removedEntry);
+    assert.ok(!removal?.catalog.entries.some(entry => entry.catalogEntryId === removedEntry));
+    assert.ok(!after.entries.some(entry => entry.catalogEntryId === removedEntry));
+  });
+
+  it("saves and loads mock catalog snapshots", async () => {
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: createMockStudioApiFetch()
+    });
+    const snapshot = await client.saveCatalogSnapshot?.();
+
+    const loaded = await client.loadCatalogSnapshot?.({
+      snapshot: {
+        tenantId: snapshot?.tenantId ?? "tenant-local",
+        catalogHash: "sha256:loaded",
+        entries: []
+      }
+    });
+    const after = await client.listCatalogVisuals();
+
+    assert.equal(snapshot?.catalogHash, "sha256:catalog");
+    assert.equal(loaded?.entries.length, 0);
+    assert.equal(after.entries.length, 0);
+  });
+
+  it("saves and loads mock assembly snapshots", async () => {
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      fetch: createMockStudioApiFetch()
+    });
+
+    const snapshot = await client.saveAssemblySnapshot?.();
+    const loaded = await client.loadAssemblySnapshot?.({
+      snapshot: {
+        tenantId: "tenant-import",
+        assemblyId: "assembly-import",
+        assembly: snapshot?.assembly ?? {
+          tenantId: "tenant-local",
+          assemblyId: "assembly-demo",
+          targetApplicationName: "Demo",
+          defaultDeploymentTarget: "",
+          needsId: "",
+          deploymentShape: "CONTAINERIZED_SERVICE",
+          currentCandidateId: "",
+          sceneRevision: 0
+        },
+        layout: snapshot?.layout ?? {
+          tenantId: "tenant-local",
+          assemblyId: "assembly-demo",
+          activeView: "Assembly",
+          semanticZoomLevel: "ASSEMBLY_DCP",
+          selectedSurface: "validation",
+          camera: {},
+          annotations: []
+        },
+        sessions: []
+      }
+    });
+
+    assert.equal(snapshot?.assemblyId, studioApiExampleSession.assemblyId);
+    assert.equal(loaded?.tenantId, studioApiExampleSession.tenantId);
+    assert.equal(loaded?.assemblyId, studioApiExampleSession.assemblyId);
+  });
+
   it("returns DCP diagnostics for filename-only catalog admission drafts", async () => {
     const client = createHttpStudioFabricClient({
       baseUrl: "http://fabric.local",
