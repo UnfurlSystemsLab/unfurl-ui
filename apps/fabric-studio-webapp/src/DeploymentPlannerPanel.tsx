@@ -20,13 +20,27 @@ import { DiagnosticArtifactsPanel } from "./DiagnosticArtifactsPanel.js";
 
 export type DeploymentPlannerPanelProps = {
   readonly client: Pick<StudioFabricClient, "resolveDeployment">;
+  readonly initialTenantId?: string;
+  readonly initialAssemblyId?: string;
+  readonly initialSessionId?: string;
+  readonly initialNeedsId?: string;
+  readonly initialNeedsYaml?: string;
   readonly initialCatalogPath?: string;
   readonly initialAssemblyPath?: string;
   readonly initialPlannerState?: DeploymentPlannerState | undefined;
 };
 
+/**
+ * Panel component: resolves deployment shapes either from a Studio draft session
+ * or from filesystem catalog/needs paths for debug launches.
+ */
 export function DeploymentPlannerPanel({
   client,
+  initialTenantId = "",
+  initialAssemblyId = "",
+  initialSessionId = "",
+  initialNeedsId = "",
+  initialNeedsYaml = "",
   initialCatalogPath = "",
   initialAssemblyPath = "",
   initialPlannerState
@@ -44,6 +58,9 @@ export function DeploymentPlannerPanel({
   const [busy, setBusy] = useState(false);
   const policy = useMemo(() => deploymentPolicyFromPlannerState(planner), [planner]);
   const view = useMemo(() => buildDeploymentPlannerView(planner, response), [planner, response]);
+  const sessionBacked = initialTenantId.trim() !== ""
+    && initialAssemblyId.trim() !== ""
+    && initialSessionId.trim() !== "";
 
   async function resolve() {
     if (!client.resolveDeployment) {
@@ -54,8 +71,18 @@ export function DeploymentPlannerPanel({
     setError(undefined);
     try {
       const resolved = await client.resolveDeployment({
-        catalogPath,
-        needsPath: assemblyPath,
+        ...(sessionBacked
+          ? {
+              tenantId: initialTenantId,
+              assemblyId: initialAssemblyId,
+              sessionId: initialSessionId,
+              ...(initialNeedsId.trim() === "" ? {} : { needsId: initialNeedsId.trim() }),
+              ...(initialNeedsYaml.trim() === "" ? {} : { needsYaml: initialNeedsYaml })
+            }
+          : {
+              catalogPath,
+              needsPath: assemblyPath
+            }),
         ...(candidateId.trim() === "" ? {} : { candidateId: candidateId.trim() }),
         autoSelectBest,
         deploymentPolicy: policy
@@ -90,14 +117,24 @@ export function DeploymentPlannerPanel({
 
       <section className="studio-panel">
         <h2>Inputs</h2>
-        <label>
-          Catalog directory
-          <input value={catalogPath} onChange={event => setCatalogPath(event.target.value)} />
-        </label>
-        <label>
-          Assembly YAML path
-          <input value={assemblyPath} onChange={event => setAssemblyPath(event.target.value)} />
-        </label>
+        {sessionBacked ? (
+          <div className="summary-list">
+            <span>Tenant {initialTenantId}</span>
+            <span>Assembly {initialAssemblyId}</span>
+            <span>Session {initialSessionId}</span>
+          </div>
+        ) : (
+          <>
+            <label>
+              Catalog directory
+              <input value={catalogPath} onChange={event => setCatalogPath(event.target.value)} />
+            </label>
+            <label>
+              Assembly YAML path
+              <input value={assemblyPath} onChange={event => setAssemblyPath(event.target.value)} />
+            </label>
+          </>
+        )}
         <label>
           Candidate ID
           <input value={candidateId} onChange={event => setCandidateId(event.target.value)} />

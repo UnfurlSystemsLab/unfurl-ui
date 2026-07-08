@@ -134,6 +134,10 @@ function VisualDiffRoute() {
   return <VisualDiffPanel />;
 }
 
+/**
+ * Route adapter: hydrates the deployment planner from URL parameters, preferring
+ * Studio session identifiers over filesystem debug paths.
+ */
 function DeploymentPlannerRoute() {
   const client = useStudioClient();
   const [searchParams] = useSearchParams();
@@ -148,6 +152,10 @@ function DeploymentPlannerRoute() {
   return (
     <DeploymentPlannerPanel
       client={client}
+      initialTenantId={searchParams.get("tenantId") ?? ""}
+      initialAssemblyId={searchParams.get("assemblyId") ?? ""}
+      initialSessionId={searchParams.get("sessionId") ?? ""}
+      initialNeedsId={searchParams.get("needsId") ?? ""}
       initialCatalogPath={searchParams.get("catalogPath") ?? ""}
       initialAssemblyPath={searchParams.get("needsPath") ?? searchParams.get("assemblyPath") ?? ""}
       initialPlannerState={initialPlannerState}

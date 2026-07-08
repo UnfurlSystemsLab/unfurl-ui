@@ -545,6 +545,8 @@ export type ResolveDeploymentRequest = {
   readonly sessionId?: string;
   readonly candidateId?: string;
   readonly baseCatalogHash?: string;
+  readonly needsId?: string;
+  readonly needsYaml?: string;
   readonly catalogPath?: string;
   readonly needsPath?: string;
   readonly autoSelectBest?: boolean;

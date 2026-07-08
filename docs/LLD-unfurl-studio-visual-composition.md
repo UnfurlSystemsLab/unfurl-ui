@@ -1004,6 +1004,7 @@ loadAssemblySnapshot(tenantId, assemblyId, snapshot)
 createDraftComposition(tenantId, assemblyId, request)
 applyIntent(tenantId, assemblyId, sessionId, intent)
 getDraftSession(tenantId, assemblyId, sessionId)
+resolveDeployment(tenantId, assemblyId, sessionId)
 compileCandidate(tenantId, assemblyId, sessionId)
 getVisualAsset(tenantId, assetId)
 ```
@@ -1015,7 +1016,8 @@ API rules:
 3. Intent responses include revision information.
 4. Compile/export uses the current validated assembly session revision.
 5. Catalog visuals include visual integrity metadata.
-6. API errors must be renderable in both 3D/2D views and table view.
+6. Deployment planning uses the tenant session/catalog state by default; filesystem catalog/needs paths are a debug-only mode.
+7. API errors must be renderable in both 3D/2D views and table view.
 
 ---
 
@@ -1051,6 +1053,7 @@ compile current validated candidate
 export CompositionContract
 export SubstrateProfile
 invoke or hand off to Fabric signing
+download hash-pinned export artifact bytes from Fabric-issued URLs
 show DecisionAudit and visual diff from prior revision
 ```
 
