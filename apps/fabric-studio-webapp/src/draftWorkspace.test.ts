@@ -151,6 +151,21 @@ describe("draft workspace", () => {
     assert.equal(state.status === "READY" ? state.history.records.length : undefined, 0);
   });
 
+  it("keeps the ready draft session retryable when an intent transport fails", async () => {
+    const client = fakeClient({
+      session: session({ sceneRevision: 7 }),
+      intentError: new Error("socket hang up")
+    });
+    const created = await createDraftWorkspace(client, { baseCatalogHash: "sha256:catalog" });
+
+    const state = await applyDraftIntent(client, created, connectCommand());
+
+    assert.equal(state.status, "READY");
+    assert.equal(state.status === "READY" ? state.session.sceneRevision : undefined, 7);
+    assert.equal(state.status === "READY" ? currentRevision(state.history) : undefined, 7);
+    assert.match(state.status === "READY" ? state.lastError ?? "" : "", /socket hang up/);
+  });
+
   it("compiles the current validated session revision through Fabric", async () => {
     const calls: unknown[] = [];
     const client = fakeClient({
@@ -198,6 +213,21 @@ describe("draft workspace", () => {
     assert.equal(state.status === "READY" ? currentRevision(state.history) : undefined, 9);
     assert.equal(state.status === "READY" ? state.lastCompile?.status : undefined, "STALE_REVISION");
   });
+
+  it("keeps the ready draft session retryable when compile transport fails", async () => {
+    const client = fakeClient({
+      session: session({ sceneRevision: 7 }),
+      compileError: new Error("Fabric Studio API timed out after 5 ms")
+    });
+    const created = await createDraftWorkspace(client, { baseCatalogHash: "sha256:catalog" });
+
+    const state = await compileDraftWorkspace(client, created);
+
+    assert.equal(state.status, "READY");
+    assert.equal(state.status === "READY" ? state.session.sceneRevision : undefined, 7);
+    assert.equal(state.status === "READY" ? currentRevision(state.history) : undefined, 7);
+    assert.match(state.status === "READY" ? state.lastError ?? "" : "", /timed out/);
+  });
 });
 
 function connectCommand(): DraftIntentCommand {
@@ -222,10 +252,15 @@ function session(overrides: { readonly sceneRevision: number; readonly currentCa
     : { ...base, currentCandidateId: overrides.currentCandidateId };
 }
 
+/**
+ * Test double factory: simulates the StudioFabricClient draft/session methods needed by the
+ * reducer tests, including transport failures that should remain retryable.
+ */
 function fakeClient(options: {
   readonly session: StudioDraftSession;
   readonly refreshedSession?: StudioDraftSession;
   readonly intentResponse?: IntentResponse;
+  readonly intentError?: Error;
   readonly compileResponse?: ReturnType<typeof compiled> | {
     readonly status: "STALE_REVISION";
     readonly expectedRevision: number;
@@ -235,6 +270,7 @@ function fakeClient(options: {
     readonly reason: string;
     readonly details: string;
   };
+  readonly compileError?: Error;
   readonly calls?: unknown[];
 }): StudioFabricClient {
   return {
@@ -253,6 +289,9 @@ function fakeClient(options: {
     getDraftSession: async () => options.refreshedSession ?? options.session,
     applyIntent: async intent => {
       options.calls?.push(intent);
+      if (options.intentError) {
+        throw options.intentError;
+      }
       return options.intentResponse ?? {
         status: "VALID",
         newRevision: intent.baseRevision + 1,
@@ -262,6 +301,9 @@ function fakeClient(options: {
     },
     compileCandidate: async request => {
       options.calls?.push(request);
+      if (options.compileError) {
+        throw options.compileError;
+      }
       return options.compileResponse ?? compiled();
     },
     getVisualAsset: async assetId => ({

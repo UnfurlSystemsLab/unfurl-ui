@@ -52,6 +52,7 @@ export type DraftWorkspaceState =
       readonly history: GovernedIntentHistory;
       readonly lastResponse?: IntentResponse;
       readonly lastCompile?: CompileDraftCandidateResponse;
+      readonly lastError?: string;
     }
   | {
       readonly status: "FAILED";
@@ -64,10 +65,20 @@ export type CompileDraftWorkspaceOptions = {
   readonly deploymentPolicy?: DeploymentPolicyDraft;
 };
 
+type ReadyDraftWorkspaceState = Extract<DraftWorkspaceState, { readonly status: "READY" }>;
+
+/**
+ * Factory: creates an initial loading state for callers that want to optimistically render draft
+ * creation while Fabric allocates the governed session.
+ */
 export function loadingDraftWorkspace(request: CreateDraftCompositionRequest): DraftWorkspaceState {
   return { status: "LOADING", request };
 }
 
+/**
+ * State-machine command: asks Fabric to create a governed draft composition session. A creation
+ * failure has no existing session to preserve, so it remains a terminal FAILED state.
+ */
 export async function createDraftWorkspace(
   client: Pick<StudioFabricClient, "createDraftComposition">,
   request: CreateDraftCompositionRequest
@@ -88,6 +99,10 @@ export async function createDraftWorkspace(
   }
 }
 
+/**
+ * State-machine command: applies a semantic draft intent through Fabric validation. Transport
+ * failures are recorded as transient errors while preserving the ready session for operator retry.
+ */
 export async function applyDraftIntent(
   client: Pick<StudioFabricClient, "applyIntent" | "getDraftSession">,
   state: DraftWorkspaceState,
@@ -122,17 +137,21 @@ export async function applyDraftIntent(
     }
 
     return {
-      ...state,
+      ...clearTransientError(state),
       lastResponse: response
     };
   } catch (error) {
     return {
-      status: "FAILED",
-      message: errorMessage(error)
+      ...clearTransientError(state),
+      lastError: errorMessage(error)
     };
   }
 }
 
+/**
+ * State-machine command: compiles the current validated candidate at the recorded revision.
+ * Backend/proxy failures stay retryable and do not drop the active draft session.
+ */
 export async function compileDraftWorkspace(
   client: Pick<StudioFabricClient, "compileCandidate" | "getDraftSession">,
   state: DraftWorkspaceState,
@@ -167,17 +186,20 @@ export async function compileDraftWorkspace(
     }
 
     return {
-      ...state,
+      ...clearTransientError(state),
       lastCompile: response
     };
   } catch (error) {
     return {
-      status: "FAILED",
-      message: errorMessage(error)
+      ...clearTransientError(state),
+      lastError: errorMessage(error)
     };
   }
 }
 
+/**
+ * Adapter: converts UI draft commands into the revisioned Fabric Studio intent DTO.
+ */
 function toStudioIntent(session: StudioDraftSession, baseRevision: number, command: DraftIntentCommand): StudioIntent {
   const scope = {
     tenantId: session.tenantId,
@@ -210,6 +232,9 @@ function toStudioIntent(session: StudioDraftSession, baseRevision: number, comma
   }
 }
 
+/**
+ * Reference builder: keeps follow-up session refresh calls scoped to the same tenant/assembly.
+ */
 function sessionRef(session: StudioDraftSession) {
   return {
     tenantId: session.tenantId,
@@ -218,6 +243,17 @@ function sessionRef(session: StudioDraftSession) {
   };
 }
 
+/**
+ * State helper: removes stale transient faults before recording a fresh Fabric response.
+ */
+function clearTransientError(state: ReadyDraftWorkspaceState): ReadyDraftWorkspaceState {
+  const { lastError: _lastError, ...ready } = state;
+  return ready;
+}
+
+/**
+ * Error adapter: turns unknown thrown values into stable draft-state copy.
+ */
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim() !== "") {
     return error.message;

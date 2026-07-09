@@ -1018,6 +1018,9 @@ API rules:
 5. Catalog visuals include visual integrity metadata.
 6. Deployment planning uses the tenant session/catalog state by default; filesystem catalog/needs paths are a debug-only mode.
 7. API errors must be renderable in both 3D/2D views and table view.
+8. Client-side Studio API calls must be time-bound. A stalled catalog, candidate,
+   intent, or compile request renders as a transient error and must not discard an
+   already-ready draft session.
 
 ---
 

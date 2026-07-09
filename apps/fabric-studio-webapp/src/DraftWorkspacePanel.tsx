@@ -426,6 +426,7 @@ export function DraftWorkspacePanel({
    */
   async function create() {
     setBusy(true);
+    setCatalogError(undefined);
     try {
       setState(await createDraftWorkspace(client, {
         tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
@@ -528,7 +529,7 @@ export function DraftWorkspacePanel({
    * accepted draft component into local inventory for selection continuity.
    */
   async function addComponent(entryId = catalogEntryId) {
-    if (!state) {
+    if (state?.status !== "READY") {
       return;
     }
     if (!knownCatalogEntryIds.has(entryId)) {
@@ -538,6 +539,7 @@ export function DraftWorkspacePanel({
       return;
     }
     setBusy(true);
+    setCatalogError(undefined);
     try {
       setCatalogEntryId(entryId);
       const next = await applyDraftIntent(client, state, { type: "ADD_COMPONENT", catalogEntryId: entryId });
@@ -564,10 +566,11 @@ export function DraftWorkspacePanel({
    * validated target port, surfacing partial success if the component has no offer to connect.
    */
   async function addComponentAndConnect(entryId: string, targetPortId: string) {
-    if (!state) {
+    if (state?.status !== "READY") {
       return;
     }
     setBusy(true);
+    setCatalogError(undefined);
     try {
       const added = await applyDraftIntent(client, state, { type: "ADD_COMPONENT", catalogEntryId: entryId });
       if (added.status !== "READY") {
@@ -673,7 +676,7 @@ export function DraftWorkspacePanel({
    * so the scene reflects that the connection has been validated.
    */
   async function connectPorts() {
-    if (!state) {
+    if (state?.status !== "READY") {
       return;
     }
     setBusy(true);
@@ -694,7 +697,7 @@ export function DraftWorkspacePanel({
    * planner state; UI state is updated only with Fabric's response.
    */
   async function compile() {
-    if (!state) {
+    if (state?.status !== "READY") {
       return;
     }
     setBusy(true);
@@ -1248,6 +1251,9 @@ export function DraftWorkspacePanel({
                 ? "Live catalog unavailable; showing generated fallback."
                 : "Live catalog unavailable."}
             </p>
+          )}
+          {state?.status === "READY" && state.lastError && (
+            <p className="studio-error">{friendlyStudioError(state.lastError)}</p>
           )}
           {!catalogError && paletteEntries.length === 0 && (
             <p className="live-data-notice">No catalog entries available for this tenant.</p>
@@ -1965,6 +1971,7 @@ export function DraftWorkspacePanel({
               <li>Substrate target reachable</li>
               <li>Isolation policy satisfied</li>
             </ul>
+            {state?.status === "READY" && state.lastError && <p className="studio-error">{friendlyStudioError(state.lastError)}</p>}
             {state?.status === "FAILED" && <p className="studio-error">{state.message}</p>}
           </section>
         </aside>
@@ -1993,7 +2000,7 @@ export function DraftWorkspacePanel({
         </div>
         <div>
           <strong>Validation</strong>
-          <span>{state?.status === "READY" ? state.lastResponse?.status ?? "all validations passed" : "waiting for draft"}</span>
+          <span>{state?.status === "READY" ? state.lastError ? "transient error" : state.lastResponse?.status ?? "all validations passed" : "waiting for draft"}</span>
         </div>
         <div>
           <strong>Handoff</strong>
@@ -2154,6 +2161,12 @@ function shouldShowTutorial(): boolean {
 function friendlyStudioError(message: string): string {
   if (/HTTP\s+5\d\d|Internal Server Error/i.test(message)) {
     return "Fabric projection is temporarily unavailable. The workbench is showing the last available local state.";
+  }
+  if (/timed out|timeout|AbortError/i.test(message)) {
+    return "Fabric Studio request timed out. The draft session is still active; retry the action.";
+  }
+  if (/socket hang up|ECONNRESET/i.test(message)) {
+    return "Fabric Studio connection dropped. The draft session is still active; retry the action.";
   }
   if (/Failed to fetch|ECONNREFUSED|NetworkError/i.test(message)) {
     return "Fabric projection cannot be reached. Check that the local Fabric service is running.";

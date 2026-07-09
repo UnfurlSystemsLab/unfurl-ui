@@ -712,6 +712,21 @@ describe("HTTP Studio Fabric client", () => {
       /Fabric Studio API failed: GET \/studio\/tenants\/tenant-local\/catalog HTTP 409 Conflict/
     );
   });
+
+  it("times out stalled Studio API calls", async () => {
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      requestTimeoutMs: 5,
+      fetch: async () => new Promise<never>(() => {
+        // Intentionally unresolved: verifies the client releases UI callers when a transport stalls.
+      })
+    });
+
+    await assert.rejects(
+      () => client.listCatalogVisuals(),
+      /Fabric Studio API timed out after 5 ms/
+    );
+  });
 });
 
 type FetchCall = {

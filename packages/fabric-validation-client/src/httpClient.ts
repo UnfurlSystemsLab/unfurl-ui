@@ -60,8 +60,11 @@ export type FetchLike = (
     readonly method?: string;
     readonly headers?: Record<string, string>;
     readonly body?: string;
+    readonly signal?: AbortSignal;
   }
 ) => Promise<FetchResponseLike>;
+
+export const DEFAULT_STUDIO_REQUEST_TIMEOUT_MS = 30_000;
 
 export type HttpStudioFabricClientOptions = {
   readonly baseUrl: string;
@@ -70,6 +73,7 @@ export type HttpStudioFabricClientOptions = {
   readonly defaultAssemblyId?: string;
   readonly userId?: string;
   readonly tenantMemberships?: readonly string[];
+  readonly requestTimeoutMs?: number;
 };
 
 type HttpStudioAuthContext = {
@@ -77,11 +81,16 @@ type HttpStudioAuthContext = {
   readonly tenantMemberships?: readonly string[];
 };
 
+/**
+ * Factory: builds the HTTP Adapter for Fabric Studio routes, including tenant headers and a
+ * request timeout guard so stalled backend/proxy calls become visible UI errors.
+ */
 export function createHttpStudioFabricClient(options: HttpStudioFabricClientOptions): StudioFabricClient {
   const fetchImpl = options.fetch ?? (globalThis.fetch as unknown as FetchLike | undefined);
   if (!fetchImpl) {
     throw new Error("fetch implementation is required");
   }
+  const guardedFetch = createTimeoutFetch(fetchImpl, normalizeRequestTimeoutMs(options.requestTimeoutMs));
   const baseUrl = normalizeBaseUrl(options.baseUrl);
   const defaultScope = {
     tenantId: options.defaultTenantId ?? DEFAULT_STUDIO_TENANT_ID,
@@ -96,7 +105,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     listCatalogVisuals: async body => {
       const tenantId = body?.tenantId ?? defaultScope.tenantId;
       return request<ListCatalogVisualsResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(tenantId)}/catalog`,
@@ -107,7 +116,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     admitCatalogArtifacts: async body => {
       const scope = resolveScope(defaultScope, body);
       return request<AdmitCatalogArtifactsResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/catalog/admissions`,
@@ -118,7 +127,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     removeCatalogEntry: async body => {
       const tenantId = body.tenantId ?? defaultScope.tenantId;
       return request<RemoveCatalogEntryResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "DELETE",
         `/studio/tenants/${encodeURIComponent(tenantId)}/catalog/${encodeURIComponent(body.catalogEntryId)}`,
@@ -129,7 +138,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     saveCatalogSnapshot: async (body?: SaveCatalogSnapshotRequest) => {
       const tenantId = body?.tenantId ?? defaultScope.tenantId;
       return request<StudioCatalogSnapshot>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(tenantId)}/catalog/snapshot`,
@@ -140,7 +149,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     loadCatalogSnapshot: async (body: LoadCatalogSnapshotRequest) => {
       const tenantId = body.tenantId ?? defaultScope.tenantId;
       return request<ListCatalogVisualsResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(tenantId)}/catalog/snapshot`,
@@ -151,7 +160,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     extractNeeds: async body => {
       const scope = resolveScope(defaultScope, body);
       return request<ExtractNeedsResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/needs/extract`,
@@ -162,7 +171,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     listAssemblies: async body => {
       const tenantId = body?.tenantId ?? defaultScope.tenantId;
       return request<ListAssembliesResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(tenantId)}/assemblies`,
@@ -173,7 +182,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     createAssembly: async body => {
       const tenantId = body.tenantId ?? defaultScope.tenantId;
       return request<StudioAssemblySummary>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(tenantId)}/assemblies`,
@@ -184,7 +193,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     saveDraft: async body => {
       const scope = resolveScope(defaultScope, body);
       return request<SaveDraftResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/drafts/save`,
@@ -195,7 +204,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     saveAssemblySnapshot: async (body?: SaveAssemblySnapshotRequest) => {
       const scope = resolveScope(defaultScope, body ?? {});
       return request<StudioAssemblySnapshot>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/snapshot`,
@@ -206,7 +215,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     loadAssemblySnapshot: async (body: LoadAssemblySnapshotRequest) => {
       const scope = resolveScope(defaultScope, body);
       return request<StudioAssemblySnapshot>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/snapshot`,
@@ -217,7 +226,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     loadLayoutState: async (body?: LoadLayoutStateRequest) => {
       const scope = resolveScope(defaultScope, body ?? {});
       return request<StudioLayoutState>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/layout`,
@@ -228,7 +237,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     saveLayoutState: async (body: SaveLayoutStateRequest) => {
       const scope = resolveScope(defaultScope, body);
       return request<StudioLayoutState>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/layout`,
@@ -239,7 +248,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     loadDynamicDcpProjection: async body => {
       const scope = resolveScope(defaultScope, body ?? {});
       return request<DynamicDcpProjectionResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/dynamic-dcp`,
@@ -251,7 +260,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
       const scope = resolveScope(defaultScope, body);
       const componentNodeId = encodeURIComponent(body.componentNodeId);
       return request<ReplacementCandidatesResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/dynamic-dcp/replacements?componentNodeId=${componentNodeId}`,
@@ -263,7 +272,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
       const scope = resolveScope(defaultScope, body);
       const catalogEntryId = encodeURIComponent(body.catalogEntryId);
       return request<ConnectionCandidatesResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/dynamic-dcp/connection-candidates?catalogEntryId=${catalogEntryId}`,
@@ -272,11 +281,11 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
       );
     },
     loadCompositionView: async (body: LoadCompositionViewRequest) =>
-      request<LoadCompositionViewResponse>(fetchImpl, baseUrl, "POST", "/studio/composition-view", body),
+      request<LoadCompositionViewResponse>(guardedFetch, baseUrl, "POST", "/studio/composition-view", body),
     createDraftComposition: async (body: CreateDraftCompositionRequest) => {
       const scope = resolveScope(defaultScope, body);
       return request<CreateDraftCompositionResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions`,
@@ -288,7 +297,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
       const sessionRef = typeof body === "string" ? { sessionId: body } : body;
       const scope = resolveScope(defaultScope, sessionRef);
       return request<StudioDraftSession>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(sessionRef.sessionId)}`,
@@ -299,7 +308,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     heartbeatCollaborator: async (body: HeartbeatCollaboratorRequest) => {
       const scope = resolveScope(defaultScope, body);
       return request<StudioDraftSession>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/collaborators/heartbeat`,
@@ -317,7 +326,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     },
     applyIntent: async (body: StudioIntent) =>
       request<IntentResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(body.tenantId)}/assemblies/${encodeURIComponent(body.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/intents`,
@@ -327,7 +336,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     compileCandidate: async (body: CompileDraftCandidateRequest) => {
       const scope = resolveScope(defaultScope, body);
       return request<CompileDraftCandidateResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "POST",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/compile`,
@@ -338,7 +347,7 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     converseAuthoring: async (body: AuthoringConverseRequest) => {
       const scope = resolveScope(defaultScope, body);
       return request<AuthoringConverseResponse>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "POST",
         "/studio/authoring/converse",
@@ -347,10 +356,10 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
       );
     },
     resolveDeployment: async (body: ResolveDeploymentRequest) =>
-      request<ResolveDeploymentResponse>(fetchImpl, baseUrl, "POST", "/studio/deployment/resolve", body),
+      request<ResolveDeploymentResponse>(guardedFetch, baseUrl, "POST", "/studio/deployment/resolve", body),
     getVisualAsset: async (assetId: string) =>
       request<StudioVisualAsset>(
-        fetchImpl,
+        guardedFetch,
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(defaultScope.tenantId)}/assets/${encodeURIComponent(assetId)}`,
@@ -360,6 +369,39 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
   };
 }
 
+/**
+ * Adapter: wraps the provided fetch implementation with an AbortController and Promise race so
+ * transports that honor abort and transports that merely stall both release the UI.
+ */
+function createTimeoutFetch(fetchImpl: FetchLike, timeoutMs: number | undefined): FetchLike {
+  if (timeoutMs === undefined) {
+    return fetchImpl;
+  }
+  return async (input, init) => {
+    const controller = new AbortController();
+    const fetchPromise = fetchImpl(input, { ...(init ?? {}), signal: controller.signal });
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        const error = new Error(`Fabric Studio API timed out after ${timeoutMs} ms: ${init?.method ?? "GET"} ${input}`);
+        reject(error);
+        controller.abort(error);
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([fetchPromise, timeoutPromise]);
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+    }
+  };
+}
+
+/**
+ * Transport helper: sends one JSON Studio API request and converts non-2xx responses into
+ * route-scoped errors that panels can render without inspecting raw Response objects.
+ */
 async function request<T>(
   fetchImpl: FetchLike,
   baseUrl: string,
@@ -387,6 +429,29 @@ async function request<T>(
   return response.json() as Promise<T>;
 }
 
+/**
+ * Validation helper: normalizes the client request timeout. Zero disables the guard for callers
+ * that own cancellation externally; negative or non-finite values are configuration errors.
+ */
+function normalizeRequestTimeoutMs(timeoutMs: number | undefined): number | undefined {
+  if (timeoutMs === undefined) {
+    return DEFAULT_STUDIO_REQUEST_TIMEOUT_MS;
+  }
+  if (!Number.isFinite(timeoutMs)) {
+    throw new Error("requestTimeoutMs must be finite");
+  }
+  if (timeoutMs < 0) {
+    throw new Error("requestTimeoutMs must be zero or positive");
+  }
+  if (timeoutMs === 0) {
+    return undefined;
+  }
+  return Math.max(1, Math.trunc(timeoutMs));
+}
+
+/**
+ * Header factory: projects host/user tenant context into the lightweight Studio API headers.
+ */
 function tenantHeaders(
   tenantId: string,
   authContext?: HttpStudioAuthContext
@@ -400,6 +465,9 @@ function tenantHeaders(
   };
 }
 
+/**
+ * URL helper: normalizes the API base URL once so endpoint path builders can concatenate safely.
+ */
 function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim();
   if (trimmed.length === 0) {
@@ -408,6 +476,9 @@ function normalizeBaseUrl(baseUrl: string): string {
   return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
 }
 
+/**
+ * Scope resolver: applies client defaults to optional tenant/assembly request bodies.
+ */
 function resolveScope(
   defaults: { readonly tenantId: string; readonly assemblyId: string },
   body: { readonly tenantId?: string; readonly assemblyId?: string }
