@@ -216,6 +216,7 @@ export function DraftWorkspacePanel({
   const [dynamicProjectionError, setDynamicProjectionError] = useState<string | undefined>();
   const [fabricReplacementCandidates, setFabricReplacementCandidates] = useState<readonly FabricReplacementCandidate[] | undefined>();
   const [replacementCandidateError, setReplacementCandidateError] = useState<string | undefined>();
+  const readySession = state?.status === "READY" ? state.session : undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -243,10 +244,12 @@ export function DraftWorkspacePanel({
       return;
     }
     let cancelled = false;
-    void client.loadDynamicDcpProjection({
+    const projectionRequest = {
       tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
-      assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID
-    }).then(response => {
+      assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID,
+      ...(readySession ? { sessionId: readySession.sessionId } : {})
+    };
+    void client.loadDynamicDcpProjection(projectionRequest).then(response => {
       if (!cancelled) {
         setDynamicProjection(response);
         setDynamicProjectionError(undefined);
@@ -259,7 +262,7 @@ export function DraftWorkspacePanel({
     return () => {
       cancelled = true;
     };
-  }, [client, tenantId, assemblyId]);
+  }, [client, tenantId, assemblyId, readySession?.sessionId, readySession?.sceneRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -313,8 +316,6 @@ export function DraftWorkspacePanel({
       window.clearTimeout(handle);
     };
   }, [client, tenantId, assemblyId, activeView, semanticZoomLevel, selectedComponent]);
-
-  const readySession = state?.status === "READY" ? state.session : undefined;
 
   useEffect(() => {
     if (!readySession || !client.sessionEventsUrl || typeof EventSource === "undefined") {
@@ -1421,16 +1422,11 @@ export function DraftWorkspacePanel({
                   semanticProjection={semanticSceneProjection}
                   requestedSemanticZoomLevel={requestedSemanticZoomLevel}
                   dynamicProjection={displayDynamicProjection}
-                  // Restrict the scene to ONLY render modules for
-                  // components the operator has actually added to the
-                  // draft. Without this filter, the dynamicProjection
-                  // ships the whole catalog (because the backend's
-                  // dynamic-dcp endpoint reads from catalog), so an
-                  // empty draft would render every catalog entry on
-                  // stage — overlapping the "Import or add components"
-                  // empty-assembly overlay. `undefined` ⇒ no filter
-                  // (catalog-browsing preview); empty set ⇒ scene
-                  // shows only the substrate plate.
+                  // Visual guard: draft-session projections should already
+                  // contain only accepted draft components, while catalog
+                  // preview projections still need a local allow-list.
+                  // `undefined` leaves preview mode unfiltered; an empty set
+                  // shows only the substrate plate for an empty draft.
                   draftCatalogEntryIds={draftCatalogEntryIdSet}
                   // Hover-preview highlight sets — undefined when the
                   // operator isn't hovering anything, so the scene

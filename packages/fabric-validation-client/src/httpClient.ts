@@ -247,11 +247,12 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     },
     loadDynamicDcpProjection: async body => {
       const scope = resolveScope(defaultScope, body ?? {});
+      const sessionQuery = body?.sessionId ? `?sessionId=${encodeURIComponent(body.sessionId)}` : "";
       return request<DynamicDcpProjectionResponse>(
         guardedFetch,
         baseUrl,
         "GET",
-        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/dynamic-dcp`,
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/dynamic-dcp${sessionQuery}`,
         undefined,
         tenantHeaders(scope.tenantId, authContext)
       );

@@ -290,6 +290,7 @@ export type SaveLayoutStateRequest = {
 export type DynamicDcpProjectionRequest = {
   readonly tenantId?: string;
   readonly assemblyId?: string;
+  readonly sessionId?: string;
 };
 
 export type DynamicDcpProjectionResponse = {
