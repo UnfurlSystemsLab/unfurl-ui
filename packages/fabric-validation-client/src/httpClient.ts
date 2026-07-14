@@ -41,7 +41,9 @@ import type {
   StudioIntent,
   StudioCatalogSnapshot,
   StudioAssemblySnapshot,
-  StudioVisualAsset
+  StudioVisualAsset,
+  StudioToolCallRequest,
+  StudioToolCallResult
 } from "./index.js";
 
 export const DEFAULT_STUDIO_TENANT_ID = "tenant-local";
@@ -345,6 +347,17 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         tenantHeaders(scope.tenantId, authContext)
       );
     },
+    callStudioTool: async (body: StudioToolCallRequest & { readonly toolName: string }) => {
+      const tenantId = stringFromToolArguments(body.arguments, "tenantId") ?? defaultScope.tenantId;
+      return request<StudioToolCallResult>(
+        guardedFetch,
+        baseUrl,
+        "POST",
+        `/studio/tools/${encodeURIComponent(body.toolName)}`,
+        body,
+        tenantHeaders(tenantId, authContext)
+      );
+    },
     converseAuthoring: async (body: AuthoringConverseRequest) => {
       const scope = resolveScope(defaultScope, body);
       return request<AuthoringConverseResponse>(
@@ -488,4 +501,23 @@ function resolveScope(
     tenantId: body.tenantId ?? defaults.tenantId,
     assemblyId: body.assemblyId ?? defaults.assemblyId
   };
+}
+
+/**
+ * Tool-call helper: reads tenant scope from top-level or nested request arguments
+ * so HTTP tool calls use the same tenant headers as first-class Studio routes.
+ */
+function stringFromToolArguments(argumentsBody: Record<string, unknown> | undefined, key: string): string | undefined {
+  const direct = argumentsBody?.[key];
+  if (typeof direct === "string" && direct.trim().length > 0) {
+    return direct.trim();
+  }
+  const nested = argumentsBody?.request;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    const nestedValue = (nested as Record<string, unknown>)[key];
+    if (typeof nestedValue === "string" && nestedValue.trim().length > 0) {
+      return nestedValue.trim();
+    }
+  }
+  return undefined;
 }

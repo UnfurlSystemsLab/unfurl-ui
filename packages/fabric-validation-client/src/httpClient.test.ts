@@ -725,6 +725,51 @@ describe("HTTP Studio Fabric client", () => {
     ]);
   });
 
+  it("calls Studio tool gateway with route tool name and tenant headers", async () => {
+    const calls: HeaderFetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      userId: "author",
+      fetch: async (input, init) => {
+        calls.push({ input, headers: init?.headers });
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            success: true,
+            output: {
+              status: "PASS",
+              tool: "fabric.catalog-verify"
+            }
+          })
+        };
+      }
+    });
+
+    const result = await client.callStudioTool?.({
+      callId: "call-1",
+      toolName: "fabric.catalog-verify",
+      arguments: {
+        tenantId: "tenant-a",
+        requiredCapabilities: ["workflow.execute"]
+      }
+    });
+
+    assert.equal(result?.success, true);
+    assert.equal(result?.output.status, "PASS");
+    assert.deepEqual(calls, [
+      {
+        input: "http://fabric.local/studio/tools/fabric.catalog-verify",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Unfurl-Tenant": "tenant-a",
+          "X-Unfurl-User": "author"
+        }
+      }
+    ]);
+  });
+
   it("reports non-success responses with method path and HTTP status", async () => {
     const client = createHttpStudioFabricClient({
       baseUrl: "http://fabric.local",

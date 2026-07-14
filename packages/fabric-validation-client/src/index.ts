@@ -578,6 +578,20 @@ export type ResolveDeploymentResponse =
       readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
     };
 
+export type StudioToolCallRequest = {
+  readonly callId?: string;
+  readonly toolName?: string;
+  readonly arguments?: Record<string, unknown>;
+  readonly metadata?: Record<string, unknown>;
+};
+
+export type StudioToolCallResult = {
+  readonly success: boolean;
+  readonly output: Record<string, unknown>;
+  readonly errorCode?: string;
+  readonly errorMessage?: string;
+};
+
 export type CompileDraftCandidateResponse =
   | {
       readonly status: "COMPILED";
@@ -665,6 +679,7 @@ export interface StudioFabricClient {
   readonly sessionEventsUrl?: (request: SessionEventsRequest) => string;
   readonly applyIntent: (intent: StudioIntent) => Promise<IntentResponse>;
   readonly compileCandidate: (request: CompileDraftCandidateRequest) => Promise<CompileDraftCandidateResponse>;
+  readonly callStudioTool?: (request: StudioToolCallRequest & { readonly toolName: string }) => Promise<StudioToolCallResult>;
   readonly converseAuthoring?: (request: AuthoringConverseRequest) => Promise<AuthoringConverseResponse>;
   readonly resolveDeployment?: (request: ResolveDeploymentRequest) => Promise<ResolveDeploymentResponse>;
   readonly getVisualAsset: (assetId: string) => Promise<StudioVisualAsset>;
