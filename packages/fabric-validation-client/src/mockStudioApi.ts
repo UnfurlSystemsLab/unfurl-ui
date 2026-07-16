@@ -288,6 +288,7 @@ export const studioApiExampleCompileResponse: CompileDraftCandidateResponse = {
     planningWarnings: []
   },
   warnings: [],
+  supportArtifacts: [artifact("signed-compiled-contract", "application/yaml")],
   diagnosticArtifacts: [artifact("compile-response", "application/json")]
 };
 

@@ -514,6 +514,14 @@ export type AuthoringConverseResponse =
       readonly kind: "gap";
       readonly unmet: readonly string[];
       readonly assistantMessage: string;
+    }
+  | {
+      readonly kind: "execution";
+      readonly assistantMessage: string;
+      readonly phase?: string;
+      readonly step?: number;
+      readonly toolCalls: readonly Record<string, unknown>[];
+      readonly artifacts: readonly Record<string, unknown>[];
     };
 
 export type DeploymentShape =
@@ -601,18 +609,21 @@ export type CompileDraftCandidateResponse =
       readonly signedContractArtifact?: StudioExportArtifact;
       readonly decisionAudit?: StudioDecisionAudit;
       readonly warnings: readonly string[];
+      readonly supportArtifacts?: readonly StudioExportArtifact[];
       readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
     }
   | {
       readonly status: "STALE_REVISION";
       readonly expectedRevision: number;
       readonly receivedRevision: number;
+      readonly supportArtifacts?: readonly StudioExportArtifact[];
       readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
     }
   | {
       readonly status: "INVALID";
       readonly reason: string;
       readonly details: string;
+      readonly supportArtifacts?: readonly StudioExportArtifact[];
       readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
     };
 
