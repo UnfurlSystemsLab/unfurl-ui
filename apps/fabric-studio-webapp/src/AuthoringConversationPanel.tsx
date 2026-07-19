@@ -24,6 +24,8 @@ export type AuthoringConversationPanelProps = {
   >;
   readonly tenantId: string;
   readonly assemblyId: string;
+  readonly catalogFileId?: string;
+  readonly displayName?: string;
   readonly state: DraftWorkspaceState | undefined;
   readonly onStateChange: (state: DraftWorkspaceState) => void;
   readonly onDeploymentPolicy?: (proposal: AuthoringProposal) => void;
@@ -39,6 +41,8 @@ export function AuthoringConversationPanel({
   client,
   tenantId,
   assemblyId,
+  catalogFileId,
+  displayName,
   state,
   onStateChange,
   onDeploymentPolicy,
@@ -66,6 +70,8 @@ export function AuthoringConversationPanel({
       tenantId,
       assemblyId,
       ...(readySession?.sessionId === undefined ? {} : { sessionId: readySession.sessionId }),
+      ...(catalogFileId === undefined || catalogFileId === "" ? {} : { catalogFileId }),
+      ...(displayName === undefined || displayName === "" ? {} : { displayName }),
       userMessage: prompt
     });
     setSession(next);

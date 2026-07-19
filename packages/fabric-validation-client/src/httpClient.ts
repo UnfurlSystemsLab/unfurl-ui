@@ -43,7 +43,11 @@ import type {
   StudioAssemblySnapshot,
   StudioVisualAsset,
   StudioToolCallRequest,
-  StudioToolCallResult
+  StudioToolCallResult,
+  ListStudioFilesRequest,
+  StudioFileRecord,
+  ListStudioSessionHistoryRequest,
+  StudioSessionHistoryItem
 } from "./index.js";
 
 export const DEFAULT_STUDIO_TENANT_ID = "tenant-local";
@@ -106,11 +110,38 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
   return {
     listCatalogVisuals: async body => {
       const tenantId = body?.tenantId ?? defaultScope.tenantId;
+      const query = body?.catalogFileId ? `?catalogFileId=${encodeURIComponent(body.catalogFileId)}` : "";
       return request<ListCatalogVisualsResponse>(
         guardedFetch,
         baseUrl,
         "GET",
-        `/studio/tenants/${encodeURIComponent(tenantId)}/catalog`,
+        `/studio/tenants/${encodeURIComponent(tenantId)}/catalog${query}`,
+        undefined,
+        tenantHeaders(tenantId, authContext)
+      );
+    },
+    listStudioFiles: async (body?: ListStudioFilesRequest) => {
+      const tenantId = body?.tenantId ?? defaultScope.tenantId;
+      return request<readonly StudioFileRecord[]>(
+        guardedFetch,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(tenantId)}/files${queryString({
+          fileType: body?.fileType,
+          sessionId: body?.sessionId,
+          correlationId: body?.correlationId
+        })}`,
+        undefined,
+        tenantHeaders(tenantId, authContext)
+      );
+    },
+    listSessionHistory: async (body?: ListStudioSessionHistoryRequest) => {
+      const tenantId = body?.tenantId ?? defaultScope.tenantId;
+      return request<readonly StudioSessionHistoryItem[]>(
+        guardedFetch,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(tenantId)}/sessions${queryString({ assemblyId: body?.assemblyId })}`,
         undefined,
         tenantHeaders(tenantId, authContext)
       );
@@ -488,6 +519,21 @@ function normalizeBaseUrl(baseUrl: string): string {
     throw new Error("baseUrl is required");
   }
   return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+}
+
+/**
+ * URL helper: builds a query string from optional Studio filter values while
+ * omitting blanks so route URLs remain deterministic for tests and logs.
+ */
+function queryString(values: Record<string, string | undefined>): string {
+  const params = new URLSearchParams();
+  Object.entries(values).forEach(([key, value]) => {
+    if (value !== undefined && value.trim() !== "") {
+      params.set(key, value);
+    }
+  });
+  const encoded = params.toString();
+  return encoded === "" ? "" : `?${encoded}`;
 }
 
 /**

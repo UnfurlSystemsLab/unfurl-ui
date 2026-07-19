@@ -32,6 +32,13 @@ export type StudioDraftSession = {
   readonly needsId?: string;
   readonly trustPolicyId?: string;
   readonly currentCandidateId?: string;
+  readonly catalogFileId?: string;
+  readonly displayName?: string;
+  readonly sessionType?: string;
+  readonly status?: string;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly lastOpenedAt?: string;
   readonly sceneRevision: number;
   readonly warnings: readonly PlanningWarning[];
   readonly collaborators?: readonly StudioCollaborator[];

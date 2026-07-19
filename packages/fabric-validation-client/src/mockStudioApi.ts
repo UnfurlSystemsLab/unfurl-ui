@@ -21,7 +21,9 @@ import type {
   ListCatalogVisualsResponse,
   LoadCompositionViewResponse,
   ResolveDeploymentResponse,
-  StudioVisualAsset
+  StudioVisualAsset,
+  StudioFileRecord,
+  StudioSessionHistoryItem
 } from "./index.js";
 import { DEFAULT_STUDIO_ASSEMBLY_ID, DEFAULT_STUDIO_TENANT_ID } from "./httpClient.js";
 
@@ -43,6 +45,8 @@ export type MockStudioApiFixtures = {
   readonly authoringResponse?: AuthoringConverseResponse;
   readonly resolveDeploymentResponse?: ResolveDeploymentResponse;
   readonly asset?: StudioVisualAsset;
+  readonly files?: readonly StudioFileRecord[];
+  readonly sessionHistory?: readonly StudioSessionHistoryItem[];
 };
 
 export const studioApiExampleCatalog: ListCatalogVisualsResponse = {
@@ -105,6 +109,13 @@ export const studioApiExampleSession: StudioDraftSession = {
   sessionId: "studio-session-123",
   baseCatalogHash: "sha256:catalog",
   compositionMode: "DYNAMIC",
+  catalogFileId: "file-catalog-1",
+  displayName: "assembly-demo - Tenant Catalog v1",
+  sessionType: "DRAFT",
+  status: "OPEN",
+  createdAt: "2026-06-06T00:00:00.000Z",
+  updatedAt: "2026-06-06T00:00:00.000Z",
+  lastOpenedAt: "2026-06-06T00:00:00.000Z",
   currentCandidateId: "cand-abc123",
   sceneRevision: 7,
   warnings: [],
@@ -318,6 +329,8 @@ export const studioApiExampleAsset: StudioVisualAsset = {
 export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): FetchLike {
   const session = fixtures.session ?? studioApiExampleSession;
   let catalog = fixtures.catalog ?? studioApiExampleCatalog;
+  let files = [...(fixtures.files ?? [catalogFile(session.tenantId, catalog, 1)])];
+  let sessionHistory = [...(fixtures.sessionHistory ?? [sessionHistoryItem(session, files.length)])];
   return async (input, init) => {
     const url = new URL(input);
     const method = init?.method ?? "GET";
@@ -325,6 +338,17 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
 
     if (method === "GET" && (path === "/studio/catalog" || path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog`)) {
       return ok(catalog);
+    }
+    if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/files`) {
+      const fileType = url.searchParams.get("fileType") ?? "";
+      const sessionId = url.searchParams.get("sessionId") ?? "";
+      return ok(files.filter(file =>
+        (fileType === "" || file.fileType.toLowerCase() === fileType.toLowerCase())
+          && (sessionId === "" || file.fileId === session.catalogFileId)));
+    }
+    if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/sessions`) {
+      const assemblyId = url.searchParams.get("assemblyId") ?? "";
+      return ok(sessionHistory.filter(item => assemblyId === "" || item.assemblyId === assemblyId));
     }
     if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog/snapshot`) {
       return ok(fixtures.catalogSnapshot ?? {
@@ -366,8 +390,17 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
       return ok(fixtures.compositionView ?? studioApiExampleCompositionView);
     }
     if (method === "POST" && (path === "/studio/sessions" || path === sessionPath(session, ""))) {
-      parseJson<CreateDraftCompositionRequest>(init?.body);
-      return ok<CreateDraftCompositionResponse>({ session });
+      const body = parseJson<CreateDraftCompositionRequest>(init?.body);
+      const catalogFileId = body?.catalogFileId ?? files.find(file => file.fileType === "CATALOG")?.fileId ?? "";
+      const createdSession = {
+        ...session,
+        baseCatalogHash: body?.baseCatalogHash ?? catalog.catalogHash,
+        catalogFileId,
+        displayName: body?.displayName ?? session.displayName ?? `${session.assemblyId} - Tenant Catalog v1`,
+        sceneRevision: 0
+      };
+      sessionHistory = [sessionHistoryItem(createdSession, files.length), ...sessionHistory];
+      return ok<CreateDraftCompositionResponse>({ session: createdSession });
     }
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog/admissions`) {
       const body = parseJson<{ readonly assemblyId?: string; readonly artifacts?: readonly { readonly fileName: string; readonly claimYaml?: string; readonly artifactBase64?: string }[] }>(init?.body);
@@ -398,6 +431,7 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
         ].sort((left, right) => left.catalogEntryId.localeCompare(right.catalogEntryId)),
         diagnosticArtifacts: [artifact("catalog-snapshot", "application/json")]
       };
+      files = [catalogFile(session.tenantId, catalog, files.filter(file => file.logicalFileId === "tenant-catalog").length + 1), ...files];
       return ok(fixtures.admissionResponse ?? {
         tenantId: session.tenantId,
         assemblyId: body?.assemblyId ?? session.assemblyId,
@@ -624,6 +658,48 @@ function artifact(name: string, mediaType = "application/yaml") {
     mediaType,
     sha256: `sha256:${name}`,
     url: `/studio/assets/${name}`
+  };
+}
+
+/**
+ * Fixture factory: creates a tenant catalog file row equivalent to the backend
+ * registry's immutable `CATALOG` versions.
+ */
+function catalogFile(tenantId: string, catalog: ListCatalogVisualsResponse, version: number): StudioFileRecord {
+  return {
+    fileId: `file-catalog-${version}`,
+    tenantId,
+    logicalFileId: "tenant-catalog",
+    version,
+    fileName: `catalog-v${version}.json`,
+    fileTitle: `Tenant Catalog v${version}`,
+    filePath: `/studio/tenants/${encodeURIComponent(tenantId)}/files/file-catalog-${version}/content?sha256=${catalog.catalogHash}`,
+    fileType: "CATALOG",
+    mediaType: "application/json",
+    sha256: catalog.catalogHash,
+    createdAt: `2026-06-06T00:00:0${version}.000Z`
+  };
+}
+
+/**
+ * Fixture projector: creates the compact tenant session history row returned by
+ * the `/sessions` route.
+ */
+function sessionHistoryItem(session: StudioDraftSession, linkedFileCount: number): StudioSessionHistoryItem {
+  return {
+    tenantId: session.tenantId,
+    assemblyId: session.assemblyId,
+    sessionId: session.sessionId,
+    displayName: session.displayName ?? session.sessionId,
+    sessionType: session.sessionType ?? "DRAFT",
+    status: session.status ?? "OPEN",
+    baseCatalogHash: session.baseCatalogHash,
+    catalogFileId: session.catalogFileId ?? "",
+    createdAt: session.createdAt ?? "2026-06-06T00:00:00.000Z",
+    updatedAt: session.updatedAt ?? "2026-06-06T00:00:00.000Z",
+    lastOpenedAt: session.lastOpenedAt ?? "2026-06-06T00:00:00.000Z",
+    linkedFileCount,
+    intentCount: session.intentLog?.length ?? 0
   };
 }
 

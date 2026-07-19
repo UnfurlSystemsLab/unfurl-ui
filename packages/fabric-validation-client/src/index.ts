@@ -108,6 +108,49 @@ export type ListCatalogVisualsResponse = {
 
 export type ListCatalogVisualsRequest = {
   readonly tenantId?: string;
+  readonly catalogFileId?: string;
+};
+
+export type StudioFileRecord = {
+  readonly fileId: string;
+  readonly tenantId: string;
+  readonly logicalFileId: string;
+  readonly version: number;
+  readonly fileName: string;
+  readonly fileTitle: string;
+  readonly filePath: string;
+  readonly fileType: "CATALOG" | "DRAFT" | "ASSEMBLY" | "EXPORT" | "SIGNED_EXPORT" | "SUPPORT" | "DIAGNOSTIC" | string;
+  readonly mediaType: string;
+  readonly sha256: string;
+  readonly createdAt: string;
+};
+
+export type ListStudioFilesRequest = {
+  readonly tenantId?: string;
+  readonly fileType?: string;
+  readonly sessionId?: string;
+  readonly correlationId?: string;
+};
+
+export type StudioSessionHistoryItem = {
+  readonly tenantId: string;
+  readonly assemblyId: string;
+  readonly sessionId: string;
+  readonly displayName: string;
+  readonly sessionType: string;
+  readonly status: string;
+  readonly baseCatalogHash: string;
+  readonly catalogFileId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly lastOpenedAt: string;
+  readonly linkedFileCount: number;
+  readonly intentCount: number;
+};
+
+export type ListStudioSessionHistoryRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
 };
 
 export type RemoveCatalogEntryRequest = {
@@ -426,6 +469,8 @@ export type CreateDraftCompositionRequest = {
   readonly tenantId?: string;
   readonly assemblyId?: string;
   readonly baseCatalogHash: string;
+  readonly catalogFileId?: string;
+  readonly displayName?: string;
   readonly needsId?: string;
   readonly trustPolicyId?: string;
   readonly initialCandidateId?: string;
@@ -487,6 +532,8 @@ export type AuthoringConverseRequest = {
   readonly tenantId?: string;
   readonly assemblyId?: string;
   readonly sessionId?: string;
+  readonly catalogFileId?: string;
+  readonly displayName?: string;
   readonly conversation: readonly AuthoringConversationMessage[];
   readonly userMessage?: string;
 };
@@ -664,6 +711,8 @@ export type StudioScoreBreakdown = {
 
 export interface StudioFabricClient {
   readonly listCatalogVisuals: (request?: ListCatalogVisualsRequest) => Promise<ListCatalogVisualsResponse>;
+  readonly listStudioFiles?: (request?: ListStudioFilesRequest) => Promise<readonly StudioFileRecord[]>;
+  readonly listSessionHistory?: (request?: ListStudioSessionHistoryRequest) => Promise<readonly StudioSessionHistoryItem[]>;
   readonly admitCatalogArtifacts?: (request: AdmitCatalogArtifactsRequest) => Promise<AdmitCatalogArtifactsResponse>;
   readonly removeCatalogEntry?: (request: RemoveCatalogEntryRequest) => Promise<RemoveCatalogEntryResponse>;
   readonly saveCatalogSnapshot?: (request?: SaveCatalogSnapshotRequest) => Promise<StudioCatalogSnapshot>;

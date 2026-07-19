@@ -352,6 +352,41 @@ describe("HTTP Studio Fabric client", () => {
     ]);
   });
 
+  it("lists a selected catalog file version through the Studio catalog endpoint", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local/",
+      fetch: fakeFetch(calls, { catalogHash: "sha256:catalog", entries: [] })
+    });
+
+    await client.listCatalogVisuals({ catalogFileId: "file-catalog-2" });
+
+    assert.equal(
+      calls[0]?.input,
+      "http://fabric.local/studio/tenants/tenant-local/catalog?catalogFileId=file-catalog-2"
+    );
+  });
+
+  it("lists tenant files and historical sessions from Studio registry endpoints", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local/",
+      fetch: fakeFetch(calls, [])
+    });
+
+    await client.listStudioFiles?.({ fileType: "CATALOG", sessionId: "studio-session-123" });
+    await client.listSessionHistory?.({ assemblyId: "assembly-demo" });
+
+    assert.equal(
+      calls[0]?.input,
+      "http://fabric.local/studio/tenants/tenant-local/files?fileType=CATALOG&sessionId=studio-session-123"
+    );
+    assert.equal(
+      calls[1]?.input,
+      "http://fabric.local/studio/tenants/tenant-local/sessions?assemblyId=assembly-demo"
+    );
+  });
+
   it("loads the draft-scoped dynamic DCP projection when a session id is supplied", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

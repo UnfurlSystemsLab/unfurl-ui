@@ -13,7 +13,8 @@ import {
   type StudioFabricClient,
   type ConnectionCandidatesResponse,
   type AuthoringProposal,
-  type AuthoringProposedIntent
+  type AuthoringProposedIntent,
+  type StudioFileRecord
 } from "@unfurl/fabric-validation-client";
 import type { VisualCatalogEntry } from "@unfurl/visual-manifest";
 import {
@@ -58,7 +59,7 @@ export type DraftWorkspacePanelProps = {
     "loadDynamicDcpProjection" |
     "loadReplacementCandidates" |
     "loadConnectionCandidates" |
-    "listCatalogVisuals" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate" | "resolveDeployment" | "converseAuthoring"
+    "listCatalogVisuals" | "listStudioFiles" | "listSessionHistory" | "createDraftComposition" | "applyIntent" | "getDraftSession" | "compileCandidate" | "resolveDeployment" | "converseAuthoring"
     | "heartbeatCollaborator" | "sessionEventsUrl"
   >;
   readonly initialTenantId?: string | undefined;
@@ -166,6 +167,8 @@ export function DraftWorkspacePanel({
   const [busy, setBusy] = useState(false);
   const [state, setState] = useState<DraftWorkspaceState | undefined>();
   const [catalog, setCatalog] = useState<readonly VisualCatalogEntry[]>([]);
+  const [catalogFiles, setCatalogFiles] = useState<readonly StudioFileRecord[]>([]);
+  const [selectedCatalogFileId, setSelectedCatalogFileId] = useState("");
   const [catalogError, setCatalogError] = useState<string | undefined>();
   const [selectedComponent, setSelectedComponent] = useState<SelectedSurfaceId>("validation");
   const [selectedPart, setSelectedPart] = useState<ThreeAssemblySelection>({
@@ -220,24 +223,43 @@ export function DraftWorkspacePanel({
 
   useEffect(() => {
     let cancelled = false;
-    void client.listCatalogVisuals({ tenantId })
-      .then(response => {
+    async function loadCatalog() {
+      const scopedTenantId = tenantId.trim() || DEFAULT_STUDIO_TENANT_ID;
+      let catalogFileId = selectedCatalogFileId;
+      if (client.listStudioFiles) {
+        const files = await client.listStudioFiles({ tenantId: scopedTenantId, fileType: "CATALOG" });
         if (!cancelled) {
-          setBaseCatalogHash(current => current === "sha256:catalog" ? response.catalogHash : current);
-          setCatalog(response.entries);
-          setCatalogEntryId(response.entries[0]?.catalogEntryId ?? "com.unfurl.flow:orchestrator:0.1.0");
-          setReplacementEntryId(response.entries[0]?.catalogEntryId ?? "com.unfurl.flow:orchestrator:0.1.0");
+          setCatalogFiles(files);
         }
-      })
+        if (catalogFileId === "" || !files.some(file => file.fileId === catalogFileId)) {
+          catalogFileId = files[0]?.fileId ?? "";
+          if (!cancelled) {
+            setSelectedCatalogFileId(catalogFileId);
+          }
+        }
+      }
+      const response = await client.listCatalogVisuals({
+        tenantId: scopedTenantId,
+        ...(catalogFileId === "" ? {} : { catalogFileId })
+      });
+      if (!cancelled) {
+        setBaseCatalogHash(response.catalogHash);
+        setCatalog(response.entries);
+        setCatalogEntryId(response.entries[0]?.catalogEntryId ?? "com.unfurl.flow:orchestrator:0.1.0");
+        setReplacementEntryId(response.entries[0]?.catalogEntryId ?? "com.unfurl.flow:orchestrator:0.1.0");
+        setCatalogError(undefined);
+      }
+    }
+    void loadCatalog()
       .catch(error => {
         if (!cancelled) {
           setCatalogError(error instanceof Error ? error.message : String(error));
         }
-      });
+      })
     return () => {
       cancelled = true;
     };
-  }, [client, tenantId]);
+  }, [client, tenantId, selectedCatalogFileId]);
 
   useEffect(() => {
     if (!client.loadDynamicDcpProjection) {
@@ -433,6 +455,8 @@ export function DraftWorkspacePanel({
         tenantId: tenantId.trim() || DEFAULT_STUDIO_TENANT_ID,
         assemblyId: assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID,
         baseCatalogHash,
+        ...(selectedCatalogFileId === "" ? {} : { catalogFileId: selectedCatalogFileId }),
+        displayName: draftDisplayName(assemblyId, selectedCatalogFile(catalogFiles, selectedCatalogFileId))
       }));
       setDraftComponents([]);
       setExtractedPartId(undefined);
@@ -1242,6 +1266,22 @@ export function DraftWorkspacePanel({
               <span>profile mode: STRICT</span>
             </div>
           </div>
+          {catalogFiles.length > 0 && (
+            <label>
+              Catalog version
+              <select
+                value={selectedCatalogFileId}
+                disabled={busy}
+                onChange={event => setSelectedCatalogFileId(event.target.value)}
+              >
+                {catalogFiles.map(file => (
+                  <option value={file.fileId} key={file.fileId}>
+                    {catalogFileOptionLabel(file)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label>
             Catalog hash
             <input value={baseCatalogHash} onChange={event => setBaseCatalogHash(event.target.value)} />
@@ -1283,6 +1323,8 @@ export function DraftWorkspacePanel({
             client={client}
             tenantId={tenantId.trim() || DEFAULT_STUDIO_TENANT_ID}
             assemblyId={assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID}
+            catalogFileId={selectedCatalogFileId}
+            displayName={draftDisplayName(assemblyId, selectedCatalogFile(catalogFiles, selectedCatalogFileId))}
             state={state}
             onStateChange={setState}
             onDeploymentPolicy={applyAuthoringDeploymentPolicy}
@@ -2194,6 +2236,35 @@ function labelForCatalogEntry(catalogEntryId: string): string {
     .filter(Boolean)
     .map(part => part.slice(0, 1).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+/**
+ * Catalog-file lookup helper: resolves the currently selected tenant catalog
+ * file row for draft creation metadata.
+ */
+function selectedCatalogFile(
+  files: readonly StudioFileRecord[],
+  selectedFileId: string
+): StudioFileRecord | undefined {
+  return files.find(file => file.fileId === selectedFileId) ?? files[0];
+}
+
+/**
+ * Label helper: formats tenant catalog file versions for the New Draft
+ * dropdown without exposing internal ids as the primary text.
+ */
+function catalogFileOptionLabel(file: StudioFileRecord): string {
+  const version = Number.isFinite(file.version) ? `v${file.version}` : "version";
+  return `${file.fileTitle || file.fileName} (${version})`;
+}
+
+/**
+ * Naming helper: creates a readable draft history title from the selected
+ * assembly and catalog file metadata.
+ */
+function draftDisplayName(assemblyId: string, catalogFile: StudioFileRecord | undefined): string {
+  const assembly = assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID;
+  return `${assembly} - ${catalogFile?.fileTitle ?? "Current Catalog"}`;
 }
 
 /**
