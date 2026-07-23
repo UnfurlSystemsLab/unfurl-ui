@@ -477,6 +477,18 @@ or:
 
 The intent API is the primary boundary between Studio and Fabric engine. Studio never bypasses it to generate a contract directly.
 
+### Agent-Assisted Edit Context
+
+The visual workbench may ask the server-side Fabric authoring agent for help before
+an operator adds, removes, replaces, connects, or configures a component or
+substrate surface. This is an advisory turn over `POST /studio/authoring/converse`:
+Studio passes the selected action context (operation, selected catalog entry or
+component, visible ports, substrate requirements, and current draft session id)
+so the agent can ask grounded questions and propose normal Studio intents. The
+agent does not mutate the draft directly; accepted output is replayed through
+the same `ADD_COMPONENT`, `REMOVE_COMPONENT`, `REPLACE_COMPONENT`, `CONNECT`, and
+`DISCONNECT` intent routes described above.
+
 ---
 
 ## 12. Backend responsibilities

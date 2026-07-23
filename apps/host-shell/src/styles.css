@@ -653,15 +653,39 @@ th, td {
   text-align: left;
 }
 
+.catalog-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.catalog-row-main span:not(.catalog-glyph) {
+  overflow-wrap: anywhere;
+}
+
 .catalog-row.active {
   background: #eaf2ff;
 }
 
 .catalog-row-action {
   margin-left: auto;
+  border: none;
+  background: transparent;
   color: #1d4ed8;
   font-size: 11px;
   font-weight: 800;
+  padding: 2px 4px;
+}
+
+.catalog-row-action + .catalog-row-action {
+  margin-left: 0;
 }
 
 .catalog-glyph {

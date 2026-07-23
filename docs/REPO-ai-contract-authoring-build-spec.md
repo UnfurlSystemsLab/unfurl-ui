@@ -25,18 +25,18 @@ The AI runs **server-side on foundry** (the agent platform) with a customer-conf
 ```
 unfurl-ui (fabric-studio-webapp)        the conversational UI
   apps/fabric-studio-webapp/
-    AuthoringConversationPanel.tsx      chat panel: prompt, typed clarifying questions, proposal preview
+    AuthoringConversationPanel.tsx      chat panel: prompt, typed clarifying questions, structured answers, proposal preview
     authoringSession.ts                 turn/state; bridges proposals into the existing draftWorkspace + intents
     authoringNoBrowserModelSdk.test.ts  guard: webapp imports no model SDK, holds no provider key
   packages/fabric-validation-client/    converse client method + mock
-        │  POST /studio/authoring/converse  { scope, sessionId, conversation[], userMessage }
+        │  POST /studio/authoring/converse  { scope, sessionId, conversation[], userMessage, questionAnswers }
         ▼
 unfurl-fabric (Studio API)              thin DCP delegator — depends ONLY on the neutral
                                         substrate-composition-api (no foundry product at runtime)
   StudioAuthoringHandler                the endpoint
   StudioCatalogService.converseAuthoring
     if a ContractInvocable is injected → build an agent.run ContractInvocation
-        { userMessage, conversation, catalog } and call it; map result → StudioAuthoringConverseResponse
+        { userMessage, conversation, questionAnswers, catalog } and call it; map result → StudioAuthoringConverseResponse
     else → deterministic in-Fabric bridge (fallback)
     + grounding guard: re-validate every proposed ADD_COMPONENT against the admitted catalog
   DcpAuthoringClient implements ContractInvocable
@@ -77,7 +77,7 @@ The agent platform runs the DAG and owns provider/tool registration: `FoundryDcp
 **Tests:** `DcpAuthoringClientTest`, `StudioCatalogServiceAuthoringDcpTest` (proposal/gap routing, fallback, unadmitted→gap), `FoundryDcpAuthoringEndToEndTest` (Fabric `DcpAuthoringClient` → real `FoundryDcpServer` → scripted-model agent run).
 
 ### Phase 3 — Conversational UI panel   **[IMPLEMENTED]**   *(unfurl-ui)*
-`AuthoringConversationPanel` + `authoringSession` drive `/studio/authoring/converse`, render typed clarifying questions, preview the proposal, and apply accepted intents into the existing `draftWorkspace`. `fabric-validation-client` gains the converse method + mock. `authoringNoBrowserModelSdk.test.ts` guards that the webapp makes no model call and carries no key.
+`AuthoringConversationPanel` + `authoringSession` drive `/studio/authoring/converse`, render typed clarifying questions, send structured `questionAnswers` keyed by question id, preview the proposal, and apply accepted intents into the existing `draftWorkspace`. Select-style options are `{ label, value }` objects: the UI renders labels and sends values. The visual workbench can also seed the same panel from action-scoped controls such as Add, Remove, Replace, Connect, or Substrate configuration; those controls pass `actionContext` so Foundry can ask configuration or impact questions without owning the mutation. `fabric-validation-client` gains the converse method + mock. `authoringNoBrowserModelSdk.test.ts` guards that the webapp makes no model call and carries no key.
 
 ### Phase 4 — Wire proposal into resolve/compile/export   **[IMPLEMENTED — reuse]**   *(unfurl-ui)*
 The accepted draft flows through the existing steps unchanged: `resolveDeployment` → `compileCandidate({ sign: true, deploymentPolicy })` → `draftExport`. An AI-authored signed contract is identical in shape/trust to a visually-authored one.
@@ -103,6 +103,7 @@ Feed the signed `BindingPlan` to deploy-emitter for Helm/raw artifacts. Emit ≠
 - No invented components — proposals are re-validated against the admitted catalog.
 - No new contract/deployment format — reuse the signed contract + substrate profile + deployment bundle.
 - No auto-apply / auto-deploy — every proposal is human-reviewed; Studio emits, it does not apply into a perimeter.
+- No action-assist bypass — contextual Add/Remove/Replace/Substrate help may call the authoring agent, but accepted output still replays the same Studio intents and Fabric validation path.
 
 ## Build-order note
 

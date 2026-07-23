@@ -34,7 +34,7 @@ import {
 import { buildSigningHandoff } from "./signingHandoff.js";
 import { createIntentHistory } from "./intentHistory.js";
 import { DiagnosticArtifactsPanel } from "./DiagnosticArtifactsPanel.js";
-import { AuthoringConversationPanel } from "./AuthoringConversationPanel.js";
+import { AuthoringConversationPanel, type AuthoringPromptSeed } from "./AuthoringConversationPanel.js";
 import { SemanticZoomNavigator } from "./SemanticZoomNavigator.js";
 import type { SceneDropTarget, SemanticDcpSceneProjection, SemanticZoomLevel, ThreeAssemblySelection, ThreeAssemblySurfaceId } from "./ThreeAssemblyScene.js";
 
@@ -190,6 +190,7 @@ export function DraftWorkspacePanel({
   } | undefined>(undefined);
   const hoverDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hoverGenerationRef = useRef(0);
+  const authoringPromptSeedCounter = useRef(0);
   const [activeView, setActiveView] = useState("Assembly");
   const [activeInspectorTab, setActiveInspectorTab] = useState("Properties");
   const [tutorialOpen, setTutorialOpen] = useState(() => shouldShowTutorial());
@@ -199,6 +200,7 @@ export function DraftWorkspacePanel({
   const [saveDeploymentShape, setSaveDeploymentShape] = useState("CONTAINERIZED_SERVICE");
   const [saveDraftStatus, setSaveDraftStatus] = useState<string | undefined>();
   const [deploymentPlanner, setDeploymentPlanner] = useState<DeploymentPlannerState>(() => createDefaultDeploymentPlannerState());
+  const [authoringPromptSeed, setAuthoringPromptSeed] = useState<AuthoringPromptSeed | undefined>();
   const [draftComponents, setDraftComponents] = useState<readonly DraftComponentItem[] | undefined>(() => {
     if (initialDraftComponentCatalogEntryIds !== undefined) {
       return initialDraftComponentCatalogEntryIds.map(catalogEntryId => ({
@@ -547,6 +549,124 @@ export function DraftWorkspacePanel({
       setDraftComponents(draftComponentsFromSession(snapshot.sessions[0]));
     }
     setSaveDraftStatus(`Assembly snapshot loaded for ${snapshot.assemblyId}.`);
+  }
+
+  /**
+   * Action-assist command: seeds the server-side authoring panel with one
+   * visual-edit action context. Foundry may ask clarifying questions or propose
+   * normal Studio intents; the UI does not mutate draft state from this helper.
+   */
+  function requestAuthoringAssist(seed: Omit<AuthoringPromptSeed, "id">) {
+    authoringPromptSeedCounter.current += 1;
+    setAuthoringPromptSeed({
+      ...seed,
+      id: authoringPromptSeedCounter.current
+    });
+  }
+
+  /**
+   * Action-assist command: asks the authoring agent what configuration is
+   * needed before a catalog component is added to the current draft.
+   */
+  function askAuthoringForAdd(entryId = catalogEntryId) {
+    const entry = catalog.find(item => item.catalogEntryId === entryId);
+    const label = labelForCatalogEntry(entryId);
+    requestAuthoringAssist({
+      autoSend: true,
+      text: `Help me add and configure ${label} (${entryId}) in this governed draft. Ask the required configuration, binding, substrate, and external-connection questions before proposing Studio intents.`,
+      actionContext: {
+        operation: "ADD_COMPONENT",
+        catalogEntryId: entryId,
+        componentLabel: label,
+        offeredCapabilities: entryCapabilities(entry, "OFFER"),
+        dependencyPorts: entryCapabilities(entry, "DEPENDENCY"),
+        substratePorts: entryCapabilities(entry, "SUBSTRATE_DEPENDENCY"),
+        ...(readySession ? { draftSessionId: readySession.sessionId } : {})
+      }
+    });
+  }
+
+  /**
+   * Action-assist command: asks the authoring agent to analyze removal impact
+   * before the operator submits a governed REMOVE_COMPONENT intent.
+   */
+  function askAuthoringForRemoval(component: DraftComponentItem) {
+    const componentId = projectionNodeIdForCatalogEntry(dynamicProjection, component.catalogEntryId)
+      ?? selectedComponentIdForDraftItem(component, selectedPart);
+    requestAuthoringAssist({
+      autoSend: true,
+      text: `Help me remove ${component.label} (${component.catalogEntryId}) from this draft. Ask about dependent connections, replacement-before-removal, state cleanup, and substrate binding impact before proposing Studio intents.`,
+      actionContext: {
+        operation: "REMOVE_COMPONENT",
+        componentId,
+        catalogEntryId: component.catalogEntryId,
+        componentLabel: component.label,
+        substratePorts: liveSubstratePorts.map(port => port.capability || port.portId),
+        ...(readySession ? { draftSessionId: readySession.sessionId } : {})
+      }
+    });
+  }
+
+  /**
+   * Action-assist command: asks the authoring agent to validate replacement
+   * configuration before the selected replacement candidate is applied.
+   */
+  function askAuthoringForReplacement() {
+    if (selectedPart.kind !== "component" || replacementEntryId === "") {
+      return;
+    }
+    const replacementEntry = catalog.find(entry => entry.catalogEntryId === replacementEntryId);
+    requestAuthoringAssist({
+      autoSend: true,
+      text: `Help me replace ${selectedPart.label} with ${labelForCatalogEntry(replacementEntryId)} (${replacementEntryId}). Ask which bindings should be preserved and what configuration changes are needed before proposing Studio intents.`,
+      actionContext: {
+        operation: "REPLACE_COMPONENT",
+        selectedComponentId: selectedPart.surface,
+        selectedComponentLabel: selectedPart.label,
+        ...(selectedDraftComponent ? { catalogEntryId: selectedDraftComponent.catalogEntryId } : {}),
+        replacementCatalogEntryId: replacementEntryId,
+        componentLabel: labelForCatalogEntry(replacementEntryId),
+        offeredCapabilities: entryCapabilities(replacementEntry, "OFFER"),
+        dependencyPorts: entryCapabilities(replacementEntry, "DEPENDENCY"),
+        substratePorts: entryCapabilities(replacementEntry, "SUBSTRATE_DEPENDENCY"),
+        ...(readySession ? { draftSessionId: readySession.sessionId } : {})
+      }
+    });
+  }
+
+  /**
+   * Action-assist command: asks the authoring agent to gather endpoint,
+   * credential, and policy details before a port connection is validated.
+   */
+  function askAuthoringForConnection() {
+    requestAuthoringAssist({
+      autoSend: true,
+      text: `Help me configure and validate the connection from ${fromPort} to ${toPort}. Ask for endpoint, credential reference, protocol, and policy details before proposing Studio intents.`,
+      actionContext: {
+        operation: "CONNECT",
+        fromPort,
+        toPort,
+        ...(readySession ? { draftSessionId: readySession.sessionId } : {})
+      }
+    });
+  }
+
+  /**
+   * Action-assist command: asks the authoring agent for substrate/runtime
+   * configuration choices without changing the profile directly in the UI.
+   */
+  function askAuthoringForSubstrateConfiguration() {
+    requestAuthoringAssist({
+      autoSend: true,
+      text: "Help me configure the substrate/runtime layer for this draft. Ask which runtime target, secret/config references, telemetry, audit, and provider bindings should be used before proposing Studio intents or deployment policy.",
+      actionContext: {
+        operation: "CONFIGURE_SUBSTRATE",
+        componentId: "substrate:base",
+        componentLabel: "Substrate Runtime Layer",
+        substratePorts: liveSubstratePorts.map(port => port.capability || port.portId),
+        ...(readySession ? { draftSessionId: readySession.sessionId } : {})
+      }
+    });
   }
 
   /**
@@ -1305,9 +1425,11 @@ export function DraftWorkspacePanel({
               entries={paletteEntries}
               busy={busy}
               ready={state?.status === "READY"}
+              canAssist={Boolean(client.converseAuthoring)}
               knownCatalogEntryIds={knownCatalogEntryIds}
               hoveredCatalogEntryId={preview?.catalogEntryId}
               onSelect={entryId => void addComponent(entryId)}
+              onAssist={entryId => askAuthoringForAdd(entryId)}
               onHover={hoverCandidate}
               onHoverEnd={clearPreview}
             />
@@ -1325,6 +1447,7 @@ export function DraftWorkspacePanel({
             assemblyId={assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID}
             catalogFileId={selectedCatalogFileId}
             displayName={draftDisplayName(assemblyId, selectedCatalogFile(catalogFiles, selectedCatalogFileId))}
+            promptSeed={authoringPromptSeed}
             state={state}
             onStateChange={setState}
             onDeploymentPolicy={applyAuthoringDeploymentPolicy}
@@ -1652,6 +1775,14 @@ export function DraftWorkspacePanel({
                           <button
                             type="button"
                             className="secondary"
+                            disabled={!client.converseAuthoring}
+                            onClick={() => askAuthoringForRemoval(component)}
+                          >
+                            Ask Agent
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary"
                             disabled={busy || state?.status !== "READY"}
                             onClick={() => void removeDraftComponent(component)}
                           >
@@ -1773,6 +1904,9 @@ export function DraftWorkspacePanel({
                 the catalog. It cannot be replaced from this panel — adjust the substrate
                 profile to change which runtime hosts the assembly.
               </p>
+              <button type="button" className="secondary" disabled={!client.converseAuthoring} onClick={askAuthoringForSubstrateConfiguration}>
+                Ask Agent For Configuration
+              </button>
             </section>
           ) : hasInspectableSelection && selectedPart.kind === "pipe" ? (
             <section className="inspector-card">
@@ -1782,6 +1916,9 @@ export function DraftWorkspacePanel({
                 Use Disconnect on the selected scene part to remove this wiring, or
                 remove the consuming component to drop the pipe.
               </p>
+              <button type="button" className="secondary" disabled={!client.converseAuthoring} onClick={askAuthoringForConnection}>
+                Ask Agent
+              </button>
             </section>
           ) : hasInspectableSelection ? (
             <section className="inspector-card">
@@ -1807,9 +1944,14 @@ export function DraftWorkspacePanel({
                   </button>
                 ))}
               </div>
-              <button type="button" disabled={busy || state?.status !== "READY" || selectedPart.kind !== "component" || selectedReplacement?.status !== "ALLOWED" || !knownCatalogEntryIds.has(replacementEntryId)} onClick={replaceSelectedComponent}>
-                Validate & Replace
-              </button>
+              <div className="scene-action-row">
+                <button type="button" className="secondary" disabled={!client.converseAuthoring || selectedPart.kind !== "component" || replacementEntryId === ""} onClick={askAuthoringForReplacement}>
+                  Ask Agent
+                </button>
+                <button type="button" disabled={busy || state?.status !== "READY" || selectedPart.kind !== "component" || selectedReplacement?.status !== "ALLOWED" || !knownCatalogEntryIds.has(replacementEntryId)} onClick={replaceSelectedComponent}>
+                  Validate & Replace
+                </button>
+              </div>
               {state?.status === "READY" && replacementEntryId !== "" && !knownCatalogEntryIds.has(replacementEntryId) && (
                 <p className="studio-error">Replacement candidate '{replacementEntryId}' is not in the live catalog and cannot be applied.</p>
               )}
@@ -1928,28 +2070,38 @@ export function DraftWorkspacePanel({
                 </dl>
                 <p>{selected.description}</p>
                 {selectedDraftComponent && (
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busy || state?.status !== "READY"}
-                    onClick={() => void removeDraftComponent(selectedDraftComponent)}
-                  >
-                    Remove Component
-                  </button>
+                  <div className="scene-action-row">
+                    <button type="button" className="secondary" disabled={!client.converseAuthoring} onClick={() => askAuthoringForRemoval(selectedDraftComponent)}>
+                      Ask Agent
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy || state?.status !== "READY"}
+                      onClick={() => void removeDraftComponent(selectedDraftComponent)}
+                    >
+                      Remove Component
+                    </button>
+                  </div>
                 )}
               </>
             ) : pendingDraftComponentLabel ? (
               <>
                 <p className="live-data-notice">{pendingDraftComponentLabel} is in this draft; governed details appear once the projection includes it.</p>
                 {selectedDraftComponent && (
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busy || state?.status !== "READY"}
-                    onClick={() => void removeDraftComponent(selectedDraftComponent)}
-                  >
-                    Remove Component
-                  </button>
+                  <div className="scene-action-row">
+                    <button type="button" className="secondary" disabled={!client.converseAuthoring} onClick={() => askAuthoringForRemoval(selectedDraftComponent)}>
+                      Ask Agent
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy || state?.status !== "READY"}
+                      onClick={() => void removeDraftComponent(selectedDraftComponent)}
+                    >
+                      Remove Component
+                    </button>
+                  </div>
                 )}
               </>
             ) : (
@@ -1975,6 +2127,9 @@ export function DraftWorkspacePanel({
             <button type="button" disabled={busy || state?.status !== "READY"} onClick={() => void addComponent()}>
               Add Component
             </button>
+            <button type="button" className="secondary" disabled={!client.converseAuthoring || catalogEntryId === ""} onClick={() => askAuthoringForAdd()}>
+              Ask Agent
+            </button>
             <label>
               From port
               <input value={fromPort} onChange={event => setFromPort(event.target.value)} />
@@ -1984,6 +2139,9 @@ export function DraftWorkspacePanel({
               <input value={toPort} onChange={event => setToPort(event.target.value)} />
             </label>
             <button type="button" disabled={busy || state?.status !== "READY"} onClick={connectPorts}>Validate Connection</button>
+            <button type="button" className="secondary" disabled={!client.converseAuthoring || fromPort === "" || toPort === ""} onClick={askAuthoringForConnection}>
+              Ask Agent
+            </button>
             <label className="studio-checkbox">
               <input type="checkbox" checked={sign} onChange={event => setSign(event.target.checked)} />
               Request signed compile
@@ -2083,9 +2241,11 @@ function CatalogGroup({
   entries,
   ready,
   busy,
+  canAssist,
   knownCatalogEntryIds,
   hoveredCatalogEntryId,
   onSelect,
+  onAssist,
   onHover,
   onHoverEnd
 }: {
@@ -2093,9 +2253,11 @@ function CatalogGroup({
   readonly entries: readonly VisualCatalogEntry[];
   readonly ready: boolean;
   readonly busy: boolean;
+  readonly canAssist: boolean;
   readonly knownCatalogEntryIds: ReadonlySet<string>;
   readonly hoveredCatalogEntryId?: string | undefined;
   readonly onSelect: (entryId: string) => void;
+  readonly onAssist: (entryId: string) => void;
   readonly onHover?: (entryId: string) => void;
   readonly onHoverEnd?: () => void;
 }) {
@@ -2107,13 +2269,10 @@ function CatalogGroup({
         const isHovered = hoveredCatalogEntryId === entry.catalogEntryId;
         const baseClass = index === 0 ? "catalog-row active" : "catalog-row";
         return (
-          <button
-            type="button"
-            aria-label={`Add ${paletteLabel(entry)}`}
+          <div
             className={isHovered ? `${baseClass} previewing` : baseClass}
             draggable={inCatalog}
             key={entry.catalogEntryId}
-            onClick={() => onSelect(entry.catalogEntryId)}
             onDragStart={event => {
               if (!inCatalog || !ready || busy) {
                 return;
@@ -2129,13 +2288,39 @@ function CatalogGroup({
             onMouseLeave={onHoverEnd}
             onFocus={onHover ? () => onHover(entry.catalogEntryId) : undefined}
             onBlur={onHoverEnd}
-            disabled={!ready || busy || !inCatalog}
+            aria-disabled={!ready || busy || !inCatalog}
             title={inCatalog ? undefined : "Not in the live catalog; admit it before assembly"}
           >
-            <span className="catalog-glyph purple">{entry.visualManifest?.fallbackShape.kind.slice(0, 1) ?? "C"}</span>
-            <span>{paletteLabel(entry)}</span>
-            <span className="catalog-row-action">Add</span>
-          </button>
+            <button
+              type="button"
+              className="catalog-row-main"
+              aria-label={`Add ${paletteLabel(entry)}`}
+              draggable={inCatalog}
+              onClick={() => onSelect(entry.catalogEntryId)}
+              disabled={!ready || busy || !inCatalog}
+            >
+              <span className="catalog-glyph purple">{entry.visualManifest?.fallbackShape.kind.slice(0, 1) ?? "C"}</span>
+              <span>{paletteLabel(entry)}</span>
+            </button>
+            <button
+              type="button"
+              className="catalog-row-action"
+              draggable={inCatalog}
+              disabled={!canAssist || !ready || busy || !inCatalog}
+              onClick={() => onAssist(entry.catalogEntryId)}
+            >
+              Ask
+            </button>
+            <button
+              type="button"
+              className="catalog-row-action"
+              draggable={inCatalog}
+              disabled={!ready || busy || !inCatalog}
+              onClick={() => onSelect(entry.catalogEntryId)}
+            >
+              Add
+            </button>
+          </div>
         );
       })}
     </section>
@@ -2273,6 +2458,32 @@ function draftDisplayName(assemblyId: string, catalogFile: StudioFileRecord | un
  */
 function activePorts(entry: VisualCatalogEntry | undefined): readonly string[] {
   return entry?.visualManifest?.ports.map(port => port.id) ?? [];
+}
+
+/**
+ * Projection helper: extracts capability strings for one visual port kind from
+ * the component's DCP-backed visual manifest.
+ */
+function entryCapabilities(
+  entry: VisualCatalogEntry | undefined,
+  kind: "OFFER" | "DEPENDENCY" | "SUBSTRATE_DEPENDENCY" | "REFUSAL"
+): readonly string[] {
+  return entry?.visualManifest?.ports
+    .filter(port => port.kind === kind)
+    .map(port => capabilityFromMapsTo(port.mapsTo) || port.id)
+    .filter(Boolean) ?? [];
+}
+
+/**
+ * DCP path formatter: trims common visual-manifest `mapsTo` prefixes into the
+ * capability names that the authoring agent should reason about.
+ */
+function capabilityFromMapsTo(mapsTo: string): string {
+  return mapsTo
+    .replace(/^claim\.offers\./, "")
+    .replace(/^claim\.dependencies\./, "")
+    .replace(/^claim\.substrateDependencies\./, "")
+    .replace(/^claim\.substrate_dependencies\./, "");
 }
 
 /**

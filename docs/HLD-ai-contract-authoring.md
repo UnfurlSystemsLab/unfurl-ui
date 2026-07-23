@@ -38,7 +38,15 @@ The authoring AI is a **foundry agent**. The Studio endpoint (`POST /studio/auth
 
 The agent's turns are **structured**, so they are machine-checkable and drive the existing pipeline directly:
 
-1. **Clarify.** Given the user's prompt and the catalog, the agent either asks **clarifying questions** (typed: single-select, multi-select, free-text) or signals it has enough to propose.
+1. **Clarify.** Given the user's prompt, tenant catalog file rows, session history, and the selected admitted catalog,
+   the agent either asks **clarifying questions** (typed: single-select, multi-select, free-text) or signals it has
+   enough to propose. The first clarification should be grounded in real Studio state: which catalog version/title to
+   use, whether to continue or fork a historical draft, and which admitted component should be the starting/root
+   component when the prompt does not name one.
+   The same clarification contract is used for action-scoped assist from the visual workbench: when the operator asks
+   for help adding, removing, replacing, connecting, or configuring a component/substrate surface, Studio passes the
+   selected action context to Fabric so the agent can ask relevant configuration, binding, external-connection, or
+   removal-impact questions before any proposal is accepted.
 2. **Propose needs.** The agent emits a **needs spec** in the existing `suggestedNeedsYaml` shape (the same shape as the `*-needs.yaml` e2e fixtures) — the structured statement of what the app requires.
 3. **Propose composition.** The agent emits a sequence of existing Studio **intents** (`AddComponent`, `ConnectPorts`, …) that realize the needs against the catalog. Each intent is applied through the existing `StudioFabricClient`, so **all existing Fabric validation and compatibility checks run** — an AI proposal that doesn't validate is rejected the same way a manual one would be.
 4. **Propose deployment.** The agent suggests a `deploymentPolicy` / target; `resolveDeployment` produces the concrete shape selections.
@@ -56,7 +64,11 @@ Export reuses the existing `draftExport` bundle — **the signed Fabric contract
 
 - **No browser→LLM, ever.** The agent runs server-side on foundry with a customer-configured provider. The browser only exchanges conversation turns and structured proposals with the Studio API.
 - **The AI cannot bypass Fabric.** Every proposed intent goes through the same validation/compatibility/negotiation path as a manual edit; the contract is signed by the same compile path. The AI is an authoring convenience, not a new trust or signing path.
+- **Action assist is not auto-apply.** Add/remove/replace/substrate assist may prefill or call the authoring agent with
+  selected UI context, but accepting the result still applies normal Studio intents and Fabric validation.
 - **No invented components.** The agent composes only from admitted catalog claims; an unsatisfiable need surfaces as a gap ("no catalog component offers X"), not a hallucinated component.
+- **No hidden runbook assumptions.** Generic assembly authoring starts from catalog/session discovery. Flowfoundry or any
+  other numbered runbook is invoked only when a Flow workflow/template explicitly owns that execution path.
 - **Same artifact, same trust.** An AI-authored signed contract is indistinguishable in shape and trust tier from a hand-authored one.
 - **The browser holds no secrets.** Provider credentials and catalog trust live behind the Studio API / foundry, not in the webapp.
 

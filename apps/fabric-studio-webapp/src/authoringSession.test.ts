@@ -21,7 +21,12 @@ describe("authoring session", () => {
     const response: AuthoringConverseResponse = {
       kind: "clarify",
       assistantMessage: "Pick a target.",
-      questions: [{ id: "target", label: "Target", type: "SINGLE_SELECT", options: ["Customer Runtime Substrate"] }]
+      questions: [{
+        id: "target",
+        label: "Target",
+        type: "SINGLE_SELECT",
+        options: [{ label: "Customer Runtime Substrate", value: "customer-runtime-substrate" }]
+      }]
     };
     const client = fakeClient({ authoringResponse: response });
 
@@ -33,6 +38,73 @@ describe("authoring session", () => {
 
     assert.equal(state.status, "READY");
     assert.equal(state.status === "READY" ? state.response.kind : undefined, "clarify");
+  });
+
+  it("passes visual edit action context through the authoring endpoint", async () => {
+    const calls: unknown[] = [];
+    const client = fakeClient({ calls, authoringResponse: {
+      kind: "clarify",
+      assistantMessage: "Configuration needed.",
+      questions: [{
+        id: "configurationMode",
+        label: "Configuration",
+        type: "SINGLE_SELECT",
+        options: [{ label: "Use defaults", value: "use-defaults" }]
+      }]
+    } });
+
+    await converseAuthoring(client, initialAuthoringSession(), {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      userMessage: "Help me add this component.",
+      actionContext: {
+        operation: "ADD_COMPONENT",
+        catalogEntryId: "com.unfurl.flow:orchestrator:0.1.0",
+        dependencyPorts: ["state-store"]
+      }
+    });
+
+    assert.deepEqual(calls.at(0), {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      userMessage: "Help me add this component.",
+      actionContext: {
+        operation: "ADD_COMPONENT",
+        catalogEntryId: "com.unfurl.flow:orchestrator:0.1.0",
+        dependencyPorts: ["state-store"]
+      },
+      conversation: []
+    });
+  });
+
+  it("passes structured clarification answers through the authoring endpoint", async () => {
+    const calls: unknown[] = [];
+    const client = fakeClient({ calls, authoringResponse: {
+      kind: "proposal",
+      assistantMessage: "Proposal ready.",
+      proposal: proposal()
+    } });
+
+    await converseAuthoring(client, initialAuthoringSession(), {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      userMessage: "Here are my structured answers.",
+      questionAnswers: {
+        startingComponent: "uploaded:unfurl-flow-0.1.0-SNAPSHOT.jar",
+        recursiveCapabilities: ["tools", "rag"]
+      }
+    });
+
+    assert.deepEqual(calls.at(0), {
+      tenantId: "tenant-local",
+      assemblyId: "assembly-demo",
+      userMessage: "Here are my structured answers.",
+      questionAnswers: {
+        startingComponent: "uploaded:unfurl-flow-0.1.0-SNAPSHOT.jar",
+        recursiveCapabilities: ["tools", "rag"]
+      },
+      conversation: []
+    });
   });
 
   it("applies proposal intents through the existing draft intent path", async () => {
@@ -153,10 +225,13 @@ function fakeClient(options: {
         warnings: []
       };
     },
-    converseAuthoring: async () => options.authoringResponse ?? {
+    converseAuthoring: async request => {
+      options.calls?.push(request);
+      return options.authoringResponse ?? {
       kind: "proposal",
       assistantMessage: "Proposal ready.",
       proposal: proposal()
+      };
     },
     getVisualAsset: async assetId => ({
       assetId,

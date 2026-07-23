@@ -590,7 +590,10 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
               label: "Where should this run?",
               type: "SINGLE_SELECT",
               required: true,
-              options: ["Customer Runtime Substrate", "Kubernetes"]
+              options: [
+                { label: "Customer Runtime Substrate", value: "customer-runtime-substrate" },
+                { label: "Kubernetes", value: "kubernetes" }
+              ]
             }
           ]
         });

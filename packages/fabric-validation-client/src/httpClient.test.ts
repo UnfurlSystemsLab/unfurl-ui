@@ -710,7 +710,7 @@ describe("HTTP Studio Fabric client", () => {
             id: "target",
             label: "Target",
             type: "SINGLE_SELECT",
-            options: ["Customer Runtime Substrate"]
+            options: [{ label: "Customer Runtime Substrate", value: "customer-runtime-substrate" }]
           }
         ]
       })

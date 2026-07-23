@@ -520,12 +520,36 @@ export type AuthoringConversationMessage = {
   readonly content: string;
 };
 
+export type AuthoringQuestionOption = {
+  readonly label: string;
+  readonly value: string;
+};
+
 export type AuthoringQuestion = {
   readonly id: string;
   readonly label: string;
-  readonly type: "SINGLE_SELECT" | "MULTI_SELECT" | "FREE_TEXT";
+  readonly type: "SINGLE_SELECT" | "MULTI_SELECT" | "FREE_TEXT" | "TEXT";
   readonly required?: boolean;
-  readonly options?: readonly string[];
+  readonly options?: readonly AuthoringQuestionOption[];
+};
+
+export type AuthoringQuestionAnswers = Record<string, string | readonly string[]>;
+
+export type AuthoringActionContext = {
+  readonly operation: "ADD_COMPONENT" | "REMOVE_COMPONENT" | "REPLACE_COMPONENT" | "CONNECT" | "DISCONNECT" | "CONFIGURE_SUBSTRATE" | string;
+  readonly catalogEntryId?: string;
+  readonly componentId?: string;
+  readonly componentLabel?: string;
+  readonly selectedComponentId?: string;
+  readonly selectedComponentLabel?: string;
+  readonly replacementCatalogEntryId?: string;
+  readonly fromPort?: string;
+  readonly toPort?: string;
+  readonly dependencyPorts?: readonly string[];
+  readonly substratePorts?: readonly string[];
+  readonly offeredCapabilities?: readonly string[];
+  readonly draftSessionId?: string;
+  readonly notes?: string;
 };
 
 export type AuthoringConverseRequest = {
@@ -536,6 +560,8 @@ export type AuthoringConverseRequest = {
   readonly displayName?: string;
   readonly conversation: readonly AuthoringConversationMessage[];
   readonly userMessage?: string;
+  readonly questionAnswers?: AuthoringQuestionAnswers;
+  readonly actionContext?: AuthoringActionContext;
 };
 
 export type AuthoringProposal = {

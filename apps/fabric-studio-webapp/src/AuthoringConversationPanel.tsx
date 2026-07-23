@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
+  AuthoringActionContext,
+  AuthoringQuestion,
+  AuthoringQuestionAnswers,
   AuthoringProposal,
   StudioFabricClient
 } from "@unfurl/fabric-validation-client";
@@ -11,6 +14,13 @@ import {
   initialAuthoringSession,
   type AuthoringSessionState
 } from "./authoringSession.js";
+
+export type AuthoringPromptSeed = {
+  readonly id: number;
+  readonly text: string;
+  readonly actionContext?: AuthoringActionContext;
+  readonly autoSend?: boolean;
+};
 
 /**
  * Props contract for the AI authoring panel. The component intentionally receives only the Fabric
@@ -26,6 +36,7 @@ export type AuthoringConversationPanelProps = {
   readonly assemblyId: string;
   readonly catalogFileId?: string;
   readonly displayName?: string;
+  readonly promptSeed?: AuthoringPromptSeed | undefined;
   readonly state: DraftWorkspaceState | undefined;
   readonly onStateChange: (state: DraftWorkspaceState) => void;
   readonly onDeploymentPolicy?: (proposal: AuthoringProposal) => void;
@@ -43,17 +54,51 @@ export function AuthoringConversationPanel({
   assemblyId,
   catalogFileId,
   displayName,
+  promptSeed,
   state,
   onStateChange,
   onDeploymentPolicy,
   onProposalApplied
 }: AuthoringConversationPanelProps) {
   const [session, setSession] = useState<AuthoringSessionState>(() => initialAuthoringSession());
-  const [prompt, setPrompt] = useState("Build a docs chatbot that answers from approved content and escalates to a human.");
+  const [prompt, setPrompt] = useState("Help me create a governed Fabric assembly from the selected tenant catalog.");
+  const [promptActionContext, setPromptActionContext] = useState<AuthoringActionContext | undefined>();
+  const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<string | undefined>();
+  const lastPromptSeedId = useRef<number | undefined>();
   const readySession = state?.status === "READY" ? state.session : undefined;
   const response = session.status === "READY" ? session.response : undefined;
   const proposal = response?.kind === "proposal" ? response.proposal : undefined;
+
+  /**
+   * Effect adapter: accepts action-scoped prompt seeds from the visual
+   * workbench, optionally auto-submitting them through the same server-side
+   * authoring endpoint as a manually typed prompt.
+   */
+  useEffect(() => {
+    if (!promptSeed || promptSeed.id === lastPromptSeedId.current) {
+      return;
+    }
+    lastPromptSeedId.current = promptSeed.id;
+    setPrompt(promptSeed.text);
+    setPromptActionContext(promptSeed.actionContext);
+    if (promptSeed.autoSend) {
+      void sendPromptText(promptSeed.text, promptSeed.actionContext);
+    } else {
+      setStatus("Review the action assist prompt, then ask the authoring agent.");
+    }
+  }, [promptSeed?.id]);
+
+  /**
+   * State reset: each new clarification response starts with blank local
+   * answers so stale values from a prior action do not leak into follow-up
+   * turns.
+   */
+  useEffect(() => {
+    if (response?.kind === "clarify") {
+      setQuestionAnswers({});
+    }
+  }, [response?.assistantMessage, response?.kind]);
 
   /**
    * Event handler: sends the current prompt to the server-side Foundry-backed authoring endpoint.
@@ -61,7 +106,19 @@ export function AuthoringConversationPanel({
    * state because Fabric has not validated anything yet.
    */
   async function sendPrompt() {
-    if (!prompt.trim()) {
+    await sendPromptText(prompt, promptActionContext);
+  }
+
+  /**
+   * Command helper: sends one prompt with optional visual-edit action context
+   * and structured clarification answers through Fabric's DCP authoring bridge.
+   */
+  async function sendPromptText(
+    message: string,
+    actionContext?: AuthoringActionContext,
+    structuredAnswers?: AuthoringQuestionAnswers
+  ) {
+    if (!message.trim()) {
       setStatus("Add a prompt before asking the authoring agent.");
       return;
     }
@@ -72,7 +129,9 @@ export function AuthoringConversationPanel({
       ...(readySession?.sessionId === undefined ? {} : { sessionId: readySession.sessionId }),
       ...(catalogFileId === undefined || catalogFileId === "" ? {} : { catalogFileId }),
       ...(displayName === undefined || displayName === "" ? {} : { displayName }),
-      userMessage: prompt
+      ...(actionContext === undefined ? {} : { actionContext }),
+      ...(structuredAnswers === undefined || Object.keys(structuredAnswers).length === 0 ? {} : { questionAnswers: structuredAnswers }),
+      userMessage: message
     });
     setSession(next);
     setStatus(next.status === "FAILED" ? next.message : undefined);
@@ -105,6 +164,21 @@ export function AuthoringConversationPanel({
     setStatus(finalized.exportText);
   }
 
+  /**
+   * Event handler: sends the operator's typed/select answers back as a normal
+   * user turn, preserving any actionContext attached to the current assist flow.
+   */
+  async function sendQuestionAnswers() {
+    if (response?.kind !== "clarify") {
+      return;
+    }
+    await sendPromptText(
+      "Here are my structured answers.",
+      promptActionContext,
+      structuredQuestionAnswers(response.questions, questionAnswers)
+    );
+  }
+
   return (
     <section className="authoring-panel" aria-label="AI contract authoring">
       <div className="panel-title">
@@ -134,17 +208,42 @@ export function AuthoringConversationPanel({
           {response.questions.map(question => (
             <label key={question.id}>
               {question.label}
-              {question.type === "FREE_TEXT" ? (
-                <input aria-label={question.label} />
+              {question.type === "FREE_TEXT" || question.type === "TEXT" ? (
+                <input
+                  aria-label={question.label}
+                  value={questionAnswers[question.id] ?? ""}
+                  onChange={event => setQuestionAnswers(current => ({
+                    ...current,
+                    [question.id]: event.target.value
+                  }))}
+                />
               ) : (
-                <select aria-label={question.label} multiple={question.type === "MULTI_SELECT"}>
+                <select
+                  aria-label={question.label}
+                  multiple={question.type === "MULTI_SELECT"}
+                  value={question.type === "MULTI_SELECT"
+                    ? (questionAnswers[question.id] ?? "").split("\n").filter(Boolean)
+                    : questionAnswers[question.id] ?? ""}
+                  onChange={event => {
+                    const value = question.type === "MULTI_SELECT"
+                      ? Array.from(event.currentTarget.selectedOptions).map(option => option.value).join("\n")
+                      : event.currentTarget.value;
+                    setQuestionAnswers(current => ({
+                      ...current,
+                      [question.id]: value
+                    }));
+                  }}
+                >
                   {(question.options ?? []).map(option => (
-                    <option key={option}>{option}</option>
+                    <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
               )}
             </label>
           ))}
+          <button type="button" className="secondary" onClick={() => void sendQuestionAnswers()}>
+            Send Answers
+          </button>
         </div>
       )}
       {response?.kind === "gap" && (
@@ -171,4 +270,30 @@ export function AuthoringConversationPanel({
       {status && <pre className="authoring-status">{status}</pre>}
     </section>
   );
+}
+
+/**
+ * Answer projector: converts the controlled form state into the structured map
+ * Fabric and Foundry consume, preserving select option values rather than UI
+ * labels or prose bullet text.
+ */
+function structuredQuestionAnswers(
+  questions: readonly AuthoringQuestion[],
+  answers: Record<string, string>
+): AuthoringQuestionAnswers {
+  const structured: AuthoringQuestionAnswers = {};
+  for (const question of questions) {
+    const raw = answers[question.id] ?? "";
+    if (question.type === "MULTI_SELECT") {
+      const selected = raw.split("\n").filter(Boolean);
+      structured[question.id] = selected;
+      continue;
+    }
+    if (question.type === "SINGLE_SELECT") {
+      structured[question.id] = raw || question.options?.[0]?.value || "";
+      continue;
+    }
+    structured[question.id] = raw.trim();
+  }
+  return structured;
 }

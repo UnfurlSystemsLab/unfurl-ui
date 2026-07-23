@@ -46,6 +46,7 @@ describe("DraftWorkspacePanel", () => {
     assert.match(html, /Trigger Ingress/);
     assert.match(html, /Blocked/);
     assert.match(html, /Validate &amp; Replace/);
+    assert.match(html, /Ask Agent/);
     assert.match(html, /Validate Connection/);
   });
 
@@ -122,6 +123,7 @@ describe("DraftWorkspacePanel", () => {
 
     assert.match(html, /Draft Inventory/);
     assert.match(html, /Remove Component/);
+    assert.match(html, /Ask Agent/);
   });
 
   it("replays accepted authoring proposal intents into the draft inventory", () => {

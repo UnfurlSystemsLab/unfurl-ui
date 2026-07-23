@@ -19,6 +19,7 @@ describe("AuthoringConversationPanel", () => {
 
     assert.match(html, /AI Contract Authoring/);
     assert.match(html, /server-side foundry agent/);
+    assert.match(html, /Help me create a governed Fabric assembly from the selected tenant catalog/);
     assert.match(html, /Describe the governed component contract you need/);
     assert.match(html, /Ask Agent/);
     assert.match(html, /Accept Proposal/);
