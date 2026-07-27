@@ -434,13 +434,52 @@ function createTimeoutFetch(fetchImpl: FetchLike, timeoutMs: number | undefined)
       }, timeoutMs);
     });
     try {
-      return await Promise.race([fetchPromise, timeoutPromise]);
+      const response = await Promise.race([fetchPromise, timeoutPromise]);
+      return {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        json: () => withTimeout(
+          response.json(),
+          timeoutMs,
+          `Fabric Studio API response body timed out after ${timeoutMs} ms: ${init?.method ?? "GET"} ${input}`,
+          error => controller.abort(error)
+        )
+      };
     } finally {
       if (timeoutId !== undefined) {
         clearTimeout(timeoutId);
       }
     }
   };
+}
+
+/**
+ * Timeout decorator: bounds deferred response-body parsing as well as the initial
+ * header fetch so UI callers do not spin forever after a proxy or backend has
+ * already opened a 2xx response.
+ */
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+  onTimeout?: (error: Error) => void
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error(message);
+      onTimeout?.(error);
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 /**

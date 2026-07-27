@@ -836,6 +836,31 @@ describe("HTTP Studio Fabric client", () => {
       /Fabric Studio API timed out after 5 ms/
     );
   });
+
+  it("times out stalled Studio API response bodies", async () => {
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      requestTimeoutMs: 5,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => new Promise<never>(() => {
+          // Intentionally unresolved: verifies 2xx headers cannot leave the UI spinner stuck.
+        })
+      })
+    });
+
+    await assert.rejects(
+      () => client.converseAuthoring!({
+        tenantId: "tenant-local",
+        assemblyId: "assembly-demo",
+        conversation: [],
+        userMessage: "Build an AgentFlow"
+      }),
+      /Fabric Studio API response body timed out after 5 ms/
+    );
+  });
 });
 
 type FetchCall = {

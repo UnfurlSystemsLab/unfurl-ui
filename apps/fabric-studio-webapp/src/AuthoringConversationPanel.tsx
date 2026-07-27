@@ -172,10 +172,11 @@ export function AuthoringConversationPanel({
     if (response?.kind !== "clarify") {
       return;
     }
+    const structuredAnswers = structuredQuestionAnswers(response.questions, questionAnswers);
     await sendPromptText(
-      "Here are my structured answers.",
+      questionAnswerSummary(response.questions, structuredAnswers),
       promptActionContext,
-      structuredQuestionAnswers(response.questions, questionAnswers)
+      structuredAnswers
     );
   }
 
@@ -277,7 +278,7 @@ export function AuthoringConversationPanel({
  * Fabric and Foundry consume, preserving select option values rather than UI
  * labels or prose bullet text.
  */
-function structuredQuestionAnswers(
+export function structuredQuestionAnswers(
   questions: readonly AuthoringQuestion[],
   answers: Record<string, string>
 ): AuthoringQuestionAnswers {
@@ -296,4 +297,37 @@ function structuredQuestionAnswers(
     structured[question.id] = raw.trim();
   }
   return structured;
+}
+
+/**
+ * Context projector: renders selected clarification answers as human-readable
+ * labels while preserving the stable structured values in `questionAnswers`.
+ * Foundry treats `questionAnswers` as authority, and uses this text only to
+ * recover semantics when a provider emitted generic ids such as `q1`.
+ */
+export function questionAnswerSummary(
+  questions: readonly AuthoringQuestion[],
+  answers: AuthoringQuestionAnswers
+): string {
+  const lines = ["Here are my structured answers:"];
+  for (const question of questions) {
+    const answer = answers[question.id];
+    if (Array.isArray(answer)) {
+      const labels = answer.map(value => optionLabel(question, value));
+      lines.push(`- ${question.label} (${question.id}): ${labels.join(", ")} [${answer.join(", ")}]`);
+      continue;
+    }
+    const value = typeof answer === "string" ? answer : "";
+    const label = optionLabel(question, value);
+    lines.push(`- ${question.label} (${question.id}): ${label}${label === value ? "" : ` [${value}]`}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Lookup helper: maps an option value back to its operator-facing label for
+ * answer summaries without changing the stable value sent to Fabric.
+ */
+function optionLabel(question: AuthoringQuestion, value: string): string {
+  return question.options?.find(option => option.value === value)?.label ?? value;
 }

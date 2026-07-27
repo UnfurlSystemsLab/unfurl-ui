@@ -36,7 +36,7 @@ unfurl-fabric (Studio API)              thin DCP delegator — depends ONLY on t
   StudioAuthoringHandler                the endpoint
   StudioCatalogService.converseAuthoring
     if a ContractInvocable is injected → build an agent.run ContractInvocation
-        { userMessage, conversation, questionAnswers, catalog } and call it; map result → StudioAuthoringConverseResponse
+        { userMessage, conversation, questionAnswers, catalogSummary, catalogPreview, toolHydration } and call it; map result → StudioAuthoringConverseResponse
     else → deterministic in-Fabric bridge (fallback)
     + grounding guard: re-validate every proposed ADD_COMPONENT against the admitted catalog
   DcpAuthoringClient implements ContractInvocable
@@ -53,7 +53,7 @@ unfurl-foundry (agent platform)         runs the agent; owns provider + tool reg
   providers/ModelProviderPlugin (SPI) + DeploymentProviderLoader + LoadedModelProviderPlugins
   providers/FoundryEnvironmentModelProviders + AnthropicModelProvider   key from ANTHROPIC_API_KEY (env)
   deployment/                           agents/fabric-authoring.agent.yaml (DAG), prompts/, tools/*.jar, providers/
-  sample-authoring-tools/               reference tool JAR: fabric.catalog-query / needs / intent (ToolPlugins)
+  sample-authoring-tools/               reference tool JAR: needs / intent helpers; catalog-query is hydrated through Studio HTTP tools in the default deployment
 ```
 
 ## The delegation seam (the load-bearing boundary)
@@ -64,7 +64,7 @@ unfurl-foundry (agent platform)         runs the agent; owns provider + tool reg
 
 ## Grounding (defence-in-depth)
 
-The agent composes only from the admitted catalog: the `fabric.catalog-query` tool keeps the model honest, **and** Fabric independently re-validates every proposed `ADD_COMPONENT` against the admitted catalog (`StudioCatalogService.mapAuthoringOutput` → `rejectIntentAgainstCatalog`). An unadmitted component becomes a **gap**, regardless of model/tool output.
+The agent composes only from the admitted catalog: Fabric sends compact catalog summaries, the `fabric.catalog-query` Studio HTTP tool hydrates details on demand, **and** Fabric independently re-validates every proposed `ADD_COMPONENT` against the admitted catalog (`StudioCatalogService.mapAuthoringOutput` → `rejectIntentAgainstCatalog`). An unadmitted component becomes a **gap**, regardless of model/tool output.
 
 ## Phases (status reflects committed code)
 
@@ -73,11 +73,12 @@ The agent platform runs the DAG and owns provider/tool registration: `FoundryDcp
 **Tests:** `FoundryDcpServerTest`, `AgentRunInvocableTest`, `AgentRunBootstrapTest`, `DeploymentToolLoaderTest`, `DeploymentProviderLoaderTest`, `AnthropicModelProviderTest`, `FoundryEnvironmentModelProvidersTest`, `ModelProviderPluginTest`.
 
 ### Phase 2 — Fabric delegates over DCP   **[IMPLEMENTED]**   *(unfurl-fabric)*
-`POST /studio/authoring/converse` (`StudioAuthoringHandler`) → `StudioCatalogService.converseAuthoring`, which builds an `agent.run` `ContractInvocation` `{ userMessage, conversation, catalog }`, routes it through the injected `ContractInvocable` (`DcpAuthoringClient` from `UNFURL_FOUNDRY_DCP_ENDPOINT`), maps the result to `StudioAuthoringConverseResponse`, and re-validates proposals against the catalog. Deterministic bridge fallback when no endpoint is configured.
+`POST /studio/authoring/converse` (`StudioAuthoringHandler`) → `StudioCatalogService.converseAuthoring`, which builds an `agent.run` `ContractInvocation` with compact context (`userMessage`, `conversation`, `questionAnswers`, `catalogSummary`, `catalogPreview`, `toolHydration`, selected catalog/session file rows), routes it through the injected `ContractInvocable` (`DcpAuthoringClient` from `UNFURL_FOUNDRY_DCP_ENDPOINT`), maps the result to `StudioAuthoringConverseResponse`, and re-validates proposals against the catalog. Detailed catalog expansion is done through Fabric/Flow tools such as `fabric.catalog-query`, not by embedding full catalog manifests in the prompt. Deterministic bridge fallback when no endpoint is configured.
 **Tests:** `DcpAuthoringClientTest`, `StudioCatalogServiceAuthoringDcpTest` (proposal/gap routing, fallback, unadmitted→gap), `FoundryDcpAuthoringEndToEndTest` (Fabric `DcpAuthoringClient` → real `FoundryDcpServer` → scripted-model agent run).
 
 ### Phase 3 — Conversational UI panel   **[IMPLEMENTED]**   *(unfurl-ui)*
-`AuthoringConversationPanel` + `authoringSession` drive `/studio/authoring/converse`, render typed clarifying questions, send structured `questionAnswers` keyed by question id, preview the proposal, and apply accepted intents into the existing `draftWorkspace`. Select-style options are `{ label, value }` objects: the UI renders labels and sends values. The visual workbench can also seed the same panel from action-scoped controls such as Add, Remove, Replace, Connect, or Substrate configuration; those controls pass `actionContext` so Foundry can ask configuration or impact questions without owning the mutation. `fabric-validation-client` gains the converse method + mock. `authoringNoBrowserModelSdk.test.ts` guards that the webapp makes no model call and carries no key.
+`AuthoringConversationPanel` + `authoringSession` drive `/studio/authoring/converse`, render typed clarifying questions, send structured `questionAnswers` keyed by question id, preview the proposal, and apply accepted intents into the existing `draftWorkspace`. Select-style options are `{ label, value }` objects: the UI renders labels and sends values. Follow-up turns also include a human-readable answer summary in `userMessage` so Foundry can recover semantics when a provider emits generic ids such as `q1`; `questionAnswers` remains the authoritative stable-value map. The visual workbench can also seed the same panel from action-scoped controls such as Add, Remove, Replace, Connect, or Substrate configuration; those controls pass `actionContext` so Foundry can ask configuration or impact questions without owning the mutation. `fabric-validation-client` gains the converse method + mock. `authoringNoBrowserModelSdk.test.ts` guards that the webapp makes no model call and carries no key.
+The HTTP client must bound both the initial fetch and the JSON response body parse; a backend or proxy that opens a 2xx response but never completes the body is surfaced as a Studio API timeout instead of leaving the authoring panel in its "Asking authoring agent..." state.
 
 ### Phase 4 — Wire proposal into resolve/compile/export   **[IMPLEMENTED — reuse]**   *(unfurl-ui)*
 The accepted draft flows through the existing steps unchanged: `resolveDeployment` → `compileCandidate({ sign: true, deploymentPolicy })` → `draftExport`. An AI-authored signed contract is identical in shape/trust to a visually-authored one.

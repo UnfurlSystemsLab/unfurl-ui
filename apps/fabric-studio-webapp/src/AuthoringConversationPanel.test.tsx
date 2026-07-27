@@ -2,7 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { renderToString } from "react-dom/server";
 import { createHttpStudioFabricClient, createMockStudioApiFetch } from "@unfurl/fabric-validation-client";
-import { AuthoringConversationPanel } from "./AuthoringConversationPanel.js";
+import {
+  AuthoringConversationPanel,
+  questionAnswerSummary,
+  structuredQuestionAnswers
+} from "./AuthoringConversationPanel.js";
 import type { DraftWorkspaceState } from "./draftWorkspace.js";
 
 describe("AuthoringConversationPanel", () => {
@@ -38,6 +42,32 @@ describe("AuthoringConversationPanel", () => {
     );
 
     assert.match(html, /Studio authoring endpoint unavailable/);
+  });
+
+  it("summarizes structured answers with question labels for generic ids", () => {
+    const questions = [{
+      id: "q1",
+      label: "Which model provider should the Foundry runtime utilize?",
+      type: "SINGLE_SELECT" as const,
+      options: [
+        { label: "Gemini", value: "uploaded:unfurl-fabric-advisor-gemini-0.1.0-SNAPSHOT.jar" }
+      ]
+    }];
+    const answers = structuredQuestionAnswers(questions, {
+      q1: "uploaded:unfurl-fabric-advisor-gemini-0.1.0-SNAPSHOT.jar"
+    });
+
+    assert.deepEqual(answers, {
+      q1: "uploaded:unfurl-fabric-advisor-gemini-0.1.0-SNAPSHOT.jar"
+    });
+    assert.match(
+      questionAnswerSummary(questions, answers),
+      /Which model provider should the Foundry runtime utilize\? \(q1\): Gemini/
+    );
+    assert.match(
+      questionAnswerSummary(questions, answers),
+      /uploaded:unfurl-fabric-advisor-gemini-0\.1\.0-SNAPSHOT\.jar/
+    );
   });
 });
 
