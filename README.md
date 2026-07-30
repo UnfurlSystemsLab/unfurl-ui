@@ -1,5 +1,11 @@
 # unfurl-ui
 
+Use `unfurl-ui` when you need the browser experience for Unfurl: the host shell,
+Fabric Studio, shared UI contracts, visual scene model, theming, and rendering
+packages. It is the frontend workspace that lets operators inspect, author, and
+validate governed compositions without making the visual scene the source of
+truth.
+
 `unfurl-ui` is the coordinated frontend workspace for Unfurl. It is the frontend analogue of the multi-module `unfurl-substrate` repo: one coherent layer with multiple narrow apps and packages that release together.
 
 The workspace starts with the host shell and Fabric Studio scaffolding from:
