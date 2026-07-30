@@ -137,6 +137,23 @@ describe("authoring session", () => {
     ]);
   });
 
+  it("emits progressive draft states after each accepted authoring intent", async () => {
+    const revisions: number[] = [];
+    const client = fakeClient();
+    const draft = await createDraftWorkspace(client, { baseCatalogHash: "sha256:catalog" });
+
+    const result = await applyAuthoringProposal(client, draft, proposal(), {
+      onIntentApplied: progress => {
+        if (progress.state.status === "READY") {
+          revisions.push(progress.state.session.sceneRevision);
+        }
+      }
+    });
+
+    assert.equal(result.appliedIntentCount, 2);
+    assert.deepEqual(revisions, [8, 9]);
+  });
+
   it("resolves deployment compiles signed output and renders existing export bundle", async () => {
     const calls: unknown[] = [];
     const client = fakeClient({ calls });
@@ -190,20 +207,25 @@ function fakeClient(options: {
   readonly deploymentResponse?: ResolveDeploymentResponse;
   readonly calls?: unknown[];
 } = {}): StudioFabricClient {
+  let sceneRevision = 7;
   return {
     listCatalogVisuals: async () => ({ catalogHash: "sha256:catalog", entries: [] }),
     loadCompositionView: async () => ({ view: { contractId: "contract", candidateId: "cand", components: [], ports: [], substrate: [], warnings: [] } }),
     createDraftComposition: async () => ({ session: session(7) }),
-    getDraftSession: async () => session((options.calls?.length ?? 0) + 7, "cand-next"),
+    getDraftSession: async () => session(sceneRevision, "cand-next"),
     applyIntent: async intent => {
       options.calls?.push(intent);
-      return options.intentResponse ?? {
+      const response = options.intentResponse ?? {
         status: "VALID",
         newRevision: intent.baseRevision + 1,
         updatedCandidateId: "cand-next",
         requiredSubstratePorts: [],
         warnings: []
       };
+      if (response.status === "VALID") {
+        sceneRevision = response.newRevision;
+      }
+      return response;
     },
     compileCandidate: async request => {
       options.calls?.push(request);

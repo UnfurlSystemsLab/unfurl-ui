@@ -1,8 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createHttpStudioFabricClient, type FetchLike } from "./index.js";
+import { DEFAULT_STUDIO_REQUEST_TIMEOUT_MS, createHttpStudioFabricClient, type FetchLike } from "./index.js";
 
 describe("HTTP Studio Fabric client", () => {
+  it("keeps the default timeout aligned with Foundry-backed authoring turns", () => {
+    assert.equal(DEFAULT_STUDIO_REQUEST_TIMEOUT_MS, 120_000);
+  });
+
   it("lists catalog visuals from the Studio catalog endpoint", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

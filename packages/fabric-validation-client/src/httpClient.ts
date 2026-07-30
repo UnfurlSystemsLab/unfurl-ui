@@ -70,7 +70,7 @@ export type FetchLike = (
   }
 ) => Promise<FetchResponseLike>;
 
-export const DEFAULT_STUDIO_REQUEST_TIMEOUT_MS = 30_000;
+export const DEFAULT_STUDIO_REQUEST_TIMEOUT_MS = 120_000;
 
 export type HttpStudioFabricClientOptions = {
   readonly baseUrl: string;

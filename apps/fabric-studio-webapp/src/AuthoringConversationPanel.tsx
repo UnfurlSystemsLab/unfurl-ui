@@ -147,7 +147,12 @@ export function AuthoringConversationPanel({
       return;
     }
     setStatus("Applying proposal through Fabric validation...");
-    const applied = await applyAuthoringProposal(client, state, proposal);
+    const applied = await applyAuthoringProposal(client, state, proposal, {
+      onIntentApplied: progress => {
+        setStatus(`Applied ${progress.appliedIntentCount} of ${proposal.intents.length} authoring intents...`);
+        onStateChange(progress.state);
+      }
+    });
     onStateChange(applied.state);
     onProposalApplied?.(proposal, applied.appliedIntentCount);
     onDeploymentPolicy?.(proposal);
@@ -159,6 +164,7 @@ export function AuthoringConversationPanel({
       setStatus("Fabric rejected part of the proposal.");
       return;
     }
+    setStatus("Resolving deployment and compiling export...");
     const finalized = await finalizeAuthoringProposal(client, applied.state, applied.deploymentPolicy);
     onStateChange(finalized.state);
     setStatus(finalized.exportText);

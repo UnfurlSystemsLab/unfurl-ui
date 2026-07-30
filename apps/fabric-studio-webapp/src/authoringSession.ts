@@ -43,6 +43,16 @@ export type ApplyAuthoringProposalResult = {
   readonly appliedIntentCount: number;
 };
 
+export type ApplyAuthoringProposalProgress = {
+  readonly state: DraftWorkspaceState;
+  readonly intent: AuthoringProposal["intents"][number];
+  readonly appliedIntentCount: number;
+};
+
+export type ApplyAuthoringProposalOptions = {
+  readonly onIntentApplied?: (progress: ApplyAuthoringProposalProgress) => void | Promise<void>;
+};
+
 export type FinalizeAuthoringProposalResult = {
   readonly state: DraftWorkspaceState;
   readonly deployment?: ResolveDeploymentResponse | undefined;
@@ -95,7 +105,8 @@ export async function converseAuthoring(
 export async function applyAuthoringProposal(
   client: Pick<StudioFabricClient, "applyIntent" | "getDraftSession">,
   state: DraftWorkspaceState,
-  proposal: AuthoringProposal
+  proposal: AuthoringProposal,
+  options: ApplyAuthoringProposalOptions = {}
 ): Promise<ApplyAuthoringProposalResult> {
   let next = state;
   let appliedIntentCount = 0;
@@ -108,6 +119,7 @@ export async function applyAuthoringProposal(
       return { state: next, deploymentPolicy: proposal.deploymentPolicy, appliedIntentCount };
     }
     appliedIntentCount += 1;
+    await options.onIntentApplied?.({ state: next, intent, appliedIntentCount });
   }
   return { state: next, deploymentPolicy: proposal.deploymentPolicy, appliedIntentCount };
 }
