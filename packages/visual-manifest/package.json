@@ -6,5 +6,6 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "typecheck": "tsc -b"
-  }
+  },
+  "license": "Apache-2.0"
 }

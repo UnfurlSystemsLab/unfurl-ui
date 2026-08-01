@@ -6,6 +6,17 @@ packages. It is the frontend workspace that lets operators inspect, author, and
 validate governed compositions without making the visual scene the source of
 truth.
 
+## License And Community Model
+
+`unfurl-ui` is published under the [Apache License 2.0](LICENSE). Contributions
+are accepted under the same license unless explicitly stated otherwise.
+
+Unfurl Studio's community UI surface is intended to stay open so contributors
+can improve the host shell, visual composition experience, shared UI contracts,
+themes, and rendering packages. Enterprise-only modules, hosted services,
+managed deployments, support, and commercial integrations may be offered under
+separate commercial terms outside this community repository.
+
 `unfurl-ui` is the coordinated frontend workspace for Unfurl. It is the frontend analogue of the multi-module `unfurl-substrate` repo: one coherent layer with multiple narrow apps and packages that release together.
 
 The workspace starts with the host shell and Fabric Studio scaffolding from:
