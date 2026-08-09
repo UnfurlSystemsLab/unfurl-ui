@@ -110,9 +110,9 @@ if ($Mode -eq 'preview' -and -not $NoBuild) {
 $arguments = if ($Mode -eq 'preview') {
     @('run', 'preview', '-w', '@unfurl/host-shell', '--', '--host', '127.0.0.1', '--port', "$resolvedPort")
 } elseif ($Mode -eq 'dev') {
-    @('run', 'dev:studio', '--', '--host', '127.0.0.1', '--port', "$resolvedPort")
+    @('run', 'dev', '-w', '@unfurl/host-shell', '--', '--host', '127.0.0.1', '--port', "$resolvedPort")
 } else {
-    @('run', 'dev:studio:fixture', '--', '--host', '127.0.0.1', '--port', "$resolvedPort")
+    @('run', 'dev:fixture', '-w', '@unfurl/host-shell', '--', '--host', '127.0.0.1', '--port', "$resolvedPort")
 }
 
 Write-Host "Starting Unfurl Studio ($Mode mode)..."

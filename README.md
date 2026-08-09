@@ -171,6 +171,110 @@ Useful options:
 .\scripts\launch-studio.ps1 -Mode preview -NoBuild
 ```
 
+### Startup With Lab Services
+
+Use the root startup script when Studio should run against the real Lab service
+containers instead of fixture data. On Windows, the batch wrapper is the
+simplest entry point:
+
+```bat
+Startup.bat
+```
+
+PowerShell can call the implementation directly:
+
+```powershell
+.\Startup.ps1
+```
+
+By default, startup pulls these GitHub Container Registry images, starts them
+with Docker Compose, waits for their health endpoints, then launches Studio in
+live mode at `http://127.0.0.1:5173/components/fabric-studio/workspace`:
+
+```text
+ghcr.io/unfurlsystemslab/unfurl-fabric-studio:0.1.0-snapshot
+ghcr.io/unfurlsystemslab/unfurl-foundry:0.1.0-snapshot
+ghcr.io/unfurlsystemslab/unfurl-flow:0.1.0-snapshot
+```
+
+Validate only the dependency pull/start/health path without launching the UI:
+
+```bat
+Startup.bat -Mode dev -NoUi
+```
+
+Skip the GHCR pull when testing freshly built local images:
+
+```powershell
+.\Startup.ps1 -Mode dev -NoPull -NoUi
+```
+
+Stop the Lab service containers:
+
+```powershell
+.\Stop.ps1
+```
+
+Batch and Bash wrappers are also available:
+
+```bat
+Stop.bat
+```
+
+```bash
+./Stop.sh
+```
+
+The stop scripts also terminate local Unfurl UI Vite/Node processes on the
+Studio ports (`5173`, `5174`, and preview `4173`) plus their child processes.
+They do not stop unrelated Docker containers or arbitrary Node processes.
+
+Use `-RemoveVolumes` only when you want to delete the local Studio state volume
+created by Docker Compose:
+
+```powershell
+.\Stop.ps1 -RemoveVolumes
+```
+
+Foundry credentials remain outside source. Put local values such as
+`UNFURL_FOUNDRY_CREDENTIAL_KEY`, `GEMINI_API_KEY`, and
+`UNFURL_FOUNDRY_MODEL_PROVIDER=spring-ai-google-genai` in
+`../.debug/foundry.env`, or export them in the shell before startup. The script
+copies the Foundry deployment metadata into `.startup/foundry-deployment` and
+rewrites Fabric tool endpoints for the Docker network; `.startup/` is ignored.
+
+Build and push the dependent images to the Lab registry:
+
+```powershell
+.\scripts\Publish-DependentImages.ps1 -Push
+```
+
+For a local push, Docker must be logged into GHCR with a token that has
+`write:packages`, `read:packages`, and access to `UnfurlSystemsLab`:
+
+```powershell
+$env:GHCR_USER = gh api user --jq .login
+$env:GHCR_TOKEN = "<classic PAT with repo, read:packages, write:packages>"
+$env:GHCR_TOKEN | docker login ghcr.io -u $env:GHCR_USER --password-stdin
+.\scripts\Publish-DependentImages.ps1 -Push
+```
+
+The same image publish path is available in GitHub Actions as the manual
+`Manual Publish Lab Docker Images` workflow. It uses the org `CI_REPO_TOKEN` to
+check out private Lab repos, read Maven packages, and push GHCR images.
+
+Or publish first and then start:
+
+```powershell
+.\Startup.ps1 -PublishImages
+```
+
+Bash is also available on machines with Docker and PowerShell installed:
+
+```bash
+./Startup.sh --mode dev
+```
+
 ### Demo fallbacks
 
 By default the workspace shows real backend data or an honest empty/error state. When an

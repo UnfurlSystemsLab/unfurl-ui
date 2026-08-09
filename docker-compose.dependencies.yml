@@ -1,0 +1,55 @@
+services:
+  unfurl-fabric:
+    image: ${UNFURL_FABRIC_IMAGE:-ghcr.io/unfurlsystemslab/unfurl-fabric-studio:0.1.0-snapshot}
+    container_name: unfurl-fabric-studio
+    ports:
+      - "${UNFURL_FABRIC_PORT:-7878}:7878"
+    environment:
+      JAVA_OPTS: ${UNFURL_FABRIC_JAVA_OPTS:-}
+      UNFURL_STUDIO_BIND: "0.0.0.0"
+      UNFURL_STUDIO_PORT: "7878"
+      UNFURL_STUDIO_STATE_PATH: /opt/unfurl/fabric/state/studio-state.json
+      UNFURL_FOUNDRY_DCP_ENDPOINT: http://unfurl-foundry:7979/dcp/agent.run
+    volumes:
+      - unfurl-fabric-state:/opt/unfurl/fabric/state
+    networks:
+      - unfurl-lab
+
+  unfurl-foundry:
+    image: ${UNFURL_FOUNDRY_IMAGE:-ghcr.io/unfurlsystemslab/unfurl-foundry:0.1.0-snapshot}
+    container_name: unfurl-foundry-agent
+    ports:
+      - "${UNFURL_FOUNDRY_PORT:-7979}:7979"
+    environment:
+      JAVA_OPTS: ${UNFURL_FOUNDRY_JAVA_OPTS:-}
+      UNFURL_FOUNDRY_PORT: "7979"
+      UNFURL_FOUNDRY_DEPLOYMENT_ROOT: /opt/unfurl/foundry
+      UNFURL_FOUNDRY_MODEL_PROVIDER: ${UNFURL_FOUNDRY_MODEL_PROVIDER:-spring-ai-google-genai}
+      UNFURL_FOUNDRY_MODEL_REF: ${UNFURL_FOUNDRY_MODEL_REF:-customer-configured}
+      UNFURL_FOUNDRY_MODEL_NAME: ${UNFURL_FOUNDRY_MODEL_NAME:-gemini-3.1-flash-lite}
+      UNFURL_FOUNDRY_GEMINI_THINKING_BUDGET: ${UNFURL_FOUNDRY_GEMINI_THINKING_BUDGET:-0}
+      UNFURL_FOUNDRY_CREDENTIAL_KEY: ${UNFURL_FOUNDRY_CREDENTIAL_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    volumes:
+      - ./.startup/foundry-deployment:/opt/unfurl/foundry:ro
+    networks:
+      - unfurl-lab
+
+  unfurl-flow:
+    image: ${UNFURL_FLOW_IMAGE:-ghcr.io/unfurlsystemslab/unfurl-flow:0.1.0-snapshot}
+    container_name: unfurl-flow-runtime
+    ports:
+      - "${UNFURL_FLOW_PORT:-8080}:8080"
+    environment:
+      JAVA_OPTS: ${UNFURL_FLOW_JAVA_OPTS:-}
+      UNFURL_FLOW_DEPLOYMENT_ROOT: ${UNFURL_FLOW_DEPLOYMENT_ROOT:-}
+    networks:
+      - unfurl-lab
+
+networks:
+  unfurl-lab:
+    name: unfurl-lab
+
+volumes:
+  unfurl-fabric-state:

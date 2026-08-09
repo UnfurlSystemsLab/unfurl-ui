@@ -1,0 +1,133 @@
+name: Manual Publish Lab Docker Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: GHCR image tag to publish
+        required: true
+        default: 0.1.0-snapshot
+      component_ref:
+        description: Git ref to check out for dependent service repos
+        required: true
+        default: master
+      push_latest:
+        description: Also tag and push latest
+        required: true
+        type: boolean
+        default: false
+      skip_tests:
+        description: Package services with -DskipTests
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.image_tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and push Lab service images
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify CI_REPO_TOKEN is configured
+        env:
+          CI_REPO_TOKEN_PRESENT: ${{ secrets.CI_REPO_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${CI_REPO_TOKEN_PRESENT}" != "true" ]]; then
+            echo "::error title=Missing CI_REPO_TOKEN::Configure CI_REPO_TOKEN with repo, workflow, read:packages, and write:packages so this workflow can check out private Lab repos, read Maven packages, and push GHCR images."
+            exit 1
+          fi
+
+      - name: Checkout unfurl-ui
+        uses: actions/checkout@v4
+        with:
+          path: unfurl-ui
+
+      - name: Checkout unfurl-fabric
+        uses: actions/checkout@v4
+        with:
+          repository: UnfurlSystemsLab/unfurl-fabric
+          ref: ${{ inputs.component_ref }}
+          token: ${{ secrets.CI_REPO_TOKEN }}
+          path: unfurl-fabric
+
+      - name: Checkout unfurl-foundry
+        uses: actions/checkout@v4
+        with:
+          repository: UnfurlSystemsLab/unfurl-foundry
+          ref: ${{ inputs.component_ref }}
+          token: ${{ secrets.CI_REPO_TOKEN }}
+          path: unfurl-foundry
+
+      - name: Checkout unfurl-flow
+        uses: actions/checkout@v4
+        with:
+          repository: UnfurlSystemsLab/unfurl-flow
+          ref: ${{ inputs.component_ref }}
+          token: ${{ secrets.CI_REPO_TOKEN }}
+          path: unfurl-flow
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          server-id: github
+          server-username: MAVEN_GITHUB_USER
+          server-password: MAVEN_GITHUB_TOKEN
+
+      - name: Login to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.CI_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Package services
+        env:
+          MAVEN_GITHUB_USER: ${{ github.actor }}
+          MAVEN_GITHUB_TOKEN: ${{ secrets.CI_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          MAVEN_FLAGS=(--batch-mode --no-transfer-progress)
+          if [[ "${{ inputs.skip_tests }}" == "true" ]]; then
+            MAVEN_FLAGS+=(-DskipTests)
+          fi
+          for repo in unfurl-fabric unfurl-foundry unfurl-flow; do
+            (cd "${repo}" && mvn "${MAVEN_FLAGS[@]}" package)
+          done
+
+      - name: Build and push images
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          PUSH_LATEST: ${{ inputs.push_latest }}
+        run: |
+          set -euo pipefail
+          owner="unfurlsystemslab"
+
+          build_and_push() {
+            local repo="$1"
+            local image="$2"
+            local jar_file="$3"
+            local image_ref="ghcr.io/${owner}/${image}:${IMAGE_TAG}"
+            docker build -f "${repo}/Dockerfile" --build-arg "JAR_FILE=${jar_file}" -t "${image_ref}" "${repo}"
+            docker push "${image_ref}"
+            if [[ "${PUSH_LATEST}" == "true" ]]; then
+              local latest_ref="ghcr.io/${owner}/${image}:latest"
+              docker tag "${image_ref}" "${latest_ref}"
+              docker push "${latest_ref}"
+            fi
+          }
+
+          build_and_push unfurl-fabric unfurl-fabric-studio target/unfurl-fabric-studio-server.jar
+          build_and_push unfurl-foundry unfurl-foundry target/unfurl-foundry-0.1.0-SNAPSHOT.jar
+          build_and_push unfurl-flow unfurl-flow target/unfurl-flow-0.1.0-SNAPSHOT.jar

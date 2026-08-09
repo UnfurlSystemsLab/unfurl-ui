@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { DynamicDcpProjectionResponse } from "@unfurl/fabric-validation-client";
@@ -145,6 +145,10 @@ type SceneHandles = {
   };
 };
 
+type WebGlFailure = {
+  readonly reason: string;
+};
+
 const initialCameraPosition = new THREE.Vector3(7.9, 5.0, 10.2);
 const initialCameraTarget = new THREE.Vector3(0.2, -0.7, 0.12);
 const viewShortcuts = ["Assembly", "Exploded", "Ports", "Substrate", "Validation"] as const;
@@ -158,6 +162,10 @@ const defaultSemanticProjection: SemanticDcpSceneProjection = {
   ]
 };
 
+/**
+ * Adapter component: projects the governed Fabric assembly model into a Three.js
+ * scene while preserving the React workspace when WebGL is unavailable.
+ */
 export function ThreeAssemblyScene({
   activeView,
   selectedSurface,
@@ -207,6 +215,7 @@ export function ThreeAssemblyScene({
   // tears down and rebuilds those groups in place.
   const dynamicProjectionRef = useRef(dynamicProjection);
   const draftCatalogEntryIdsRef = useRef(draftCatalogEntryIds);
+  const [webGlFailure, setWebGlFailure] = useState<WebGlFailure | undefined>();
 
   onSelectRef.current = onSelect;
   onSelectPartRef.current = onSelectPart;
@@ -232,7 +241,14 @@ export function ThreeAssemblyScene({
     }
     const hostElement = host;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    } catch (error) {
+      setWebGlFailure({ reason: webGlFailureReason(error) });
+      return;
+    }
+    setWebGlFailure(undefined);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.setClearColor(0xf8fbff, 0);
@@ -696,7 +712,27 @@ export function ThreeAssemblyScene({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <div className="three-assembly-scene" aria-label="3D assembly scene" ref={hostRef} />;
+  return (
+    <div className="three-assembly-scene" aria-label="3D assembly scene" ref={hostRef}>
+      {webGlFailure && (
+        <div className="three-assembly-scene-fallback" role="status" aria-live="polite">
+          <strong>3D scene unavailable</strong>
+          <span>{webGlFailure.reason}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Error mapper: converts renderer construction failures into safe operator-facing text.
+ */
+function webGlFailureReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (message.toLowerCase().includes("webgl")) {
+    return "WebGL is disabled or unavailable in this browser session. Draft data and Studio controls remain available.";
+  }
+  return "The browser could not initialize the 3D renderer. Draft data and Studio controls remain available.";
 }
 
 function addLighting(scene: THREE.Scene) {
