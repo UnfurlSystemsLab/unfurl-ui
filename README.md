@@ -229,6 +229,28 @@ The stop scripts also terminate local Unfurl UI Vite/Node processes on the
 Studio ports (`5173`, `5174`, and preview `4173`) plus their child processes.
 They do not stop unrelated Docker containers or arbitrary Node processes.
 
+### Debug With VS Code
+
+Open the `unfurl-ui` folder in VS Code and start the Lab stack before launching
+the browser debugger:
+
+```powershell
+.\Startup.ps1
+```
+
+Then run one of the shared launch configurations:
+
+```text
+Unfurl UI: Studio (Edge, after Startup.ps1)
+Unfurl UI: Studio (Chrome, after Startup.ps1)
+```
+
+The launch configuration does not start Docker, Fabric, Foundry, Flow, or Vite.
+Its preflight task only verifies that `Startup.ps1` already made
+`http://127.0.0.1:7878/health`, `http://127.0.0.1:7979/health`,
+`http://127.0.0.1:8080/health`, and the Studio UI route on `:5173` reachable.
+If any check fails, restart with `.\Startup.ps1` before debugging.
+
 Use `-RemoveVolumes` only when you want to delete the local Studio state volume
 created by Docker Compose:
 

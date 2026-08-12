@@ -1,0 +1,22 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "preflight: Startup.ps1 services",
+      "detail": "Verifies that Startup.ps1 has already started Fabric, Foundry, Flow, and the Vite UI before browser debugging starts.",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "$ErrorActionPreference = 'Stop'; $urls = @('http://127.0.0.1:7878/health', 'http://127.0.0.1:7979/health', 'http://127.0.0.1:8080/health', 'http://127.0.0.1:5173/components/fabric-studio/workspace'); foreach ($url in $urls) { try { $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2; if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 500) { throw \"HTTP $($response.StatusCode)\" }; Write-Host \"Ready: $url\" -ForegroundColor Green } catch { throw \"Startup.ps1 must be running before debugging Unfurl UI. Missing or unhealthy: $url. From unfurl-ui, run: .\\Startup.ps1\" } }"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

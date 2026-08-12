@@ -1,0 +1,55 @@
+{
+  // Shared UI debugger entry points. Start services first with:
+  //   .\Startup.ps1
+  // The preLaunchTask only verifies the already-running Lab stack; it does not
+  // start or mutate services.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "msedge",
+      "request": "launch",
+      "name": "Unfurl UI: Studio (Edge, after Startup.ps1)",
+      "url": "http://127.0.0.1:5173/components/fabric-studio/workspace",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "preflight: Startup.ps1 services",
+      "sourceMaps": true,
+      "smartStep": true,
+      "runtimeArgs": [
+        "--ignore-gpu-blocklist",
+        "--enable-webgl",
+        "--use-angle=d3d11"
+      ],
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ],
+      "skipFiles": [
+        "<node_internals>/**",
+        "${workspaceFolder}/node_modules/**"
+      ]
+    },
+    {
+      "type": "chrome",
+      "request": "launch",
+      "name": "Unfurl UI: Studio (Chrome, after Startup.ps1)",
+      "url": "http://127.0.0.1:5173/components/fabric-studio/workspace",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "preflight: Startup.ps1 services",
+      "sourceMaps": true,
+      "smartStep": true,
+      "runtimeArgs": [
+        "--ignore-gpu-blocklist",
+        "--enable-webgl",
+        "--use-angle=d3d11"
+      ],
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ],
+      "skipFiles": [
+        "<node_internals>/**",
+        "${workspaceFolder}/node_modules/**"
+      ]
+    }
+  ]
+}
