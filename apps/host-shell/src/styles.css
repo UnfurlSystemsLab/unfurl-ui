@@ -8,6 +8,11 @@ body {
   margin: 0;
 }
 
+.app-shell {
+  color: var(--foreground, #171717);
+  background: var(--background, #f6f7f9);
+}
+
 button, input, select {
   font: inherit;
 }
@@ -15,7 +20,7 @@ button, input, select {
 button {
   border: 1px solid #1d4ed8;
   border-radius: 6px;
-  background: #2563eb;
+  background: var(--primary, #2563eb);
   color: white;
   padding: 8px 10px;
   cursor: pointer;

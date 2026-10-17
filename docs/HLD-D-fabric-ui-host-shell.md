@@ -11,6 +11,9 @@
 
 ## 1. Purpose
 
+Runtime wiring and Studio scope-isolation corrections follow
+[LLD-host-runtime-gap-remediation.md](LLD-host-runtime-gap-remediation.md).
+
 The proposed [reusable runtime experiences](HLD-reusable-runtime-experiences.md)
 extend this shell with chat, settings, approval and governance features. Their
 versioned contribution contract is separate from current app navigation manifests;

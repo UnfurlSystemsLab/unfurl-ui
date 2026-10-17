@@ -73,6 +73,8 @@ export type FetchLike = (
 export const DEFAULT_STUDIO_REQUEST_TIMEOUT_MS = 120_000;
 
 export type HttpStudioFabricClientOptions = {
+  /** Host authentication port: obtain a fresh token for each request, never from model input. */
+  readonly getAccessToken?: () => Promise<string>;
   readonly baseUrl: string;
   readonly fetch?: FetchLike;
   readonly defaultTenantId?: string;
@@ -96,7 +98,15 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
   if (!fetchImpl) {
     throw new Error("fetch implementation is required");
   }
-  const guardedFetch = createTimeoutFetch(fetchImpl, normalizeRequestTimeoutMs(options.requestTimeoutMs));
+  // Resolve rotating credentials inside the timeout boundary and never persist them.
+  const authenticatedFetch: FetchLike = async (url, init) => {
+    if (!options.getAccessToken) return fetchImpl(url, init);
+    const token = await options.getAccessToken();
+    if (!token.trim()) throw new Error("Host authentication returned an empty access token");
+    if (init?.signal?.aborted) throw new Error("Request was cancelled before authentication completed");
+    return fetchImpl(url, { ...init, headers: { ...init?.headers, Authorization: `Bearer ${token}` } });
+  };
+  const guardedFetch = createTimeoutFetch(authenticatedFetch, normalizeRequestTimeoutMs(options.requestTimeoutMs));
   const baseUrl = normalizeBaseUrl(options.baseUrl);
   const defaultScope = {
     tenantId: options.defaultTenantId ?? DEFAULT_STUDIO_TENANT_ID,

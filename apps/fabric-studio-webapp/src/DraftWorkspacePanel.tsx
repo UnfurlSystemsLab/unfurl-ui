@@ -1,3 +1,4 @@
+import { reconcileSession, watchSession } from "./sessionReconciliation.js";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -6,7 +7,6 @@ import {
   type DynamicDcpProjectionResponse,
   type DeploymentPolicyDraft,
   type DeploymentShape,
-  type StudioSessionEvent,
   type StudioAssemblySnapshot,
   type StudioReplacementCandidate as FabricReplacementCandidate,
   type StudioLayoutState,
@@ -145,7 +145,7 @@ const tutorialStorageKey = "unfurl-studio-workbench-tutorial-dismissed";
  * deployment planning, and visual selection state. It stores only layout/convenience UI state locally;
  * contract truth and validation stay behind the Fabric client.
  */
-export function DraftWorkspacePanel({
+function ScopedDraftWorkspacePanel({
   client,
   initialTenantId = DEFAULT_STUDIO_TENANT_ID,
   initialAssemblyId = DEFAULT_STUDIO_ASSEMBLY_ID,
@@ -153,10 +153,13 @@ export function DraftWorkspacePanel({
   initialDraftComponentCount,
   initialDraftComponentCatalogEntryIds,
   initialDynamicProjection,
-  demoFallbacks = false
-}: DraftWorkspacePanelProps) {
-  const [tenantId, setTenantId] = useState(initialTenantId);
-  const [assemblyId, setAssemblyId] = useState(initialAssemblyId);
+  demoFallbacks = false,
+  onScopeChange
+}: DraftWorkspacePanelProps & { readonly onScopeChange: (tenant: string, assembly: string) => void }) {
+  const tenantId = initialTenantId;
+  const [tenantDraft, setTenantDraft] = useState(tenantId);
+  const assemblyId = initialAssemblyId;
+  const [assemblyDraft, setAssemblyDraft] = useState(assemblyId);
   const [baseCatalogHash, setBaseCatalogHash] = useState(initialBaseCatalogHash);
   const [targetApplicationName, setTargetApplicationName] = useState("unfurl-flow");
   const [targetDeploymentTarget, setTargetDeploymentTarget] = useState("Customer Runtime Substrate");
@@ -221,6 +224,7 @@ export function DraftWorkspacePanel({
   const [dynamicProjectionError, setDynamicProjectionError] = useState<string | undefined>();
   const [fabricReplacementCandidates, setFabricReplacementCandidates] = useState<readonly FabricReplacementCandidate[] | undefined>();
   const [replacementCandidateError, setReplacementCandidateError] = useState<string | undefined>();
+  const [sessionSyncError, setSessionSyncError] = useState<string | undefined>();
   const readySession = state?.status === "READY" ? state.session : undefined;
 
   useEffect(() => {
@@ -341,27 +345,14 @@ export function DraftWorkspacePanel({
     };
   }, [client, tenantId, assemblyId, activeView, semanticZoomLevel, selectedComponent]);
 
+  // Snapshot reconciliation uses the authenticated client and retries after transient failures.
   useEffect(() => {
-    if (!readySession || !client.sessionEventsUrl || typeof EventSource === "undefined") {
-      return;
-    }
-    const source = new EventSource(client.sessionEventsUrl({
-      tenantId: readySession.tenantId,
-      assemblyId: readySession.assemblyId,
-      sessionId: readySession.sessionId
-    }));
-    const updateFromEvent = (event: MessageEvent<string>) => {
-      const payload = JSON.parse(event.data) as StudioSessionEvent;
-      setState(current => current?.status === "READY" ? { ...current, session: payload.session } : current);
-    };
-    source.addEventListener("session", updateFromEvent);
-    source.onerror = () => {
-      source.close();
-    };
-    return () => {
-      source.removeEventListener("session", updateFromEvent);
-      source.close();
-    };
+    if (!readySession) return;
+    return watchSession(() => client.getDraftSession({ tenantId: readySession.tenantId,
+      assemblyId: readySession.assemblyId, sessionId: readySession.sessionId }),
+      session => setState(current => current?.status === "READY"
+        ? { ...current, session: reconcileSession(current.session, session) } : current),
+      connected => setSessionSyncError(connected ? undefined : "Session updates disconnected. Retrying authoritative snapshot reads."));
   }, [client, readySession?.tenantId, readySession?.assemblyId, readySession?.sessionId]);
 
   useEffect(() => {
@@ -379,7 +370,7 @@ export function DraftWorkspacePanel({
         selectedSurface: selectedComponent
       }).then(session => {
         if (!cancelled) {
-          setState(current => current?.status === "READY" ? { ...current, session } : current);
+          setState(current => current?.status === "READY" ? { ...current, session: reconcileSession(current.session, session) } : current);
         }
       }).catch(() => {
         // Presence is advisory; revisioned Fabric intents remain authoritative.
@@ -1365,12 +1356,13 @@ export function DraftWorkspacePanel({
           </div>
           <label>
             Tenant
-            <input value={tenantId} onChange={event => setTenantId(event.target.value)} />
+            <input value={tenantDraft} onChange={event => setTenantDraft(event.target.value)} />
           </label>
           <label>
             Assembly
-            <input value={assemblyId} onChange={event => setAssemblyId(event.target.value)} />
+            <input value={assemblyDraft} onChange={event => setAssemblyDraft(event.target.value)} />
           </label>
+          <button type="button" disabled={!tenantDraft.trim() || !assemblyDraft.trim()} onClick={() => onScopeChange(tenantDraft.trim(), assemblyDraft.trim())}>Apply workspace scope</button>
           <div className="target-app-loader">
             <label>
               Target runtime
@@ -1441,7 +1433,9 @@ export function DraftWorkspacePanel({
         </aside>
 
         <main className="workbench-stage" aria-label="Composition workbench">
+          {sessionSyncError && <p role="status">{sessionSyncError}</p>}
           <AuthoringConversationPanel
+            key={JSON.stringify([tenantId, assemblyId, readySession?.sessionId, selectedCatalogFileId])}
             client={client}
             tenantId={tenantId.trim() || DEFAULT_STUDIO_TENANT_ID}
             assemblyId={assemblyId.trim() || DEFAULT_STUDIO_ASSEMBLY_ID}
@@ -3496,3 +3490,12 @@ const replacementMatrix: Partial<Record<Exclude<ThreeAssemblySurfaceId, "substra
     { catalogEntryId: "com.unfurl.flow.adapter:in-memory-state-store:0.1.0", label: "In-memory State Store", owner: "platform-team", shape: "ADAPTER", status: "BLOCKED", reason: "not durable for STRICT profile mode" }
   ]
 };
+
+/** Scope boundary: changing the applied tenant/assembly destroys prior state and subscriptions. */
+export function DraftWorkspacePanel(props: DraftWorkspacePanelProps) {
+  const [scope, setScope] = useState({ tenant: props.initialTenantId ?? DEFAULT_STUDIO_TENANT_ID,
+    assembly: props.initialAssemblyId ?? DEFAULT_STUDIO_ASSEMBLY_ID });
+  return <ScopedDraftWorkspacePanel {...props} initialTenantId={scope.tenant} initialAssemblyId={scope.assembly}
+    key={JSON.stringify([scope.tenant, scope.assembly])}
+    onScopeChange={(tenant, assembly) => setScope({ tenant, assembly })} />;
+}

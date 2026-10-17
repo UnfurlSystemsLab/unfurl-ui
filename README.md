@@ -28,6 +28,11 @@ The workspace starts with the host shell and Fabric Studio scaffolding from:
 
 ## Workspace Model
 
+The runnable shell and Studio isolation fixes are described in
+[Host deployment and authentication](docs/HOST-RUNTIME.md) and the
+[remediation build specification](docs/REPO-host-runtime-gap-remediation-build-spec.md).
+Production builds require explicit deployment-owned host configuration.
+
 Proposed runtime UI work is defined separately from current implementation:
 
 - [Reusable chat and settings HLD](docs/HLD-reusable-runtime-experiences.md)

@@ -14,7 +14,9 @@
     "@unfurl/graph-layout": "0.1.0-SNAPSHOT",
     "@unfurl/three-renderer": "0.1.0-SNAPSHOT",
     "react": "18.3.1",
-    "three": "^0.184.0"
+    "three": "^0.184.0",
+    "react-router-dom": "6.26.2",
+    "@unfurl/ui-contracts": "0.1.0-SNAPSHOT"
   },
   "devDependencies": {
     "@types/react": "18.3.5",

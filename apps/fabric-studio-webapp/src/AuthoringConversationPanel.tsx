@@ -48,7 +48,7 @@ export type AuthoringConversationPanelProps = {
  * workspace pipeline. User prompts go to the server-side authoring endpoint, accepted proposals are
  * replayed as Fabric intents, and every state change flows back through the caller-owned workspace.
  */
-export function AuthoringConversationPanel({
+function ScopedAuthoringConversationPanel({
   client,
   tenantId,
   assemblyId,
@@ -60,6 +60,10 @@ export function AuthoringConversationPanel({
   onDeploymentPolicy,
   onProposalApplied
 }: AuthoringConversationPanelProps) {
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  /** Guard: old asynchronous completions must not publish into a replacement scope. */
+  const publishState = (next: DraftWorkspaceState) => { if (alive.current) onStateChange(next); };
   const [session, setSession] = useState<AuthoringSessionState>(() => initialAuthoringSession());
   const [prompt, setPrompt] = useState("Help me create a governed Fabric assembly from the selected tenant catalog.");
   const [promptActionContext, setPromptActionContext] = useState<AuthoringActionContext | undefined>();
@@ -133,6 +137,7 @@ export function AuthoringConversationPanel({
       ...(structuredAnswers === undefined || Object.keys(structuredAnswers).length === 0 ? {} : { questionAnswers: structuredAnswers }),
       userMessage: message
     });
+    if (!alive.current) return;
     setSession(next);
     setStatus(next.status === "FAILED" ? next.message : undefined);
   }
@@ -150,10 +155,11 @@ export function AuthoringConversationPanel({
     const applied = await applyAuthoringProposal(client, state, proposal, {
       onIntentApplied: progress => {
         setStatus(`Applied ${progress.appliedIntentCount} of ${proposal.intents.length} authoring intents...`);
-        onStateChange(progress.state);
+        publishState(progress.state);
       }
     });
-    onStateChange(applied.state);
+    publishState(applied.state);
+    if (!alive.current) return;
     onProposalApplied?.(proposal, applied.appliedIntentCount);
     onDeploymentPolicy?.(proposal);
     if (applied.state.status !== "READY") {
@@ -166,7 +172,7 @@ export function AuthoringConversationPanel({
     }
     setStatus("Resolving deployment and compiling export...");
     const finalized = await finalizeAuthoringProposal(client, applied.state, applied.deploymentPolicy);
-    onStateChange(finalized.state);
+    publishState(finalized.state);
     setStatus(finalized.exportText);
   }
 
@@ -336,4 +342,11 @@ export function questionAnswerSummary(
  */
 function optionLabel(question: AuthoringQuestion, value: string): string {
   return question.options?.find(option => option.value === value)?.label ?? value;
+}
+
+/** Scope boundary: conversation history and proposals never cross tenant, assembly, session or catalog. */
+export function AuthoringConversationPanel(props: AuthoringConversationPanelProps) {
+  const key = JSON.stringify([props.tenantId, props.assemblyId, props.catalogFileId,
+    props.state?.status === "READY" ? props.state.session.sessionId : undefined]);
+  return <ScopedAuthoringConversationPanel key={key} {...props} />;
 }

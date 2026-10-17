@@ -42,3 +42,7 @@ export * from "./intentHistory.js";
 export * from "./readOnlyWorkspace.js";
 export * from "./signingHandoff.js";
 export * from "./visualDiff.js";
+
+export * from "./StudioClientContext.js";
+export * from "./StudioRoutes.js";
+export { createFixtureStudioFabricClient, fixtureDeploymentPolicy } from "./fixtures/deploymentResolutionFixtures.js";

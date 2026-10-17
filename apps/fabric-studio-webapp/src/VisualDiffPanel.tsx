@@ -3,8 +3,12 @@ import { exportBundleFromCompile } from "./draftExport.js";
 import { appendValidatedIntent, createIntentHistory } from "./intentHistory.js";
 import { buildVisualDiff } from "./visualDiff.js";
 
-export function VisualDiffPanel() {
-  const diff = useMemo(() => buildVisualDiff(
+/** Presenter: compare caller-supplied authoritative artifacts or explicitly labeled fixtures. */
+export function VisualDiffPanel({ fixture = false, authoritativeDiff }: {
+  readonly fixture?: boolean;
+  readonly authoritativeDiff?: ReturnType<typeof buildVisualDiff>;
+}) {
+  const preview = useMemo(() => fixture ? buildVisualDiff(
     exportBundleFromCompile(compiled("old")),
     exportBundleFromCompile(compiled("new")),
     appendValidatedIntent(createIntentHistory(7), {
@@ -22,12 +26,15 @@ export function VisualDiffPanel() {
       requiredSubstratePorts: ["secrets.provider"],
       warnings: []
     })
-  ), []);
+  ) : undefined, [fixture]);
+  const diff = authoritativeDiff ?? preview;
+  if (!diff) return <section><h1>Visual Diff</h1><p role="status">Authoritative revision artifacts are unavailable. Select Fabric export revisions before comparing changes.</p></section>;
 
   return (
     <div className="studio-page">
       <header className="studio-header">
         <h1>Visual Diff</h1>
+        {fixture && <p>Fixture preview only. Hashes below are sample values.</p>}
         <p>Compare exported Studio artifacts and the validated intent path that produced the change.</p>
       </header>
 

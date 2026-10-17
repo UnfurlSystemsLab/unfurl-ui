@@ -97,7 +97,8 @@ export function CatalogPalettePanel({
           })
         });
       } else {
-        setClaimVerification("VERIFIED");
+        setClaimVerification("REJECTED");
+        setCatalogActionMessage("Claim verification is unavailable. No artifacts were verified or admitted.");
       }
     }
   }

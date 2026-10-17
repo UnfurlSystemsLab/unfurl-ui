@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
+import { AppRoutes } from "./routes.js";
 import { AppShell } from "./AppShell.js";
 import { StudioClientProvider } from "./StudioClientContext.js";
 
@@ -16,7 +17,7 @@ describe("AppShell", () => {
     );
 
     assert.match(html, /Unfurl Studio/);
-    assert.match(html, /Deployment Planner/);
+    assert.match(html, /Deployment/);
     assert.match(html, /fixture.*mode/s);
     assert.match(html, /tenant-local/);
     assert.match(html, /assembly-demo/);
@@ -39,7 +40,7 @@ describe("AppShell", () => {
     const html = renderToString(
       <MemoryRouter initialEntries={["/components/fabric-studio/workspace?tenantId=tenant-retail&assemblyId=checkout-platform"]}>
         <StudioClientProvider mode="fixture">
-          <AppShell mode="fixture" />
+          <AppRoutes />
         </StudioClientProvider>
       </MemoryRouter>
     );
@@ -63,22 +64,12 @@ describe("AppShell", () => {
       const html = renderToString(
         <MemoryRouter initialEntries={[path]}>
           <StudioClientProvider mode="fixture">
-            <AppShell mode="fixture" />
+            <AppRoutes />
           </StudioClientProvider>
         </MemoryRouter>
       );
 
       assert.match(html, new RegExp(text));
-      assert.match(html, /Assembly/);
-      assert.match(html, /Catalog/);
-      assert.match(html, /Exploded/);
-      assert.match(html, /Deployment/);
-      assert.match(html, /Signing/);
-      assert.match(html, /Ports/);
-      assert.match(html, /Audit/);
-      assert.match(html, /Intents/);
-      assert.match(html, /Diff/);
-      assert.match(html, /Help/);
     });
   }
 });

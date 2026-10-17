@@ -9,10 +9,15 @@ import {
 
 export type IntentHistoryPanelProps = {
   readonly initialRevision?: number;
+  readonly fixture?: boolean;
+  readonly validatedHistory?: GovernedIntentHistory;
 };
 
-export function IntentHistoryPanel({ initialRevision = 7 }: IntentHistoryPanelProps) {
+/** Presenter: authoritative history is read-only; sample controls are explicit fixture previews only. */
+export function IntentHistoryPanel({ initialRevision = 7, fixture = false, validatedHistory }: IntentHistoryPanelProps) {
   const [history, setHistory] = useState<GovernedIntentHistory>(() => createIntentHistory(initialRevision));
+  if (!fixture && !validatedHistory) return <section><h1>Intent History</h1><p role="status">Authoritative intent history is unavailable. Select a Fabric history source before reviewing revisions.</p></section>;
+  const visibleHistory = validatedHistory ?? history;
 
   function addSampleIntent() {
     const baseRevision = history.cursor === 0
@@ -42,7 +47,8 @@ export function IntentHistoryPanel({ initialRevision = 7 }: IntentHistoryPanelPr
         <p>Review validated operator intents and move through undo/redo cursor state.</p>
       </header>
 
-      <section className="studio-panel">
+      {fixture && <section className="studio-panel">
+        <p>Fixture preview only. These controls do not change a Fabric session.</p>
         <h2>Controls</h2>
         <div className="button-row">
           <button type="button" onClick={addSampleIntent}>Add Sample Intent</button>
@@ -54,15 +60,15 @@ export function IntentHistoryPanel({ initialRevision = 7 }: IntentHistoryPanelPr
           <span>cursor: {history.cursor}</span>
           <span>records: {history.records.length}</span>
         </div>
-      </section>
+      </section>}
 
       <section className="studio-panel">
         <h2>Validated Intents</h2>
         <table>
           <thead><tr><th>Type</th><th>Revision</th><th>Candidate</th><th>Substrate Ports</th><th>Warnings</th></tr></thead>
           <tbody>
-            {history.records.length === 0 && <tr><td colSpan={5}>No validated intents.</td></tr>}
-            {history.records.map((record, index) => (
+            {visibleHistory.records.length === 0 && <tr><td colSpan={5}>No validated intents.</td></tr>}
+            {visibleHistory.records.map((record, index) => (
               <tr key={`${record.intent.type}-${index}`}>
                 <td>{record.intent.type}</td>
                 <td>{record.fromRevision} {"->"} {record.toRevision}</td>

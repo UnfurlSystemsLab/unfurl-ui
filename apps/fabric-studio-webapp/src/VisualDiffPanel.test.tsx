@@ -5,7 +5,7 @@ import { VisualDiffPanel } from "./VisualDiffPanel.js";
 
 describe("VisualDiffPanel", () => {
   it("renders artifact diff rows", () => {
-    const html = renderToString(<VisualDiffPanel />);
+    const html = renderToString(<VisualDiffPanel fixture />);
 
     assert.match(html, /Visual Diff/);
     assert.match(html, /Artifact Changes/);

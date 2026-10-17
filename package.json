@@ -14,12 +14,15 @@
     "dev:studio": "npm run dev -w @unfurl/host-shell",
     "dev:studio:fixture": "npm run dev:fixture -w @unfurl/host-shell",
     "build:studio": "npm run build -w @unfurl/host-shell",
-    "launch:studio": "powershell -ExecutionPolicy Bypass -File scripts/launch-studio.ps1"
+    "launch:studio": "powershell -ExecutionPolicy Bypass -File scripts/launch-studio.ps1",
+    "test:browser:host": "node scripts/verify-host-runtime.mjs"
   },
   "devDependencies": {
     "@types/node": "22.10.2",
+    "@types/react-test-renderer": "^18.3.0",
     "@types/three": "^0.184.1",
     "playwright": "^1.60.0",
+    "react-test-renderer": "^18.3.1",
     "typescript": "5.5.4"
   },
   "engines": {
