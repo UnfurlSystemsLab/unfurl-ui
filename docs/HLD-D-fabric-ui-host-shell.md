@@ -11,6 +11,11 @@
 
 ## 1. Purpose
 
+The proposed [reusable runtime experiences](HLD-reusable-runtime-experiences.md)
+extend this shell with chat, settings, approval and governance features. Their
+versioned contribution contract is separate from current app navigation manifests;
+the proposal does not imply these runtime features are already implemented.
+
 This document defines the design for a **Component Host Shell** that can aggregate multiple independently deployable component webapps.
 
 The host shell should allow component webapps to:

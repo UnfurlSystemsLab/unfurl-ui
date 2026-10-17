@@ -28,6 +28,12 @@ The workspace starts with the host shell and Fabric Studio scaffolding from:
 
 ## Workspace Model
 
+Proposed runtime UI work is defined separately from current implementation:
+
+- [Reusable chat and settings HLD](docs/HLD-reusable-runtime-experiences.md)
+- [Feature contribution and client contracts LLD](docs/LLD-reusable-runtime-experiences.md)
+- [Delivery and acceptance plan](docs/REPO-reusable-runtime-experiences-build-spec.md)
+
 ```text
 unfurl-ui/
   apps/
