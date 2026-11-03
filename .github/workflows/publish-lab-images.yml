@@ -102,6 +102,10 @@ jobs:
           if [[ "${{ inputs.skip_tests }}" == "true" ]]; then
             MAVEN_FLAGS+=(-DskipTests)
           fi
+          # Packaging Foundry copies its provider plugins into target/providers for the image, so they install first.
+          for prerequisite in foundry-conversation-api foundry-provider-api providers; do
+            (cd unfurl-foundry && mvn "${MAVEN_FLAGS[@]}" -f "${prerequisite}/pom.xml" install)
+          done
           for repo in unfurl-fabric unfurl-foundry unfurl-flow; do
             (cd "${repo}" && mvn "${MAVEN_FLAGS[@]}" package)
           done

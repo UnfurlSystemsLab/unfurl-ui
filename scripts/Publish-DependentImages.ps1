@@ -57,7 +57,7 @@ function Assert-DockerEngine {
     }
 }
 
-# Builder: packages one sibling service repo, builds its Docker image, and optionally pushes it to GHCR.
+# Builder: installs a service repo's prerequisite projects, packages the repo, builds its Docker image, and optionally pushes it to GHCR.
 function Build-ServiceImage {
     param(
         [Parameter(Mandatory=$true)]$Service,
@@ -74,6 +74,9 @@ function Build-ServiceImage {
     }
 
     if (-not $SkipBuild) {
+        foreach ($prerequisite in $Service.Prerequisites) {
+            Invoke-Checked -FilePath $Maven -Arguments @('--batch-mode', '--no-transfer-progress', '-DskipTests', '-f', $prerequisite, 'install') -WorkingDirectory $repoPath
+        }
         Invoke-Checked -FilePath $Maven -Arguments @('--batch-mode', '--no-transfer-progress', '-DskipTests', 'package') -WorkingDirectory $repoPath
     }
 
@@ -124,6 +127,7 @@ $services = @(
         ImageName = 'unfurl-fabric-studio'
         Dockerfile = 'Dockerfile'
         JarFile = 'target/unfurl-fabric-studio-server.jar'
+        Prerequisites = @()
     },
     [pscustomobject]@{
         Name = 'Foundry Agent Host'
@@ -131,6 +135,8 @@ $services = @(
         ImageName = 'unfurl-foundry'
         Dockerfile = 'Dockerfile'
         JarFile = 'target/unfurl-foundry-0.1.0-SNAPSHOT.jar'
+        # Packaging Foundry copies its provider plugins into target/providers for the image, so they install first.
+        Prerequisites = @('foundry-conversation-api/pom.xml', 'foundry-provider-api/pom.xml', 'providers/pom.xml')
     },
     [pscustomobject]@{
         Name = 'Flow Runtime'
@@ -138,6 +144,7 @@ $services = @(
         ImageName = 'unfurl-flow'
         Dockerfile = 'Dockerfile'
         JarFile = 'target/unfurl-flow-0.1.0-SNAPSHOT.jar'
+        Prerequisites = @()
     }
 )
 
