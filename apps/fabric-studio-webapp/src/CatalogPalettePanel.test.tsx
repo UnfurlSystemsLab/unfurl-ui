@@ -53,13 +53,10 @@ describe("CatalogPalettePanel", () => {
     assert.match(html, /claims\.zip\?sha256=sha256:bundle/);
   });
 
-  it("converts YAML uploads into claim admission drafts", async () => {
+  it("sends a YAML file by name only, because a claim is admitted only from its jar", async () => {
     const draft = await toAdmissionDraft(new File(["identity:\n  name: payment\n"], "payment.yaml"));
 
-    assert.deepEqual(draft, {
-      fileName: "payment.yaml",
-      claimYaml: "identity:\n  name: payment\n"
-    });
+    assert.deepEqual(draft, { fileName: "payment.yaml" });
   });
 
   it("converts JAR uploads into base64 artifact admission drafts", async () => {

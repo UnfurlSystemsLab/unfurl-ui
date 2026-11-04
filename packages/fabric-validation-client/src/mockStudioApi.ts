@@ -405,21 +405,14 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog/admissions`) {
       const body = parseJson<{ readonly assemblyId?: string; readonly artifacts?: readonly { readonly fileName: string; readonly claimYaml?: string; readonly artifactBase64?: string }[] }>(init?.body);
       const results = (body?.artifacts ?? []).map(artifact => {
-        const hasClaimSource = hasAdmissionClaimSource(artifact);
+        const refusal = admissionRefusal(artifact);
         return {
           fileName: artifact.fileName,
-          status: hasClaimSource ? "VERIFIED" : "REJECTED",
-          catalogEntryId: hasClaimSource ? `uploaded:${artifact.fileName}` : "",
-          claimHash: hasClaimSource ? `sha256:claim-${artifact.fileName}` : "",
-          warnings: hasClaimSource ? [] : ["claim: DCP claim YAML is required for catalog admission"],
-          diagnostics: hasClaimSource
-            ? []
-            : [{
-                severity: "ERROR",
-                code: "CLAIM_MALFORMED",
-                path: "claim",
-                message: "DCP claim YAML is required for catalog admission"
-              }]
+          status: refusal ? "REJECTED" : "VERIFIED",
+          catalogEntryId: refusal ? "" : `uploaded:${artifact.fileName}`,
+          claimHash: refusal ? "" : `sha256:claim-${artifact.fileName}`,
+          warnings: refusal ? [`${refusal.path}: ${refusal.message}`] : [],
+          diagnostics: refusal ? [{ severity: "ERROR", ...refusal }] : []
         };
       });
       const verifiedResults = results.filter(result => result.status === "VERIFIED");
@@ -782,11 +775,26 @@ function uploadedCatalogEntry(catalogEntryId: string, claimHash: string): Visual
 }
 
 /**
- * Predicate: mirrors the real Studio admission contract by accepting either explicit
- * claim YAML or JAR bytes that the backend can inspect for an embedded catalog manifest.
+ * Mirrors the real Studio admission contract (DCP HLD-C §3.10): only a .jar sent with its bytes is admitted; a claim
+ * document without its jar is refused as detached.
  */
-function hasAdmissionClaimSource(artifact: { readonly claimYaml?: string; readonly artifactBase64?: string }): boolean {
-  return Boolean(artifact.claimYaml || artifact.artifactBase64);
+function admissionRefusal(artifact: { readonly fileName: string; readonly claimYaml?: string; readonly artifactBase64?: string }):
+    { readonly code: string; readonly path: string; readonly message: string } | undefined {
+  if (artifact.claimYaml || !artifact.fileName.toLowerCase().endsWith(".jar")) {
+    return {
+      code: "CLAIM_DETACHED",
+      path: artifact.claimYaml ? "claimYaml" : "fileName",
+      message: "a claim is admitted only from the artifact that carries it; upload the component's .jar"
+    };
+  }
+  if (!artifact.artifactBase64) {
+    return {
+      code: "CLAIM_MALFORMED",
+      path: "artifactBase64",
+      message: "artifactBase64 is required: send the .jar bytes so Studio can read the claim the jar carries"
+    };
+  }
+  return undefined;
 }
 
 function parseJson<T>(body: string | undefined): T | undefined {

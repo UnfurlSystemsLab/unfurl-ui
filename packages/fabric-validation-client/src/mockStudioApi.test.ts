@@ -71,22 +71,20 @@ describe("mock Studio API contract", () => {
     assert.equal(gap?.kind, "gap");
   });
 
-  it("adds admitted artifacts to the mock catalog", async () => {
+  it("refuses a claim document sent without its jar", async () => {
     const client = createHttpStudioFabricClient({
       baseUrl: "http://fabric.local",
       fetch: createMockStudioApiFetch()
     });
 
     const admission = await client.admitCatalogArtifacts?.({
-      artifacts: [{ fileName: "payment.yaml", claimYaml: "identity:\n  name: payment\n" }]
+      artifacts: [{ fileName: "payment.yaml" }]
     });
     const catalog = await client.listCatalogVisuals();
 
-    assert.equal(admission?.status, "VERIFIED");
-    assert.equal(admission?.claimBundleArtifact?.mediaType, "application/zip");
-    assert.match(admission?.claimBundleArtifact?.url ?? "", /claims\.zip\?sha256=/);
-    assert.ok(admission?.catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.yaml"));
-    assert.ok(catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.yaml"));
+    assert.equal(admission?.status, "REJECTED");
+    assert.equal(admission?.results[0]?.diagnostics[0]?.code, "CLAIM_DETACHED");
+    assert.ok(!catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.yaml"));
   });
 
   it("adds JAR artifacts with base64 content to the mock catalog", async () => {
@@ -101,6 +99,8 @@ describe("mock Studio API contract", () => {
     const catalog = await client.listCatalogVisuals();
 
     assert.equal(admission?.status, "VERIFIED");
+    assert.equal(admission?.claimBundleArtifact?.mediaType, "application/zip");
+    assert.match(admission?.claimBundleArtifact?.url ?? "", /claims\.zip\?sha256=/);
     assert.ok(admission?.catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.jar"));
     assert.ok(catalog.entries.some(entry => entry.catalogEntryId === "uploaded:payment.jar"));
   });

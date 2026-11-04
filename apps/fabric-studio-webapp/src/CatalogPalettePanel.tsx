@@ -215,7 +215,7 @@ export function CatalogPalettePanel({
           <input
             type="file"
             multiple
-            accept=".jar,.yaml,.yml"
+            accept=".jar"
             onChange={event => selectArtifacts(event.currentTarget.files)}
           />
         </label>
@@ -372,14 +372,12 @@ function claimVerificationText(status: "IDLE" | "READY_TO_VERIFY" | "VERIFIED" |
 }
 
 /**
- * Adapter helper: reads YAML-like files as claim text and JAR files as base64 archive
- * drafts so Fabric can extract META-INF/unfurl-catalog.yaml during DCP admission.
+ * Adapter helper: turns a JAR into a base64 artifact draft so Fabric reads META-INF/unfurl-catalog.yaml out of the
+ * jar itself during DCP admission. A claim is admitted only from the artifact that carries it (DCP HLD-C §3.10), so any
+ * other file is sent by name alone and Fabric reports why it was refused.
  */
 export async function toAdmissionDraft(file: File): Promise<StudioComponentArtifactDraft> {
   const lowerName = file.name.toLowerCase();
-  if (lowerName.endsWith(".yaml") || lowerName.endsWith(".yml")) {
-    return { fileName: file.name, claimYaml: await file.text() };
-  }
   if (lowerName.endsWith(".jar")) {
     return { fileName: file.name, artifactBase64: await fileToBase64(file) };
   }

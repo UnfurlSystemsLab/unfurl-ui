@@ -107,7 +107,6 @@ describe("HTTP Studio Fabric client", () => {
     const response = await client.admitCatalogArtifacts?.({
       assemblyId: "assembly-demo",
       artifacts: [
-        { fileName: "payment.yaml", claimYaml: "identity:\n  name: payment\n" },
         { fileName: "payment.jar", artifactBase64: "UEsDBA==" }
       ]
     });
@@ -120,7 +119,6 @@ describe("HTTP Studio Fabric client", () => {
       tenantId: "tenant-local",
       assemblyId: "assembly-demo",
       artifacts: [
-        { fileName: "payment.yaml", claimYaml: "identity:\n  name: payment\n" },
         { fileName: "payment.jar", artifactBase64: "UEsDBA==" }
       ]
     });
