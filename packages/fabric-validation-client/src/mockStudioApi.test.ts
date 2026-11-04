@@ -182,6 +182,7 @@ describe("mock Studio API contract", () => {
     assert.equal(loaded?.assemblyId, studioApiExampleSession.assemblyId);
   });
 
+  /** Regression: a filename-only JAR draft reports the missing artifact bytes, rather than requesting detached claim YAML. */
   it("returns DCP diagnostics for filename-only catalog admission drafts", async () => {
     const client = createHttpStudioFabricClient({
       baseUrl: "http://fabric.local",
@@ -194,7 +195,7 @@ describe("mock Studio API contract", () => {
 
     assert.equal(admission?.status, "REJECTED");
     assert.equal(admission?.results[0]?.diagnostics[0]?.code, "CLAIM_MALFORMED");
-    assert.equal(admission?.results[0]?.diagnostics[0]?.path, "claim");
-    assert.match(admission?.results[0]?.diagnostics[0]?.message ?? "", /DCP claim YAML is required/);
+    assert.equal(admission?.results[0]?.diagnostics[0]?.path, "artifactBase64");
+    assert.match(admission?.results[0]?.diagnostics[0]?.message ?? "", /artifactBase64 is required/);
   });
 });
