@@ -161,7 +161,7 @@ export type RemoveCatalogEntryRequest = {
 export type StudioComponentArtifactDraft = {
   readonly fileName: string;
   readonly sha256?: string;
-  readonly claimYaml?: string;
+  /** The jar's bytes, base64-encoded; Fabric reads the claim out of them. */
   readonly artifactBase64?: string;
 };
 

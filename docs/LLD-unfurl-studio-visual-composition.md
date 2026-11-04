@@ -273,6 +273,11 @@ AI
 
 The palette is driven by catalog entries, visual categories, and DCP capabilities. Studio does not hardcode every component shape.
 
+Uploading components into the catalog works the same way: the palette's upload control accepts `.jar` artifacts only and
+sends their bytes as `artifactBase64`. Fabric reads the claim out of the jar and pins the jar's own hash (DCP HLD-C
+§3.10); a claim document uploaded without its jar is refused (`CLAIM_DETACHED`), so the UI does not offer one. An entry
+with no claim read from a jar (a built-in or package visual asset) can be shown in the palette but not compiled.
+
 ---
 
 ## 7. Workspace interaction model
