@@ -11,8 +11,9 @@ for (const root of roots) {
     if (!project.isDirectory()) {
       continue;
     }
+    // Recursive: tests live beside their modules, including subfolders such as src/workbench.
     const dist = join(root, project.name, "dist");
-    const files = await readdir(dist).catch(() => []);
+    const files = await readdir(dist, { recursive: true }).catch(() => []);
     for (const file of files) {
       if (file.endsWith(".test.js")) {
         testFiles.push(join(dist, file));

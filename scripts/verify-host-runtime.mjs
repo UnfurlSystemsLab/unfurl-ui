@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const base = "http://127.0.0.1:5187";
 const server = spawn(process.execPath, [resolve("node_modules/vite/bin/vite.js"), "--host", "127.0.0.1", "--port", "5187", "--strictPort"],
@@ -36,11 +37,121 @@ try {
   await page.getByRole("button", { name: "Apply workspace scope" }).click();
   await page.waitForFunction(() => document.body.innerText.includes("Private B"));
   assert.doesNotMatch(await page.locator("body").innerText(), /Private A/);
-  await page.getByRole("link", { name: "Diff", exact: true }).click();
-  await page.getByText("Authoritative revision artifacts are unavailable.", { exact: false }).waitFor();
-  await page.getByRole("link", { name: "Intents", exact: true }).click();
-  await page.getByText("Authoritative intent history is unavailable.", { exact: false }).waitFor();
+  // Studio's navigation is the workbench, catalog and help (HLD-D §6.2).
+  const studioLinks = await page.locator("nav a[href^='/components/fabric-studio/']")
+    .evaluateAll(links => links.map(link => new URL(link.href).pathname.split("/").pop()));
+  assert.deepEqual(studioLinks, ["workspace", "catalog", "help"]);
+  // Views the composition has no data for are listed with their reason, never shown empty (Studio LLD §5.1).
+  await page.getByText("More views", { exact: true }).click();
+  await page.getByText("Fabric does not provide owned state", { exact: false }).waitFor();
+  // Each retired route lands on the workbench with its mapped view state and keeps its own parameters (LLD §5.3).
+  for (const [route, expected] of [
+    ["graph", { view: "flow", renderer: "2d" }],
+    ["deployment-planner", { view: "topology", policy: "all-shapes" }],
+    ["signing", { view: "flow", overlays: "security", panel: "compile" }],
+    ["audit", { view: "flow", overlays: "compliance", panel: "compile" }],
+    ["intents", { view: "flow", panel: "history" }],
+    ["diff", { view: "flow", panel: "compile" }]
+  ]) {
+    await page.goto(`${base}/components/fabric-studio/${route}?tenantId=tenant-a&assemblyId=assembly-one${route === "deployment-planner" ? "&policy=all-shapes" : ""}`);
+    await page.waitForURL(url => url.pathname === "/components/fabric-studio/workspace");
+    const params = new URL(page.url()).searchParams;
+    for (const [key, value] of Object.entries({ tenantId: "tenant-a", ...expected })) assert.equal(params.get(key), value, `${route}: ${key}`);
+  }
+  await page.goto(`${base}/components/fabric-studio/intents?tenantId=tenant-a&assemblyId=assembly-one`);
+  await page.getByText("Start or open a draft to see its validated intent history.", { exact: false }).waitFor();
   assert.deepEqual(errors, []);
+
+  // Regression (Studio LLD §4.3 rule 6, §6): loading an assembly snapshot replaces the open session. A compile of the
+  // previous session must not survive, even at the same revision, and the snapshot's layout must be shown and saved.
+  const { createMockStudioApiFetch } = await import(pathToFileURL(resolve("packages/fabric-validation-client/dist/index.js")).href);
+  const mockFetch = createMockStudioApiFetch();
+  const snapshotPage = await browser.newPage();
+  const layoutWrites = [];
+  let failCompile = false;
+  let failProjection = false;
+  await snapshotPage.route("**/studio/**", async route => {
+    const request = route.request();
+    if (request.method() === "POST" && new URL(request.url()).pathname.endsWith("/layout")) layoutWrites.push(JSON.parse(request.postData() ?? "{}"));
+    if (failProjection && new URL(request.url()).pathname.endsWith("/dynamic-dcp")) {
+      return route.fulfill({ status: 503, json: { error: "projection unavailable" } });
+    }
+    if (failCompile && request.method() === "POST" && new URL(request.url()).pathname.endsWith("/compile")) {
+      return route.fulfill({ status: 503, json: { error: "compile unavailable" } });
+    }
+    const response = await mockFetch(request.url(), { method: request.method(), body: request.postData() ?? undefined });
+    return route.fulfill({ status: response.status, json: response.ok ? await response.json() : { error: response.statusText } });
+  });
+  const assemblyProjection = snapshotPage.waitForResponse(response => new URL(response.url()).pathname.endsWith("/dynamic-dcp")
+    && !new URL(response.url()).searchParams.has("sessionId"));
+  await snapshotPage.goto(`${base}/components/fabric-studio/workspace?tenantId=tenant-local&assemblyId=assembly-demo&panel=compile`);
+  await assemblyProjection;
+  await snapshotPage.waitForFunction(() => !document.body.innerText.includes("Loading Fabric's projection"));
+  // Regression (§4.3 rule 6): when the projection for the new session fails to load, the assembly's earlier projection is
+  // named as out of date and never drawn as the draft's; Retry loads the current one.
+  failProjection = true;
+  await snapshotPage.getByRole("button", { name: "New Draft" }).click();
+  await snapshotPage.getByText("synced at revision 7", { exact: false }).waitFor();
+  await snapshotPage.getByText("could not be loaded", { exact: false }).waitFor();
+  assert.match(await snapshotPage.locator(".workbench-stage-empty").innerText(),
+    /revision 7 of session studio-session-123 could not be loaded[\s\S]*for assembly assembly-demo, is out of date and is not shown/);
+  assert.equal(await snapshotPage.locator(".composition-plane").count(), 0, "the out-of-date projection is not drawn");
+  failProjection = false;
+  await snapshotPage.getByRole("button", { name: "Retry", exact: true }).click();
+  await snapshotPage.waitForFunction(() => !document.querySelector(".workbench-stage-empty"));
+  await snapshotPage.getByRole("button", { name: "Compile & Validate" }).click();
+  await snapshotPage.getByText("7 of session studio-session-123", { exact: false }).waitFor();
+  // Regression (§4.3 rule 6): after a policy change, a failed compile must not re-pin the earlier result to the new policy.
+  await snapshotPage.getByRole("tab", { name: "Substrate & Topology" }).click();
+  await snapshotPage.getByRole("button", { name: "Remote microservice", exact: true }).click();
+  await snapshotPage.getByText("with a different deployment policy", { exact: false }).first().waitFor();
+  failCompile = true;
+  await snapshotPage.getByRole("button", { name: "Compile & Validate" }).click();
+  await snapshotPage.getByText("FABRIC_REQUEST_FAILED", { exact: true }).waitFor();
+  assert.equal(await snapshotPage.getByText("7 of session studio-session-123", { exact: false }).count(), 0,
+    "a failed compile does not make the earlier result current");
+  assert.ok(await snapshotPage.getByText("Out of date: the compiled contract", { exact: false }).count() > 0);
+  assert.equal(await snapshotPage.getByText("COMPILE_READY", { exact: true }).count(), 0, "no compile card from an out-of-date result");
+  failCompile = false;
+  await snapshotPage.getByRole("button", { name: "Compile & Validate" }).click();
+  await snapshotPage.getByText("7 of session studio-session-123", { exact: false }).waitFor();
+  assert.equal(await snapshotPage.getByText("FABRIC_REQUEST_FAILED", { exact: true }).count(), 0, "the next success clears the failure");
+  await snapshotPage.getByRole("tab", { name: "Flow & Composition" }).click();
+  const imported = {
+    tenantId: "tenant-local", assemblyId: "assembly-demo",
+    assembly: { tenantId: "tenant-local", assemblyId: "assembly-demo", targetApplicationName: "Imported", defaultDeploymentTarget: "",
+      needsId: "", deploymentShape: "CONTAINERIZED_SERVICE", currentCandidateId: "", sceneRevision: 7 },
+    layout: { tenantId: "tenant-local", assemblyId: "assembly-demo", semanticZoomLevel: "ASSEMBLY_DCP", selectedSurface: "substrate",
+      camera: {}, annotations: [], activeViewpoint: "TOPOLOGY", activeOverlays: ["SECURITY"], colourOverlay: "SECURITY", renderer: "TABLE" },
+    sessions: [{ tenantId: "tenant-local", assemblyId: "assembly-demo", sessionId: "studio-session-imported", baseCatalogHash: "sha256:catalog",
+      sceneRevision: 7, warnings: [], intentLog: [{ type: "ADD_COMPONENT", payload: { catalogEntryId: "com.unfurl:storage:1.0" } }] }]
+  };
+  await snapshotPage.locator("input[type=file]").setInputFiles({ name: "assembly.json", mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(imported)) });
+  await snapshotPage.getByText("Assembly snapshot loaded for assembly-demo.", { exact: false }).waitFor();
+  assert.equal(await snapshotPage.getByRole("tab", { name: "Substrate & Topology" }).getAttribute("aria-selected"), "true",
+    "the snapshot's view is shown");
+  assert.equal(await snapshotPage.getByRole("button", { name: "Table", exact: true }).getAttribute("aria-pressed"), "true");
+  assert.equal(await snapshotPage.getByText("of session studio-session-123", { exact: false }).count(), 0,
+    "the previous session's compile is cleared, even at the same revision");
+  assert.equal(await snapshotPage.getByText("Out of date: the compiled contract", { exact: false }).count(), 0,
+    "cleared on replacement, not merely reported out of date");
+  await snapshotPage.waitForTimeout(500);
+  const lastWrite = layoutWrites.at(-1);
+  assert.equal(lastWrite?.activeViewpoint, "TOPOLOGY", "autosave writes the imported layout, not the previous one");
+  assert.equal(lastWrite?.renderer, "TABLE");
+  const inventory = () => snapshotPage.evaluate(() =>
+    JSON.parse(localStorage.getItem("unfurl-studio-draft-inventory:tenant-local:assembly-demo") ?? "{}").components);
+  assert.deepEqual((await inventory()).map(component => component.catalogEntryId), ["com.unfurl:storage:1.0"]);
+  // Regression (§4.3 rule 6): Fabric removes the assembly's sessions on import, so a snapshot without one leaves no
+  // open session: the removed session and its inventory are cleared and no command can target it.
+  await snapshotPage.locator("input[type=file]").setInputFiles({ name: "empty.json", mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ ...imported, sessions: [] })) });
+  await snapshotPage.getByText("Start a draft to compile.", { exact: true }).waitFor();
+  assert.equal(await snapshotPage.getByRole("button", { name: "Compile & Validate" }).isDisabled(), true);
+  assert.equal(await snapshotPage.locator(".workbench-bottom div", { hasText: "Revision" }).locator("span").innerText(), "no draft");
+  await snapshotPage.waitForFunction(() =>
+    JSON.parse(localStorage.getItem("unfurl-studio-draft-inventory:tenant-local:assembly-demo") ?? "{}").components?.length === 0);
 
   const hosted = await browser.newPage();
   await hosted.addInitScript(origin => {
@@ -76,7 +187,7 @@ try {
   await hosted.waitForFunction(() => document.body.innerText.includes("catalog loaded") || document.querySelector(".studio-page"));
   await new Promise(done => setTimeout(done, 300));
   assert.ok(tokens.length > 0); assert.ok(tokens.every(token => token === "Bearer test-only-token"));
-  console.log("Browser gate passed: isolated workspace caches, live data honesty, independent lifecycle mount/unmount, host theme and bearer authentication.");
+  console.log("Browser gate passed: isolated workspace caches, Studio's three entries, retired-route redirects, view reasons, failed-refresh projection freshness, failed-compile freshness, snapshot replacement (with and without a session), independent lifecycle mount/unmount, host theme and bearer authentication.");
 } finally {
   await browser?.close(); server.kill();
 }

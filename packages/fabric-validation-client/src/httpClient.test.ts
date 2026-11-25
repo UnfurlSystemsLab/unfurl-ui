@@ -250,21 +250,27 @@ describe("HTTP Studio Fabric client", () => {
       fetch: fakeFetch(calls, {
         tenantId: "tenant-local",
         assemblyId: "assembly-demo",
-        activeView: "Exploded",
         semanticZoomLevel: "CHILD_DCP",
         selectedSurface: "payment",
         camera: { distance: 5.5 },
-        annotations: ["inspect payment replacement"]
+        annotations: ["inspect payment replacement"],
+        activeViewpoint: "FLOW",
+        activeOverlays: ["SECURITY"],
+        renderer: "THREE_D",
+        layout: "EXPLODED"
       })
     });
 
     await client.loadLayoutState?.();
     const saved = await client.saveLayoutState?.({
-      activeView: "Exploded",
       semanticZoomLevel: "CHILD_DCP",
       selectedSurface: "payment",
       camera: { distance: 5.5 },
-      annotations: ["inspect payment replacement"]
+      annotations: ["inspect payment replacement"],
+      activeViewpoint: "FLOW",
+      activeOverlays: ["SECURITY"],
+      renderer: "THREE_D",
+      layout: "EXPLODED"
     });
 
     assert.equal(saved?.selectedSurface, "payment");
@@ -275,11 +281,14 @@ describe("HTTP Studio Fabric client", () => {
     assert.deepEqual(JSON.parse(calls[1]?.body ?? "{}"), {
       tenantId: "tenant-local",
       assemblyId: "assembly-demo",
-      activeView: "Exploded",
       semanticZoomLevel: "CHILD_DCP",
       selectedSurface: "payment",
       camera: { distance: 5.5 },
-      annotations: ["inspect payment replacement"]
+      annotations: ["inspect payment replacement"],
+      activeViewpoint: "FLOW",
+      activeOverlays: ["SECURITY"],
+      renderer: "THREE_D",
+      layout: "EXPLODED"
     });
   });
 

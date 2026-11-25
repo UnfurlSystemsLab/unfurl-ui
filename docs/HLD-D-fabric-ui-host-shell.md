@@ -339,6 +339,23 @@ results, shows the derived `SubstrateProfile` as the closed-world runtime
 surface, and exports the `CompositionContract` + `SubstrateProfile` through
 Fabric.
 
+Studio is one workbench organised by views, perspective overlays and renderers
+(`LLD-studio-viewpoints-and-perspectives.md`). The host's Studio navigation
+therefore has three entries:
+
+```text
+/components/fabric-studio/workspace   the workbench
+/components/fabric-studio/catalog     tenant-scoped catalog curation
+/components/fabric-studio/help        help
+```
+
+The former Studio routes (`read-only`, `deployment-planner`, `signing`,
+`graph`, `audit`, `intents`, `diff`) redirect to the workbench. Each carries
+deep-link query parameters
+(`?view=&overlays=&renderer=`) that select the matching view state, as mapped
+in that LLD's §5.3. Bookmarks and links keep working, and no route shows a
+separate screen for a perspective.
+
 Each component webapp can run standalone or hosted.
 
 ---

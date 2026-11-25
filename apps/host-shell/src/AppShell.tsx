@@ -15,9 +15,11 @@ export type AppShellProps = {
   readonly assemblyId?: string;
   readonly runtime?: HostRuntime | undefined;
 };
-const studioLinks = [["workspace", "Assembly"], ["catalog", "Catalog"], ["read-only", "Exploded"],
-  ["deployment-planner", "Deployment"], ["signing", "Signing"], ["graph", "Ports"], ["audit", "Audit"],
-  ["intents", "Intents"], ["diff", "Diff"], ["help", "Help"]] as const;
+/**
+ * Studio's three navigation entries (HLD-D §6.2): the workbench, tenant catalog curation and help. The former routes
+ * redirect into the workbench with their view state (Studio LLD-studio-viewpoints-and-perspectives §5.3).
+ */
+const studioLinks = [["workspace", "Workbench"], ["catalog", "Catalog"], ["help", "Help"]] as const;
 
 /** Composite: render deployment navigation, a guarded lifecycle mount and resolved theme. */
 export function AppShell({ mode = studioMode(), tenantId = studioTenantId(), assemblyId = studioAssemblyId(), runtime }: AppShellProps) {

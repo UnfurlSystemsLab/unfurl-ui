@@ -305,14 +305,34 @@ export type LoadAssemblySnapshotRequest = {
   readonly snapshot: StudioAssemblySnapshot;
 };
 
+/** A workbench view (Studio LLD-studio-viewpoints-and-perspectives §3). */
+export type StudioViewpoint = "FLOW" | "DATA" | "TOPOLOGY" | "RUNTIME";
+/** A perspective overlay (Studio LLD §4). */
+export type StudioOverlay = "SECURITY" | "PERFORMANCE" | "RESILIENCE" | "COMPLIANCE";
+/** A renderer (Studio LLD §5.2). */
+export type StudioRenderer = "THREE_D" | "TWO_D" | "TABLE";
+/** A 3D Flow layout. */
+export type StudioLayoutMode = "ASSEMBLY" | "EXPLODED";
+
+/**
+ * A tenant- and assembly-scoped Studio layout: UI state only, never a validity source (Fabric LLD-fabric-studio-api,
+ * Layout state extension). A layout written before the workbench has only `activeView`, the retired tab value, which
+ * Studio maps (Studio LLD §5.4); a current one has the view-state fields instead.
+ */
 export type StudioLayoutState = {
   readonly tenantId: string;
   readonly assemblyId: string;
-  readonly activeView: string;
+  /** Read-only: the retired five-tab value, present only on an older layout. */
+  readonly activeView?: string;
   readonly semanticZoomLevel: "PARENT_DCP" | "ASSEMBLY_DCP" | "CHILD_DCP" | string;
   readonly selectedSurface: string;
   readonly camera: Record<string, unknown>;
   readonly annotations: readonly string[];
+  readonly activeViewpoint?: StudioViewpoint;
+  readonly activeOverlays?: readonly StudioOverlay[];
+  readonly colourOverlay?: StudioOverlay;
+  readonly renderer?: StudioRenderer;
+  readonly layout?: StudioLayoutMode;
 };
 
 export type LoadLayoutStateRequest = {
@@ -320,14 +340,19 @@ export type LoadLayoutStateRequest = {
   readonly assemblyId?: string;
 };
 
+/** A layout write: always the workbench view state, never the retired `activeView` (Fabric refuses it). */
 export type SaveLayoutStateRequest = {
   readonly tenantId?: string;
   readonly assemblyId?: string;
-  readonly activeView: string;
   readonly semanticZoomLevel: "PARENT_DCP" | "ASSEMBLY_DCP" | "CHILD_DCP" | string;
   readonly selectedSurface: string;
   readonly camera?: Record<string, unknown>;
   readonly annotations?: readonly string[];
+  readonly activeViewpoint: StudioViewpoint;
+  readonly activeOverlays: readonly StudioOverlay[];
+  readonly colourOverlay?: StudioOverlay;
+  readonly renderer: StudioRenderer;
+  readonly layout?: StudioLayoutMode;
 };
 
 export type DynamicDcpProjectionRequest = {

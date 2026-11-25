@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   applyDraftIntent,
   compileDraftWorkspace,
+  compileResponseProducedBy,
   createDraftWorkspace,
   currentRevision,
   type DraftIntentCommand
@@ -227,6 +228,39 @@ describe("draft workspace", () => {
     assert.equal(state.status === "READY" ? state.session.sceneRevision : undefined, 7);
     assert.equal(state.status === "READY" ? currentRevision(state.history) : undefined, 7);
     assert.match(state.status === "READY" ? state.lastError ?? "" : "", /timed out/);
+  });
+
+  it("reports only the compile response a call produced, never the earlier one a failure keeps (Studio LLD §4.3 rule 6)", async () => {
+    const compiled = {
+      status: "COMPILED" as const,
+      candidateId: "cand-abc123",
+      contractArtifact: artifact("contract"),
+      substrateProfileArtifact: artifact("profile"),
+      warnings: []
+    };
+    const succeeding = fakeClient({ session: session({ sceneRevision: 7 }), compileResponse: compiled });
+    const created = await createDraftWorkspace(succeeding, { baseCatalogHash: "sha256:catalog" });
+    const first = await compileDraftWorkspace(succeeding, created);
+    assert.equal(compileResponseProducedBy(created, first)?.status, "COMPILED", "a first compile is produced");
+
+    const second = await compileDraftWorkspace(succeeding, first);
+    assert.ok(compileResponseProducedBy(first, second), "a later successful compile is produced, even with equal content");
+
+    const failing = fakeClient({ session: session({ sceneRevision: 7 }), compileError: new Error("Fabric Studio API timed out") });
+    const failed = await compileDraftWorkspace(failing, second);
+    assert.equal(failed.status === "READY" ? failed.lastCompile?.status : undefined, "COMPILED", "the state machine keeps the earlier compile");
+    assert.equal(compileResponseProducedBy(second, failed), undefined, "but a failed call produced none");
+
+    const recovered = await compileDraftWorkspace(succeeding, failed);
+    assert.equal(compileResponseProducedBy(failed, recovered)?.status, "COMPILED", "a success after a failure is produced");
+
+    const stale = fakeClient({
+      session: session({ sceneRevision: 7 }), refreshedSession: session({ sceneRevision: 9 }),
+      compileResponse: { status: "STALE_REVISION", expectedRevision: 9, receivedRevision: 7 }
+    });
+    assert.equal(compileResponseProducedBy(failed, await compileDraftWorkspace(stale, failed))?.status, "STALE_REVISION");
+    const loading = { status: "FAILED" as const, message: "no draft" };
+    assert.equal(compileResponseProducedBy(loading, await compileDraftWorkspace(succeeding, loading)), undefined, "no request, no response");
   });
 });
 

@@ -198,6 +198,25 @@ export async function compileDraftWorkspace(
 }
 
 /**
+ * Query: the compile response that one {@link compileDraftWorkspace} call produced, or `undefined` when the call
+ * produced none. A failed call keeps the earlier `lastCompile` (so the state machine stays retryable), and that earlier
+ * response must never be taken for this request's: a caller that pins results to the inputs it sent (Studio LLD
+ * §4.3 rule 6) pins only what this returns.
+ *
+ * The outcome is read from the state machine's own contract, not from object identity (a client may return equal or
+ * shared response objects): a call on a READY state either produced a response, and then `lastError` is absent
+ * (success clears it, a stale-revision refresh starts a fresh state), or failed, and then `lastError` is set. A call on a
+ * non-READY state makes no request.
+ */
+export function compileResponseProducedBy(
+  before: DraftWorkspaceState,
+  after: DraftWorkspaceState
+): CompileDraftCandidateResponse | undefined {
+  if (before.status !== "READY" || after.status !== "READY") return undefined;
+  return after.lastError === undefined ? after.lastCompile : undefined;
+}
+
+/**
  * Adapter: converts UI draft commands into the revisioned Fabric Studio intent DTO.
  */
 function toStudioIntent(session: StudioDraftSession, baseRevision: number, command: DraftIntentCommand): StudioIntent {
