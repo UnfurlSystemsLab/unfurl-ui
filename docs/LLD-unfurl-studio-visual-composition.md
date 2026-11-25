@@ -688,6 +688,9 @@ Rationale:
 
 - "Studio" fits design-time composition.
 - "Cockpit" is better reserved for runtime operations and monitoring.
+- Pre-release validation of a composition, load and concurrency included, stays in the Studio workbench, against a named
+  test deployment. Live monitoring of deployed apps is Cockpit's, starting with the API catalog's live documentation and
+  status report (`LLD-studio-viewpoints-and-perspectives.md` §3.4).
 - "Workbench" is accurate but less product-shaped.
 
 The product line becomes:
@@ -739,15 +742,145 @@ It is a visual, governed design-time projection of Fabric.
 
 ---
 
+## 19A. Progressive disclosure and modeling notations
+
+Studio serves small businesses, enterprises, and, in future, embedded and edge
+systems through one surface. Early adoption depends on a default that asks for
+no modeling process, while governance depends on rigor that never weakens. One
+rule reconciles the two:
+
+> Disclosure changes what you see, never what is checked.
+
+There is one model (DCP claims, needs, and signed contracts), and one set of
+Fabric gates (§16) applies to every user. Studio decides only how much of that
+model and those gates it reveals.
+
+### Notation decision
+
+DCP is the sole semantic model. Studio does not expose, and does not keep
+underneath, a general-purpose modeling notation. These were considered and
+rejected as the core:
+
+| Notation | Why not the core |
+|---|---|
+| SysML v2 | A second semantic model next to DCP. It has no home for refusals, state and decision ownership, negotiation, or trust and signing. Its parametric constraints have nothing to verify, because DCP carries no quantity data. It also brings an MBSE learning curve that blocks early adoption. |
+| UML (component diagrams) | Its provided/required interfaces are familiar, but it cannot express DCP governance without a heavy custom profile. |
+| AADL | Tied to real-time and embedded execution concepts (threads, processors, buses) that most compositions do not have. |
+| ArchiMate | Enterprise-alignment notation. It has no machine-checkable port or schema contracts. |
+
+SysML v2 is the designated **future interchange** standard for integrating
+software compositions with physical or embedded system models. It would come
+through a separate adapter, `unfurl-adapter-sysml`:
+- Import produces a needs document, never a claim.
+- Export renders a verified, signed contract tree.
+
+That adapter is designed when physical or embedded integration is on the
+roadmap, together with the DCP schema work it depends on: quantities and units
+with canonical normalization, operating ranges as validity gates, and interface
+kinds beyond `http_api|event_stream|negotiation|in_process` (DCP HLD-C2). Until
+then it is not part of Studio.
+
+### Default canvas: no modeling process
+
+The default canvas shows each component as a card:
+- needs (dependencies) on one side, offers on the other (§8);
+- the substrate as the base plate (§9);
+- nesting through `CONTAINS` drill-down (§2B).
+
+No stereotypes, compartments, or modeling vocabulary appear. An operator
+composes by adding components and connecting ports (§11), and Fabric matches
+and validates. Nothing on the default canvas requires knowing a design method.
+
+### Views and perspective overlays: driven by content, not by segment
+
+The workbench follows the Rozanski and Woods viewpoint and perspective
+framework (built on ISO/IEC/IEEE 42010), reduced to keep the default
+uncluttered. `LLD-studio-viewpoints-and-perspectives.md` is the source of
+truth. In summary, a screen combines three independent choices, all of them
+view state (§24):
+
+- **View**, from four:
+  - Flow & Composition: Context + Functional; always offered; the default.
+  - Data & State: Information.
+  - Substrate & Topology: Deployment + Concurrency; always offered.
+  - Runtime & Telemetry: Operational, pre-release only. Live production
+    monitoring belongs to Cockpit (§17).
+- **Perspective overlay**, from four: Security & Trust, Performance & Load,
+  Resilience & Faults, Compliance & Governance. An overlay annotates the active
+  view and has no screen of its own.
+- **Renderer**: 3D, 2D or Table. Table exists for every view (§20).
+
+Rules:
+
+1. A view or overlay is offered because the composition contains its data,
+   never because of who the customer is, which segment or preset they chose, or
+   which environment they run in. A view or overlay without data is listed with
+   its reason, never shown empty.
+2. The user can open any offered view or overlay at any time. Doing so never
+   changes the candidate, its validity, or what is compiled and signed.
+3. Overlays never gate. `substrateProfileMode`, trust policy and every §16 rule
+   run in Fabric whatever the overlays show.
+4. Studio never parses `catalogManifest`. Every view's data arrives typed from
+   Fabric.
+5. Resource, timing and concurrency content (budgets, instance semantics,
+   ordering) exists only once DCP claims carry that data. No claim carries it
+   today, so Studio shows none and fakes no values.
+
+### Errors are guided fixes, not silent defaults
+
+When matching fails, Studio shows Fabric's reasons as plain-language cards: the
+`NoMatchExplanation` lines, each with its reason and fix, plus each candidate
+conflict (§16). That is the same text the CLI and the advisor print. Rules:
+
+1. Studio never binds a default provider, value, or credential in the
+   background to make a composition valid. Fabric does not add providers that
+   the needs do not ask for (unfurl-fabric `HLD-unfurl-fabric.md`, Core Flow
+   step 3).
+2. A fix that one Studio edit can perform is offered as "Apply fix". That
+   replays an ordinary §11 intent (`ADD_COMPONENT`, `REPLACE_COMPONENT`,
+   `CONNECT`, `DISCONNECT`, or `REMOVE_COMPONENT`) against the current session
+   revision (§23), and Fabric validates it like any other intent. This is the
+   same replay path used for agent-assisted edits.
+3. A fix that belongs to another surface (changing the needs, the trust policy,
+   or catalog admission) is shown with where to make it. Studio does not apply
+   it from the card.
+4. Nothing is pruned silently. A rejected candidate or trust-rejected entry
+   stays visible with its reason in the Warnings table (§20), even when no
+   overlay is active.
+5. No secret value is ever proposed or filled in as part of a fix (§16 rule 9).
+
+### Starter presets
+
+A preset is a starting point for a segment, such as a local single-host
+assembly or an enterprise cluster assembly. It is an ordinary, visible needs
+document plus a deployment-policy choice, which the operator can inspect and
+edit like any other. It may also set the starting view state (view, overlays,
+renderer). A preset is never a validation mode, trust mode, or strictness
+level. Edge and embedded presets wait for DCP resource and quantity support.
+
+### Invariant
+
+Signing, verification, trust policy, refusal alignment, substrate derivation,
+and every §16 gate run identically for every user, segment, preset, view,
+overlay, and renderer. A small-business operator and an enterprise architect who build the
+same composition get the same candidate and byte-identical contracts. They
+differ only in how much of the governance Studio shows them.
+
+---
+
 ## 20. Accessibility and alternate views
 
-Studio must support three synchronized views:
+Studio must support three synchronized *renderers*. A renderer is how the
+active view (§19A, `LLD-studio-viewpoints-and-perspectives.md` §5.2) is drawn,
+not a view of its own:
 
-1. **3D Assembly View** - visual spatial composition.
-2. **2D Graph View** - large-graph and keyboard-friendly graph inspection.
-3. **Contract/Table View** - accessible tabular view of components, ports,
+1. **3D renderer** - visual spatial composition. Available for Flow &
+   Composition and Substrate & Topology only.
+2. **2D renderer** - large-graph and keyboard-friendly graph inspection.
+   Available for every view.
+3. **Table renderer** - accessible tabular view of components, ports,
    dependencies, refusals, substrate requirements, warnings, and validation
-   results.
+   results. Available for every view.
 
 All semantic operations available in 3D must also be possible through
 keyboard-accessible controls. The 3D renderer is an affordance, not the only
@@ -938,6 +1071,8 @@ View state is local or per-user:
 - collapsed panels
 - selected inspector tab
 - palette filters
+- active view, active perspective overlays, colour overlay, renderer and 3D
+  layout (`StudioViewState`, `LLD-studio-viewpoints-and-perspectives.md` §6)
 
 View state is also tenant/assembly scoped. A saved placement or annotation from
 one assembly must not appear in another assembly unless the operator explicitly
@@ -1005,7 +1140,16 @@ POST /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions/{id}/intents
 GET  /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions/{id}
 POST /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions/{id}/compile
 GET  /studio/tenants/{tenantId}/assets/{assetId}
+GET  /studio/tenants/{tenantId}/assemblies/{assemblyId}/views/{view}?sessionId=
+GET  /studio/tenants/{tenantId}/assemblies/{assemblyId}/overlays/{overlay}?sessionId=&view=
+GET  /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions/{id}/emit-plan
+GET  /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions/{id}/contract-diff?baseRevision=
+POST /studio/tenants/{tenantId}/assemblies/{assemblyId}/sessions/{id}/verify
 ```
+
+The views, overlays, emit-plan, contract-diff and verify routes are specified in
+`unfurl-fabric/docs/LLD-fabric-studio-api.md` ("Views and Overlays"). They are
+P2 in `LLD-studio-viewpoints-and-perspectives.md` §10.
 
 Service-method version:
 
@@ -1024,6 +1168,11 @@ getDraftSession(tenantId, assemblyId, sessionId)
 resolveDeployment(tenantId, assemblyId, sessionId)
 compileCandidate(tenantId, assemblyId, sessionId)
 getVisualAsset(tenantId, assetId)
+loadViewProjection(tenantId, assemblyId, sessionId, view)
+loadOverlayAnnotations(tenantId, assemblyId, sessionId, overlay, view)
+loadEmitPlanPreview(tenantId, assemblyId, sessionId)
+loadContractDiff(tenantId, assemblyId, sessionId, baseRevision)
+verifyContract(tenantId, assemblyId, sessionId)
 ```
 
 API rules:
@@ -1081,3 +1230,13 @@ The first implementation should not begin with full drag/drop 3D assembly. The
 first useful Studio release should make an existing contract/profile visible,
 inspectable, and accessible. Interactive manipulation comes after the projection
 is reliable.
+
+MVP 4: views and perspective overlays
+
+The one-workbench layout with views, overlays and renderers is phased by data
+availability, as in `LLD-studio-viewpoints-and-perspectives.md` §10:
+
+- **P1 (implemented):** views and overlays whose data Studio already receives as typed fields.
+- **P2:** views and overlays that need the Fabric view and overlay endpoints
+  (§26).
+- **P3:** content that needs DCP schema work first.

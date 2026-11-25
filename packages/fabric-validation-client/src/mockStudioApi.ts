@@ -118,7 +118,8 @@ export const studioApiExampleSession: StudioDraftSession = {
   lastOpenedAt: "2026-06-06T00:00:00.000Z",
   currentCandidateId: "cand-abc123",
   sceneRevision: 7,
-  warnings: [],
+  // No trust policy, so Fabric plans permissively and says so (LLD-fabric-studio-api, Permissive trust policy warning).
+  warnings: [{ code: "TRUST_POLICY_PERMISSIVE", message: "No trust policy is set for this session; every catalog entry is trusted." }],
   collaborators: [
     {
       collaboratorId: "local-operator",
@@ -518,13 +519,19 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     }
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/layout`) {
       const body = parseJson<Partial<StudioLayoutState>>(init?.body);
+      // Mirrors Fabric's write rule: the view state is stored as sent, and the retired activeView is never written.
       return ok(fixtures.layoutState ?? {
-        ...layout(session),
-        activeView: body?.activeView ?? "Assembly",
+        tenantId: session.tenantId,
+        assemblyId: session.assemblyId,
         semanticZoomLevel: body?.semanticZoomLevel ?? "ASSEMBLY_DCP",
         selectedSurface: body?.selectedSurface ?? "validation",
         camera: body?.camera ?? {},
-        annotations: body?.annotations ?? []
+        annotations: body?.annotations ?? [],
+        ...(body?.activeViewpoint === undefined ? {} : { activeViewpoint: body.activeViewpoint }),
+        activeOverlays: body?.activeOverlays ?? [],
+        ...(body?.colourOverlay === undefined ? {} : { colourOverlay: body.colourOverlay }),
+        ...(body?.renderer === undefined ? {} : { renderer: body.renderer }),
+        ...(body?.layout === undefined ? {} : { layout: body.layout })
       });
     }
     if (method === "GET" && (path === `/studio/sessions/${encodeURIComponent(session.sessionId)}` || path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}`))) {
@@ -727,15 +734,19 @@ function assembly(session: StudioDraftSession): StudioAssemblySummary {
   };
 }
 
+/** Fabric's initial layout for an assembly nobody has arranged: Flow & Composition in 3D, assembly layout. */
 function layout(session: StudioDraftSession): StudioLayoutState {
   return {
     tenantId: session.tenantId,
     assemblyId: session.assemblyId,
-    activeView: "Assembly",
     semanticZoomLevel: "ASSEMBLY_DCP",
     selectedSurface: "validation",
     camera: {},
-    annotations: []
+    annotations: [],
+    activeViewpoint: "FLOW",
+    activeOverlays: [],
+    renderer: "THREE_D",
+    layout: "ASSEMBLY"
   };
 }
 

@@ -1,37 +1,58 @@
-import { Navigate, Route, Routes } from "react-router-dom";
-import {
-  CatalogPalettePanel,
-  DecisionAuditPanel,
-  DraftWorkspacePanel,
-  DeploymentPlannerPanel,
-  GraphPanel,
-  IntentHistoryPanel,
-  ReadOnlyStudioPanel,
-  SigningHandoffPanel,
-  StudioHelpPanel,
-  VisualDiffPanel,
-  createAllShapesDeploymentPlannerState
-} from "./index.js";
-import { studioDemoFallbacks, useStudioMode, useStudioClient } from "./StudioClientContext.js";
-import { useSearchParams } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useSearchParams } from "react-router-dom";
+import { CatalogPalettePanel } from "./CatalogPalettePanel.js";
+import { StudioHelpPanel } from "./StudioHelpPanel.js";
+import { useStudioClient, useStudioOperator } from "./StudioClientContext.js";
+import { CompiledContractWorkbench, Workbench } from "./workbench/Workbench.js";
 
-/** Router: map Studio-owned paths to product experiences. */
+/** The workbench route (LLD-studio-viewpoints-and-perspectives §5.3). */
+export const WORKBENCH_PATH = "/components/fabric-studio/workspace";
+
+/**
+ * The retired Studio routes and the workbench view state each lands on (LLD §5.3). Only these parameters are added;
+ * every parameter the old link carried (`tenantId`, `assemblyId`, `contractPath`, `policy`, ...) is kept.
+ */
+export const RETIRED_ROUTES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  graph: { view: "flow", renderer: "2d" },
+  "read-only": { view: "flow", renderer: "table" },
+  "deployment-planner": { view: "topology" },
+  signing: { view: "flow", overlays: "security", panel: "compile" },
+  audit: { view: "flow", overlays: "compliance", panel: "compile" },
+  intents: { view: "flow", panel: "history" },
+  diff: { view: "flow", panel: "compile" }
+};
+
+/** Router: Studio's three entries (workbench, catalog, help) and the redirects of the retired routes. */
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/components/fabric-studio/workspace" replace />} />
+      <Route path="/" element={<Navigate to={WORKBENCH_PATH} replace />} />
       <Route path="/components/fabric-studio/catalog" element={<CatalogRoute />} />
-      <Route path="/components/fabric-studio/workspace" element={<WorkspaceRoute />} />
-      <Route path="/components/fabric-studio/read-only" element={<ReadOnlyRoute />} />
-      <Route path="/components/fabric-studio/signing" element={<SigningRoute />} />
-      <Route path="/components/fabric-studio/graph" element={<GraphRoute />} />
-      <Route path="/components/fabric-studio/audit" element={<AuditRoute />} />
-      <Route path="/components/fabric-studio/intents" element={<IntentHistoryRoute />} />
-      <Route path="/components/fabric-studio/diff" element={<VisualDiffRoute />} />
+      <Route path={WORKBENCH_PATH} element={<WorkbenchRoute />} />
       <Route path="/components/fabric-studio/help" element={<StudioHelpPanel />} />
-      <Route path="/components/fabric-studio/deployment-planner" element={<DeploymentPlannerRoute />} />
+      {Object.keys(RETIRED_ROUTES).map(route => (
+        <Route key={route} path={`/components/fabric-studio/${route}`} element={<RetiredRoute route={route} />} />
+      ))}
     </Routes>
   );
+}
+
+/**
+ * Redirect Adapter: a retired route lands on the workbench with its mapped view state; a parameter of the old link wins
+ * over nothing, and the mapping never overrides an explicit `view`, `overlays`, `renderer` or `panel` it already carried.
+ * The old `renderer=2d|3d` keeps its meaning.
+ */
+function RetiredRoute({ route }: { readonly route: string }) {
+  const location = useLocation();
+  return <Navigate to={retiredRouteTarget(route, location.search)} replace />;
+}
+
+/** The workbench URL a retired route redirects to. */
+export function retiredRouteTarget(route: string, search: string): string {
+  const params = new URLSearchParams(search);
+  for (const [key, value] of Object.entries(RETIRED_ROUTES[route] ?? {})) {
+    if (!params.has(key)) params.set(key, value);
+  }
+  return `${WORKBENCH_PATH}?${params.toString()}`;
 }
 
 /** Route Adapter: hydrate catalog selection from navigation state. */
@@ -43,9 +64,8 @@ function CatalogRoute() {
       client={client}
       tenantId={searchParams.get("tenantId") ?? undefined}
       assemblyId={searchParams.get("assemblyId") ?? undefined}
-      // Round-trip the panel's tenant edits into the URL so the tenant is
-      // bookmarkable / shareable and the multitenant flow is exercised
-      // end-to-end from the URL bar.
+      // Round-trip the panel's tenant edits into the URL so the tenant is bookmarkable / shareable and the multitenant
+      // flow is exercised end-to-end from the URL bar.
       onTenantIdChange={(next) => {
         setSearchParams(prev => {
           const out = new URLSearchParams(prev);
@@ -61,114 +81,29 @@ function CatalogRoute() {
   );
 }
 
-/** Scope Adapter: remount the workspace on externally selected identity changes. */
-function WorkspaceRoute() {
+/**
+ * Scope Adapter: the workbench for the linked tenant and assembly, remounted when they change, with the deep link's view
+ * state. A supplied `contractPath` opens that compiled contract read-only instead (`read-only`, LLD §5.3).
+ */
+function WorkbenchRoute() {
   const client = useStudioClient();
+  const operator = useStudioOperator();
   const [searchParams] = useSearchParams();
+  const contractPath = searchParams.get("contractPath");
+  if (contractPath) {
+    return <CompiledContractWorkbench client={client} contractPath={contractPath}
+      substrateProfilePath={searchParams.get("substrateProfilePath") ?? ""} deepLink={searchParams.toString()} />;
+  }
   return (
-    <DraftWorkspacePanel
+    <Workbench
       key={JSON.stringify([searchParams.get("tenantId"), searchParams.get("assemblyId")])}
       client={client}
       initialTenantId={searchParams.get("tenantId") ?? undefined}
       initialAssemblyId={searchParams.get("assemblyId") ?? undefined}
       initialBaseCatalogHash={searchParams.get("catalogHash") ?? undefined}
-      demoFallbacks={studioDemoFallbacks()}
-    />
-  );
-}
-
-/** Route Adapter: select an authoritative composition view. */
-function ReadOnlyRoute() {
-  const client = useStudioClient();
-  const [searchParams] = useSearchParams();
-  return (
-    <ReadOnlyStudioPanel
-      client={client}
-      initialContractPath={searchParams.get("contractPath") ?? ""}
-      initialSubstrateProfilePath={searchParams.get("substrateProfilePath") ?? ""}
-    />
-  );
-}
-
-/** Route Adapter: collect the session and revision for signed export. */
-function SigningRoute() {
-  const client = useStudioClient();
-  const [searchParams] = useSearchParams();
-  const revision = Number(searchParams.get("revision") ?? "7");
-  return (
-    <SigningHandoffPanel
-      client={client}
-      initialSessionId={searchParams.get("sessionId") ?? "studio-session-123"}
-      initialExpectedRevision={Number.isFinite(revision) ? revision : 7}
-    />
-  );
-}
-
-/** Route Adapter: select the accessible graph representation. */
-function GraphRoute() {
-  const client = useStudioClient();
-  const [searchParams] = useSearchParams();
-  return (
-    <GraphPanel
-      client={client}
-      initialContractPath={searchParams.get("contractPath") ?? ""}
-      initialSubstrateProfilePath={searchParams.get("substrateProfilePath") ?? ""}
-      initialRenderer={searchParams.get("renderer") === "3d" ? "3d" : "2d"}
-    />
-  );
-}
-
-/** Route Adapter: inspect the selected revision through the Fabric client. */
-function AuditRoute() {
-  const client = useStudioClient();
-  const [searchParams] = useSearchParams();
-  const revision = Number(searchParams.get("revision") ?? "7");
-  return (
-    <DecisionAuditPanel
-      client={client}
-      initialSessionId={searchParams.get("sessionId") ?? "studio-session-123"}
-      initialExpectedRevision={Number.isFinite(revision) ? revision : 7}
-    />
-  );
-}
-
-/** Route Adapter: expose unavailable live history or an explicitly selected fixture. */
-function IntentHistoryRoute() {
-  const [searchParams] = useSearchParams();
-  const revision = Number(searchParams.get("revision") ?? "7");
-  return <IntentHistoryPanel fixture={useStudioMode() === "fixture"} initialRevision={Number.isFinite(revision) ? revision : 7} />;
-}
-
-/** Route Adapter: never supply fabricated live revision artifacts. */
-function VisualDiffRoute() {
-  return <VisualDiffPanel fixture={useStudioMode() === "fixture"} />;
-}
-
-/**
- * Route adapter: hydrates the deployment planner from URL parameters, preferring
- * Studio session identifiers over filesystem debug paths.
- */
-function DeploymentPlannerRoute() {
-  const client = useStudioClient();
-  const [searchParams] = useSearchParams();
-  const initialPlannerState = searchParams.get("policy") === "all-shapes"
-    ? createAllShapesDeploymentPlannerState()
-    : undefined;
-  // Accept the canonical `needsPath` param (what launchers actually emit) while
-  // keeping `assemblyPath` as a backward-compat alias for old bookmarks. The
-  // previous hardcoded `samples/...` placeholder was dropped — defaulting to
-  // an empty string is consistent with `initialCatalogPath` and produces a
-  // friendly empty field instead of a misleading file-not-found error.
-  return (
-    <DeploymentPlannerPanel
-      client={client}
-      initialTenantId={searchParams.get("tenantId") ?? ""}
-      initialAssemblyId={searchParams.get("assemblyId") ?? ""}
-      initialSessionId={searchParams.get("sessionId") ?? ""}
-      initialNeedsId={searchParams.get("needsId") ?? ""}
-      initialCatalogPath={searchParams.get("catalogPath") ?? ""}
-      initialAssemblyPath={searchParams.get("needsPath") ?? searchParams.get("assemblyPath") ?? ""}
-      initialPlannerState={initialPlannerState}
+      operatorId={operator}
+      deepLink={searchParams.toString()}
+      allShapesPolicy={searchParams.get("policy") === "all-shapes"}
     />
   );
 }

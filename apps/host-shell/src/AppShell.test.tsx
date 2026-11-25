@@ -7,9 +7,9 @@ import { AppShell } from "./AppShell.js";
 import { StudioClientProvider } from "./StudioClientContext.js";
 
 describe("AppShell", () => {
-  it("renders the deployment planner route in fixture mode", () => {
+  it("renders the workbench in fixture mode with Studio's three navigation entries", () => {
     const html = renderToString(
-      <MemoryRouter initialEntries={["/components/fabric-studio/deployment-planner"]}>
+      <MemoryRouter initialEntries={["/components/fabric-studio/workspace"]}>
         <StudioClientProvider mode="fixture">
           <AppShell mode="fixture" />
         </StudioClientProvider>
@@ -17,10 +17,11 @@ describe("AppShell", () => {
     );
 
     assert.match(html, /Unfurl Studio/);
-    assert.match(html, /Deployment/);
     assert.match(html, /fixture.*mode/s);
     assert.match(html, /tenant-local/);
     assert.match(html, /assembly-demo/);
+    const links = [...html.matchAll(/href="\/components\/fabric-studio\/([a-z-]+)/g)].map(match => match[1]);
+    assert.deepEqual([...new Set(links)], ["workspace", "catalog", "help"]);
   });
 
   it("renders the active tenant and assembly context", () => {
@@ -52,12 +53,6 @@ describe("AppShell", () => {
   for (const [path, text] of [
     ["/components/fabric-studio/catalog", "Catalog Palette"],
     ["/components/fabric-studio/workspace", "Unfurl Studio Workbench"],
-    ["/components/fabric-studio/read-only", "Read-Only Studio"],
-    ["/components/fabric-studio/signing", "Signing Handoff"],
-    ["/components/fabric-studio/graph", "Graph View"],
-    ["/components/fabric-studio/audit", "Decision Audit"],
-    ["/components/fabric-studio/intents", "Intent History"],
-    ["/components/fabric-studio/diff", "Visual Diff"],
     ["/components/fabric-studio/help", "Studio Setup Help"]
   ] as const) {
     it(`renders ${path}`, () => {

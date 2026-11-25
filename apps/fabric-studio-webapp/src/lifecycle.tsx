@@ -33,7 +33,7 @@ export async function mount(props: StudioMountProps) {
   root.render(<StudioBoundary><BrowserRouter>
     <StudioClientProvider mode={props.studioMode ?? "live"} apiBaseUrl={props.api.componentBaseUrl}
       tenantId={props.tenantId} assemblyId={props.assemblyId ?? "assembly-demo"}
-      getAccessToken={props.localDevelopment ? undefined : props.auth.getAccessToken}>
+      getAccessToken={props.localDevelopment ? undefined : props.auth.getAccessToken} operatorId={props.user.id}>
       <AppRoutes />
     </StudioClientProvider>
   </BrowserRouter></StudioBoundary>);

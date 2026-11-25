@@ -1,0 +1,416 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { renderToString } from "react-dom/server";
+import {
+  createHttpStudioFabricClient,
+  createMockStudioApiFetch,
+  type CompileDraftCandidateResponse,
+  type DynamicDcpProjectionResponse,
+  type StudioLayoutState
+} from "@unfurl/fabric-validation-client";
+import type { StudioDraftSession } from "@unfurl/fabric-scene-model";
+import {
+  deepLinkParams,
+  INITIAL_VIEW_STATE,
+  layoutWriteFor,
+  migrateActiveView,
+  OVERLAYS,
+  parseDeepLink,
+  SUPPORTED_RENDERERS,
+  VIEWPOINTS,
+  viewStateFromLayout,
+  viewStateReducer,
+  type StudioViewState
+} from "./viewState.js";
+import { NOT_YET_PROVIDED_BY_FABRIC, PROJECTION_LOADING, PROJECTION_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
+import { badgesByElement, evaluateOverlays, overlayAvailability, OVERLAY_REGISTRY, TRUST_POLICY_PERMISSIVE } from "./overlays.js";
+import { projectCompiledContract, projectFlow, projectTopology } from "./projectors.js";
+import { TableRenderer, TwoDRenderer, sceneModeFor, viewForSceneMode } from "./renderers.js";
+import {
+  currentResponse,
+  failedProjectionLoad,
+  freshness,
+  isCurrent,
+  pin,
+  policyKey,
+  projectionFor,
+  projectionInputsFor,
+  type ProjectionLoad,
+  type WorkbenchData
+} from "./workbenchData.js";
+import { Workbench } from "./Workbench.js";
+import { RETIRED_ROUTES, retiredRouteTarget } from "../StudioRoutes.js";
+
+/**
+ * Tests the Studio workbench (LLD-studio-viewpoints-and-perspectives §9): the view-state reducer, deep links and the
+ * §5.4 migration; views and overlays with and without their data (the unavailable state always has a reason); Security &
+ * Trust in both identity paths; out-of-date compile and resolution values (§4.3 rule 6); renderer parity; overlays that
+ * never add elements or change composition state; rule-2 regressions; and the retired-route redirects.
+ */
+
+const PROJECTION: DynamicDcpProjectionResponse = {
+  tenantId: "tenant-a", assemblyId: "assembly-a", compositionMode: "DYNAMIC",
+  rootNodeId: "root", focusNodeId: "assembly",
+  nodes: [
+    { nodeId: "root", label: "Acme", dcpType: "COMPANY", level: "PARENT", capabilities: [], compatibleDescendants: [], replacementAllowed: false },
+    { nodeId: "assembly", label: "Checkout", dcpType: "MODULE", level: "ASSEMBLY", parentNodeId: "root", capabilities: [], compatibleDescendants: [], replacementAllowed: false },
+    { nodeId: "flow", label: "Flow", dcpType: "COMPONENT", level: "CHILD", parentNodeId: "assembly", catalogEntryId: "com.unfurl:flow:0.1.0",
+      capabilities: ["workflow.execute"], compatibleDescendants: [], replacementAllowed: true },
+    { nodeId: "idp", label: "Keycloak", dcpType: "COMPONENT", level: "CHILD", parentNodeId: "assembly", catalogEntryId: "com.unfurl:keycloak:0.1.0",
+      capabilities: ["identity-context"], compatibleDescendants: [], replacementAllowed: false }
+  ],
+  edges: [{ fromNodeId: "assembly", toNodeId: "flow", relationship: "CONTAINS" }, { fromNodeId: "assembly", toNodeId: "idp", relationship: "CONTAINS" }],
+  substratePorts: [{ portId: "port.kafka", capability: "substrate.events", label: "Kafka", provider: "substrate", status: "AVAILABLE" }],
+  connections: [
+    { sourceNodeId: "flow", sourcePortId: "identity", targetNodeId: "idp", targetPortId: "identity-context", capability: "identity-context", status: "ALLOWED", reason: "offered" },
+    { sourceNodeId: "flow", sourcePortId: "events", targetNodeId: "substrate", targetPortId: "port.kafka", capability: "substrate.events", status: "ALLOWED", reason: "substrate" }
+  ],
+  warnings: []
+};
+
+const POLICY = { preferredShapes: [], disallowedShapes: [], requireIsolationForCapabilityPatterns: [], runtime: {} };
+
+const RESOLVED = { status: "RESOLVED" as const, candidateId: "c", selections: [{ componentId: "com.unfurl:flow:0.1.0", artifactCoordinates: "x",
+  capability: "workflow.execute", deploymentShape: "CONTAINERIZED_SERVICE" as const, requiredPorts: [] }], warnings: [] };
+
+function session(overrides: Partial<StudioDraftSession> = {}): StudioDraftSession {
+  return { tenantId: "tenant-a", assemblyId: "assembly-a", sessionId: "s1", baseCatalogHash: "h", sceneRevision: 4, warnings: [], ...overrides };
+}
+
+/** Workbench data with overrides; an override of `undefined` removes that field (Fabric did not supply it). */
+function data(overrides: { readonly [K in keyof WorkbenchData]?: WorkbenchData[K] | undefined } = {}): WorkbenchData {
+  const merged: Record<string, unknown> = {
+    session: session(),
+    projection: PROJECTION,
+    deploymentPolicy: POLICY,
+    signingRequested: false,
+    ...overrides
+  };
+  for (const key of Object.keys(merged)) if (merged[key] === undefined) delete merged[key];
+  return merged as WorkbenchData;
+}
+
+const COMPILED: CompileDraftCandidateResponse = {
+  status: "COMPILED", candidateId: "cand-1",
+  contractArtifact: { artifactId: "c", label: "contract", fileName: "c.yaml", sha256: "1", downloadUrl: "/c" } as never,
+  substrateProfileArtifact: { artifactId: "p", label: "profile", fileName: "p.yaml", sha256: "2", downloadUrl: "/p" } as never,
+  warnings: []
+};
+
+describe("view state", () => {
+  it("keeps the renderer supported by the view and the layout only for 3D Flow", () => {
+    let state = viewStateReducer(INITIAL_VIEW_STATE, { type: "SELECT_VIEW", view: "DATA" });
+    assert.equal(state.renderer, "TWO_D", "DATA has no 3D renderer, so its first supported one is used");
+    assert.equal(state.layout, undefined);
+    assert.equal(viewStateReducer(state, { type: "SELECT_RENDERER", renderer: "THREE_D" }), state, "an unsupported renderer is refused");
+    state = viewStateReducer(state, { type: "SELECT_VIEW", view: "FLOW" });
+    assert.equal(state.renderer, "TWO_D", "a supported renderer is kept across a view switch");
+    state = viewStateReducer(state, { type: "SELECT_RENDERER", renderer: "THREE_D" });
+    assert.equal(state.layout, "ASSEMBLY");
+    for (const view of VIEWPOINTS) {
+      for (const renderer of SUPPORTED_RENDERERS[view]) {
+        const next = viewStateReducer(viewStateReducer(INITIAL_VIEW_STATE, { type: "SELECT_VIEW", view }), { type: "SELECT_RENDERER", renderer });
+        assert.ok(SUPPORTED_RENDERERS[next.view].includes(next.renderer));
+        assert.equal(next.layout !== undefined, next.view === "FLOW" && next.renderer === "THREE_D");
+      }
+    }
+  });
+
+  it("gives the colour channel to the newest overlay and moves the previous owner to badges", () => {
+    let state = viewStateReducer(INITIAL_VIEW_STATE, { type: "TOGGLE_OVERLAY", overlay: "SECURITY" });
+    assert.equal(state.colourOverlay, "SECURITY");
+    state = viewStateReducer(state, { type: "TOGGLE_OVERLAY", overlay: "COMPLIANCE" });
+    assert.deepEqual(state.overlays, ["SECURITY", "COMPLIANCE"]);
+    assert.equal(state.colourOverlay, "COMPLIANCE");
+    state = viewStateReducer(state, { type: "TOGGLE_OVERLAY", overlay: "COMPLIANCE" });
+    assert.deepEqual(state.overlays, ["SECURITY"]);
+    assert.equal(state.colourOverlay, undefined, "turning the colour owner off leaves no owner");
+  });
+
+  it("maps every retired tab value (§5.4) and refuses an unknown one with a notice", () => {
+    assert.deepEqual(migrateActiveView("Assembly"), { view: "FLOW", renderer: "THREE_D", layout: "ASSEMBLY", guidedFixExpanded: false });
+    assert.deepEqual(migrateActiveView("Exploded"), { view: "FLOW", renderer: "THREE_D", layout: "EXPLODED", guidedFixExpanded: false });
+    assert.deepEqual(migrateActiveView("Ports"), { view: "FLOW", renderer: "TWO_D", guidedFixExpanded: false });
+    assert.deepEqual(migrateActiveView("Substrate"), { view: "TOPOLOGY", renderer: "THREE_D", guidedFixExpanded: false });
+    assert.deepEqual(migrateActiveView("Validation"), { view: "FLOW", renderer: "THREE_D", layout: "ASSEMBLY", guidedFixExpanded: true });
+    assert.equal(migrateActiveView("Cockpit"), undefined);
+
+    const legacy = (activeView: string): StudioLayoutState => ({ tenantId: "t", assemblyId: "a", activeView, semanticZoomLevel: "CHILD_DCP",
+      selectedSurface: "flow", camera: {}, annotations: [] });
+    assert.equal(viewStateFromLayout(legacy("Substrate")).state.view, "TOPOLOGY");
+    assert.equal(viewStateFromLayout(legacy("Validation")).guidedFixExpanded, true);
+    assert.match(viewStateFromLayout(legacy("Cockpit")).notice ?? "", /unknown view "Cockpit"/);
+    assert.equal(viewStateFromLayout(legacy("Exploded")).state.semanticZoomLevel, "CHILD_DCP");
+  });
+
+  it("writes the view state and never the retired activeView, and reads a current layout back", () => {
+    const state: StudioViewState = { ...INITIAL_VIEW_STATE, view: "TOPOLOGY", renderer: "TABLE", overlays: ["SECURITY"], colourOverlay: "SECURITY", selectedSurface: "flow" };
+    const { layout: _layout, ...withoutLayout } = state;
+    const write = layoutWriteFor(withoutLayout, { tenantId: "t", assemblyId: "a" });
+    assert.equal("activeView" in write, false);
+    assert.equal(write.activeViewpoint, "TOPOLOGY");
+    assert.equal(write.renderer, "TABLE");
+    const read = viewStateFromLayout({ tenantId: "t", assemblyId: "a", semanticZoomLevel: "ASSEMBLY_DCP", selectedSurface: "flow", camera: {},
+      annotations: [], activeViewpoint: "TOPOLOGY", activeOverlays: ["SECURITY"], colourOverlay: "SECURITY", renderer: "TABLE" });
+    assert.deepEqual(read.state, withoutLayout);
+  });
+
+  it("round-trips deep links and names every ignored value", () => {
+    const state: StudioViewState = { ...INITIAL_VIEW_STATE, view: "TOPOLOGY", renderer: "TWO_D", overlays: ["SECURITY", "RESILIENCE"], colourOverlay: "RESILIENCE" };
+    const { layout: _layout, ...expected } = state;
+    const parsed = parseDeepLink(deepLinkParams(expected, "compile"));
+    assert.deepEqual(parsed.state, expected);
+    assert.equal(parsed.panel, "compile");
+    assert.deepEqual(parsed.notices, []);
+
+    const odd = parseDeepLink(new URLSearchParams("view=cockpit&overlays=security,cost&renderer=4d&panel=audit"));
+    assert.equal(odd.state.view, "FLOW");
+    assert.deepEqual(odd.state.overlays, ["SECURITY"]);
+    assert.equal(odd.notices.length, 4, odd.notices.join(" | "));
+    const unsupported = parseDeepLink(new URLSearchParams("view=data&renderer=3d"));
+    assert.equal(unsupported.state.view, "DATA");
+    assert.equal(unsupported.state.renderer, "TWO_D");
+    assert.match(unsupported.notices[0] ?? "", /no 3d renderer/);
+  });
+});
+
+describe("views and overlays", () => {
+  it("lists Data & State and Runtime & Telemetry under More views with their reason, never empty", () => {
+    const menu = viewMenu(data());
+    assert.deepEqual(menu.switcher.map(view => view.id), ["FLOW", "TOPOLOGY"]);
+    assert.deepEqual(menu.more.map(entry => [entry.view.id, entry.reason.reasonCode]), [["DATA", NOT_YET_PROVIDED_BY_FABRIC], ["RUNTIME", NOT_YET_PROVIDED_BY_FABRIC]]);
+    const without = viewMenu(data({ projection: undefined, projectionError: "HTTP 503" }));
+    assert.deepEqual(without.switcher.map(view => view.id), ["FLOW", "TOPOLOGY"], "always-offered views stay, and explain themselves");
+    const flow = without.switcher[0]!.availability(data({ projection: undefined, projectionError: "HTTP 503" }));
+    assert.equal(flow.available, false);
+  });
+
+  it("regression: a projection is read only for the scope, session and revision it was loaded for (§4.3 rule 6)", () => {
+    const at4 = projectionInputsFor("tenant-a", "assembly-a", session());
+    const at5 = projectionInputsFor("tenant-a", "assembly-a", session({ sceneRevision: 5 }));
+    const loaded: ProjectionLoad = { status: "LOADED", inputs: at4, response: PROJECTION };
+    assert.equal(projectionFor(loaded, at4).projection, PROJECTION, "current inputs: drawn");
+    for (const other of [at5, projectionInputsFor("tenant-a", "assembly-a", session({ sessionId: "s2" })),
+      projectionInputsFor("tenant-a", "assembly-b", undefined), projectionInputsFor("tenant-a", "assembly-a", undefined)]) {
+      const view = projectionFor(loaded, other);
+      assert.equal(view.projection, undefined, "any other input: never drawn");
+      assert.deepEqual(view.outOfDate, at4, "and named as out of date");
+    }
+
+    const failed = failedProjectionLoad(loaded, at5, "HTTP 503");
+    assert.deepEqual(projectionFor(failed, at5), { error: "HTTP 503", outOfDate: at4 }, "a failed refresh keeps the error and names the old one");
+    assert.deepEqual(projectionFor(failedProjectionLoad(failed, at5, "HTTP 504"), at5), { error: "HTTP 504", outOfDate: at4 },
+      "a repeated failure still names the last projection that loaded");
+    assert.deepEqual(projectionFor(failed, projectionInputsFor("tenant-a", "assembly-a", session({ sceneRevision: 6 }))), { outOfDate: at4 },
+      "another request's error is not this one's");
+
+    const flow = viewDefinition("FLOW");
+    const refreshing = flow.availability(data({ projection: undefined, session: session({ sceneRevision: 5 }), projectionOutOfDate: at4 }));
+    assert.ok(!refreshing.available && refreshing.reasonCode === PROJECTION_LOADING
+      && /revision 5 of session s1.*session s1 at revision 4, is out of date and is not shown/.test(refreshing.message));
+    const broken = flow.availability(data({ projection: undefined, projectionError: "HTTP 503", projectionOutOfDate: at4 }));
+    assert.ok(!broken.available && broken.reasonCode === PROJECTION_UNAVAILABLE && /could not be loaded: HTTP 503\. The last projection/.test(broken.message));
+  });
+
+  it("shows identity when a provider of identity-context is in the composition, and the trusted-network state when not", () => {
+    const withIdentity = evaluateOverlays(["SECURITY"], projectFlow(PROJECTION), data())[0]!;
+    assert.ok(withIdentity.available);
+    if (!withIdentity.available) return;
+    assert.deepEqual(withIdentity.annotations.map(annotation => annotation.elementId), ["idp"]);
+    assert.match(withIdentity.section.facts.find(fact => fact.label === "Identity")!.value, /provided by Keycloak/);
+
+    const noIdp: DynamicDcpProjectionResponse = { ...PROJECTION, nodes: PROJECTION.nodes.filter(node => node.nodeId !== "idp") };
+    const withoutIdentity = evaluateOverlays(["SECURITY"], projectFlow(noIdp), data({ projection: noIdp }))[0]!;
+    assert.ok(withoutIdentity.available);
+    if (!withoutIdentity.available) return;
+    assert.deepEqual(withoutIdentity.annotations, []);
+    assert.match(withoutIdentity.section.facts.find(fact => fact.label === "Identity")!.value, /trusted network/);
+  });
+
+  it("displays Fabric's permissive-policy warning only when the session carries it", () => {
+    const permissive = data({ session: session({ warnings: [{ code: TRUST_POLICY_PERMISSIVE, message: "No trust policy is set." }] }) });
+    const shown = evaluateOverlays(["SECURITY"], projectFlow(PROJECTION), permissive)[0]!;
+    assert.ok(shown.available && shown.section.facts.some(fact => fact.value.startsWith(TRUST_POLICY_PERMISSIVE)));
+    const governed = evaluateOverlays(["SECURITY"], projectFlow(PROJECTION), data({ session: session({ trustPolicyId: "trust-acme" }) }))[0]!;
+    assert.ok(governed.available && !governed.section.facts.some(fact => fact.label === "Warning"));
+    assert.ok(governed.available && governed.section.facts.some(fact => fact.value === "trust-acme"));
+  });
+
+  it("reports an out-of-date compile and resolution instead of showing them as current (§4.3 rule 6)", () => {
+    const stale = data({ compile: pin(session({ sceneRevision: 2 }), POLICY, COMPILED) });
+    const security = evaluateOverlays(["SECURITY"], projectFlow(PROJECTION), stale)[0]!;
+    assert.ok(security.available);
+    if (!security.available) return;
+    assert.match(security.section.facts.find(fact => fact.label === "Signing")!.value, /Out of date.*revision 2.*revision 4.*Compile again/);
+    const current = evaluateOverlays(["SECURITY"], projectFlow(PROJECTION), data({ compile: pin(session(), POLICY, COMPILED) }))[0]!;
+    assert.ok(current.available && /UNSIGNED_READY/.test(current.section.facts.find(fact => fact.label === "Signing")!.value));
+
+    const topology = projectTopology(PROJECTION, data({ deployment: pin(session({ sceneRevision: 1 }), POLICY, RESOLVED) }));
+    assert.match(topology.notes[0] ?? "", /Out of date.*Resolve again/);
+    assert.ok(!topology.nodes.some(node => node.facts.some(fact => fact.label === "Deployment shape")));
+    const resolved = projectTopology(PROJECTION, data({ deployment: pin(session(), POLICY, RESOLVED) }));
+    assert.ok(resolved.nodes.some(node => node.facts.some(fact => fact.label === "Deployment shape" && fact.value === "CONTAINERIZED_SERVICE")));
+  });
+
+  it("regression: a result from another session with the same revision is never current", () => {
+    const other = pin(session({ sessionId: "s-imported" }), POLICY, COMPILED);
+    assert.equal(other.revision, session().sceneRevision, "same revision, different session");
+    const result = freshness(other, data());
+    assert.ok(!result.current && /session s-imported; session s1 is open/.test(result.reason));
+    const security = evaluateOverlays(["SECURITY"], projectFlow(PROJECTION), data({ compile: other }))[0]!;
+    assert.ok(security.available && /Out of date/.test(security.section.facts.find(fact => fact.label === "Signing")!.value));
+    const topology = projectTopology(PROJECTION, data({ deployment: pin(session({ sessionId: "s-imported" }), POLICY, RESOLVED) }));
+    assert.ok(!topology.nodes.some(node => node.facts.some(fact => fact.label === "Deployment shape")));
+  });
+
+  it("regression: changing the deployment policy makes earlier compile and resolution results out of date", () => {
+    const resolvedWith = pin(session(), POLICY, RESOLVED);
+    const changedShapes = { ...POLICY, preferredShapes: ["SPRING_BOOT_SERVICE" as const] };
+    const changedRuntime = { ...POLICY, runtime: { kubernetes: true } };
+    for (const policy of [changedShapes, changedRuntime]) {
+      const result = freshness(resolvedWith, data({ deploymentPolicy: policy }));
+      assert.ok(!result.current && /different deployment policy/.test(result.reason));
+      assert.equal(isCurrent(pin(session(), POLICY, COMPILED), data({ deploymentPolicy: policy })), false);
+    }
+    const reordered = { runtime: {}, requireIsolationForCapabilityPatterns: [], disallowedShapes: [], preferredShapes: [] };
+    assert.equal(policyKey(reordered), policyKey(POLICY), "property order is not a change");
+    assert.ok(freshness(resolvedWith, data({ deploymentPolicy: reordered })).current);
+    assert.notEqual(policyKey({ ...POLICY, preferredShapes: ["A" as never, "B" as never] }),
+      policyKey({ ...POLICY, preferredShapes: ["B" as never, "A" as never] }), "preference order is a change");
+  });
+
+  it("reads a pinned response only while it is current", () => {
+    const pinned = pin(session(), POLICY, COMPILED);
+    assert.equal(currentResponse(pinned, data()), COMPILED);
+    assert.equal(currentResponse(pinned, data({ deploymentPolicy: { ...POLICY, runtime: { kubernetes: true } } })), undefined);
+    assert.equal(currentResponse(pinned, data({ session: undefined })), undefined);
+    assert.equal(currentResponse(undefined, data()), undefined);
+  });
+
+  it("lists the overlays Fabric does not yet supply as unavailable with their reason", () => {
+    const model = projectFlow(PROJECTION);
+    for (const overlay of OVERLAY_REGISTRY.filter(definition => definition.id !== "SECURITY")) {
+      const availability = overlayAvailability(overlay.id, model, data());
+      assert.equal(availability.available, false, overlay.id);
+      assert.equal(!availability.available && availability.reasonCode, NOT_YET_PROVIDED_BY_FABRIC);
+    }
+    assert.equal(overlayAvailability("SECURITY", model, data({ session: undefined })).available, false);
+  });
+
+  it("never adds an element and never changes composition state", () => {
+    const frozen = deepFreeze(data({ compile: pin(session(), POLICY, COMPILED) }));
+    for (const view of ["FLOW", "TOPOLOGY"] as const) {
+      const model = view === "FLOW" ? projectFlow(PROJECTION) : projectTopology(PROJECTION, frozen);
+      const ids = new Set([...model.nodes.map(node => node.id), ...model.edges.map(edge => edge.id)]);
+      const results = evaluateOverlays(OVERLAYS, model, frozen);
+      for (const [elementId] of badgesByElement(results)) assert.ok(ids.has(elementId), elementId);
+      let state = viewStateReducer(INITIAL_VIEW_STATE, { type: "SELECT_VIEW", view });
+      for (const overlay of OVERLAYS) state = viewStateReducer(state, { type: "TOGGLE_OVERLAY", overlay });
+      assert.deepEqual(Object.keys(state).sort(), ["colourOverlay", "layout", "overlays", "renderer", "selectedSurface", "semanticZoomLevel", "view"]
+        .filter(key => key !== "layout" || state.layout !== undefined));
+    }
+  });
+});
+
+describe("projectors and renderers", () => {
+  it("projects Flow and Topology from the draft with only Fabric's facts", () => {
+    const flow = projectFlow(PROJECTION);
+    assert.deepEqual(flow.nodes.map(node => node.id), ["root", "assembly", "flow", "idp"]);
+    assert.ok(flow.edges.some(edge => edge.kind === "CONNECTION" && edge.status === "ALLOWED" && edge.reason === "offered"));
+    assert.ok(!flow.edges.some(edge => edge.to === "substrate"), "a substrate connection belongs to Topology");
+    const topology = projectTopology(PROJECTION, data());
+    assert.ok(topology.nodes.some(node => node.id === "port.kafka" && node.kind === "SUBSTRATE_PORT"));
+    assert.ok(topology.edges.some(edge => edge.kind === "REQUIRES_SUBSTRATE" && edge.from === "flow" && edge.to === "port.kafka"));
+    assert.match(topology.notes[0] ?? "", /after Fabric resolves/);
+    for (const node of [...flow.nodes, ...topology.nodes]) {
+      for (const fact of node.facts) assert.ok(fact.source.length > 0, `${node.id} ${fact.label} has a source`);
+    }
+  });
+
+  it("draws the same elements in 2D and Table (renderer parity)", () => {
+    for (const model of [projectFlow(PROJECTION), projectTopology(PROJECTION, data())]) {
+      const props = { model, badges: new Map(), onSelect: () => undefined };
+      const twoD = elementIds(renderToString(<TwoDRenderer {...props} />));
+      const table = elementIds(renderToString(<TableRenderer {...props} />));
+      assert.deepEqual(twoD.nodes, table.nodes);
+      assert.deepEqual(twoD.all, table.all);
+    }
+  });
+
+  it("projects a supplied compiled contract into the same model", () => {
+    const model = projectCompiledContract({ contractId: "urn:c", candidateId: "cand", components: [{ componentId: "flow", catalogEntryId: "e", name: "Flow",
+      coordinates: "c", claimHash: "h", artifactSha256: "a", visualStatus: "NO_VISUAL_MANIFEST" }], ports: [], substrate: [{ port: "java", status: "REQUIRED", profileHash: "p" }],
+      warnings: [{ code: "W", message: "m" }] });
+    assert.deepEqual(model.nodes.map(node => node.id), ["flow", "substrate:java"]);
+    assert.deepEqual(model.notes, ["W: m"]);
+  });
+
+  it("maps the 3D scene's modes in one adapter", () => {
+    assert.equal(sceneModeFor("FLOW", "EXPLODED"), "Exploded");
+    assert.equal(sceneModeFor("TOPOLOGY", undefined), "Substrate");
+    assert.deepEqual(viewForSceneMode("Substrate"), { view: "TOPOLOGY" });
+    assert.equal(viewForSceneMode("Unknown"), undefined);
+  });
+});
+
+describe("workbench", () => {
+  it("renders the regions, More views with reasons, overlay pills and the renderer toggle", () => {
+    const html = renderToString(<Workbench client={client()} />);
+    for (const region of ["Unfurl Studio Workbench", "Views", "Perspective overlays", "Renderer", "Catalog palette", "Inspector", "Guided fixes"]) {
+      assert.match(html, new RegExp(region), region);
+    }
+    assert.match(html, /More views/);
+    assert.match(html, /Data &amp; State/);
+    assert.match(html, /Runtime &amp; Telemetry/);
+    for (const overlay of ["Security &amp; Trust", "Performance &amp; Load", "Resilience &amp; Faults", "Compliance &amp; Governance"]) {
+      assert.match(html, new RegExp(overlay));
+    }
+    assert.match(html, /Loading Fabric&#x27;s projection for the assembly/);
+  });
+
+  it("shows only values Fabric supplies (rule-2 regressions)", () => {
+    const html = renderToString(<Workbench client={client()} />);
+    for (const fabricated of ["Customer Runtime Substrate", "isolationPattern", "Binding Mode", "Fabric synced", "profile mode: STRICT", "Flow Orchestrator",
+      "Postgres State Store", "Java 21", "All required ports satisfied", "/ 12", "Local Operator", ">DR<"]) {
+      assert.doesNotMatch(html, new RegExp(fabricated.replace(/[/]/g, "\\/")), fabricated);
+    }
+    assert.match(html, /no draft session/);
+  });
+
+  it("opens a deep link's view state and names its ignored parameters", () => {
+    const html = renderToString(<Workbench client={client()} deepLink="view=topology&renderer=table&overlays=cost" />);
+    assert.match(html, /aria-selected="true"[^>]*>Substrate &amp; Topology/);
+    assert.match(html, /Ignored link overlay cost/);
+  });
+});
+
+describe("retired routes", () => {
+  it("redirect into the workbench with their view state and keep the old parameters", () => {
+    assert.deepEqual(Object.keys(RETIRED_ROUTES).sort(), ["audit", "deployment-planner", "diff", "graph", "intents", "read-only", "signing"]);
+    assert.equal(retiredRouteTarget("graph", "?tenantId=t1"), "/components/fabric-studio/workspace?tenantId=t1&view=flow&renderer=2d");
+    assert.equal(retiredRouteTarget("graph", "?renderer=3d"), "/components/fabric-studio/workspace?renderer=3d&view=flow", "an explicit renderer is kept");
+    assert.equal(retiredRouteTarget("deployment-planner", "?policy=all-shapes"), "/components/fabric-studio/workspace?policy=all-shapes&view=topology");
+    assert.match(retiredRouteTarget("signing", ""), /view=flow&overlays=security&panel=compile/);
+    assert.match(retiredRouteTarget("audit", ""), /overlays=compliance&panel=compile/);
+    assert.match(retiredRouteTarget("intents", ""), /panel=history/);
+    assert.match(retiredRouteTarget("read-only", "?contractPath=c.yaml"), /contractPath=c.yaml&view=flow&renderer=table/);
+  });
+});
+
+/** The element ids a renderer drew, nodes alone and all elements. */
+function elementIds(html: string): { readonly nodes: readonly string[]; readonly all: readonly string[] } {
+  const all = [...html.matchAll(/data-element-id="([^"]+)"/g)].map(match => match[1]!).sort();
+  return { nodes: all.filter(id => !id.includes("->") && !id.startsWith("connection:")), all };
+}
+
+function client() {
+  return createHttpStudioFabricClient({ baseUrl: "http://fabric.local", fetch: createMockStudioApiFetch() });
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object") {
+    Object.freeze(value);
+    for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+  }
+  return value;
+}

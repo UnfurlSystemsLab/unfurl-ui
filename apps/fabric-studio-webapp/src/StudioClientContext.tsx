@@ -10,6 +10,8 @@ import { createFixtureStudioFabricClient } from "./fixtures/deploymentResolution
 
 const StudioClientContext = createContext<StudioFabricClient | null>(null);
 const StudioModeContext = createContext<"live" | "fixture">("live");
+/** The host's verified operator id (`UnfurlMicroAppProps.user.id`), absent when Studio runs without a host identity. */
+const StudioOperatorContext = createContext<string | undefined>(undefined);
 
 // Origin-relative by default. The client appends `/studio/...` paths, so an
 // empty base produces same-origin requests like `/studio/tenants/...`. In dev
@@ -30,6 +32,8 @@ export type StudioClientProviderProps = {
   readonly apiBaseUrl?: string;
   readonly tenantId?: string;
   readonly assemblyId?: string;
+  /** The host's verified operator id: presence and the per-user layout copy (VC §2A rule 4). Never invented. */
+  readonly operatorId?: string | undefined;
 };
 
 /** Factory: bind a stable product client to explicit scope, mode and host authentication. */
@@ -39,7 +43,8 @@ export function StudioClientProvider({
   apiBaseUrl = studioApiBaseUrl(),
   tenantId = studioTenantId(),
   assemblyId = studioAssemblyId(),
-  getAccessToken
+  getAccessToken,
+  operatorId
 }: StudioClientProviderProps) {
   const client = useMemo(() => mode === "fixture"
     ? createFixtureStudioFabricClient()
@@ -51,13 +56,16 @@ export function StudioClientProvider({
       }), [mode, apiBaseUrl, tenantId, assemblyId, getAccessToken]);
   return (
     <StudioModeContext.Provider value={mode}><StudioClientContext.Provider value={client}>
-      {children}
+      <StudioOperatorContext.Provider value={operatorId}>{children}</StudioOperatorContext.Provider>
     </StudioClientContext.Provider></StudioModeContext.Provider>
   );
 }
 
 /** Context port: preview routes follow the explicit provider mode, never infer fixture data from errors. */
 export function useStudioMode(): "live" | "fixture" { return useContext(StudioModeContext); }
+
+/** Context port: the host's verified operator id, or undefined without a host identity. */
+export function useStudioOperator(): string | undefined { return useContext(StudioOperatorContext); }
 
 /** Context port: require the product client selected by the current trusted bootstrap. */
 export function useStudioClient(): StudioFabricClient {
