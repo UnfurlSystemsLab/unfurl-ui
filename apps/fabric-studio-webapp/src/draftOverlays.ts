@@ -145,6 +145,22 @@ function compileItems(state: Extract<DraftWorkspaceState, { readonly status: "RE
       message: `Compile used stale revision ${response.receivedRevision}; expected ${response.expectedRevision}.`
     }];
   }
+  // A NO_MATCH carries its causes typed (LLD-fabric-studio-api, Structured match failures and trust rejections): one
+  // card per cause and per trust rejection, in Fabric's order and with Fabric's words. Studio never splits `details`.
+  if (response.reasons.length > 0 || response.trustRejections.length > 0) {
+    return [
+      ...response.reasons.map(reason => ({
+        severity: "ERROR" as const,
+        code: `${response.reason}:${reason.reasonCode}`,
+        message: reason.message
+      })),
+      ...response.trustRejections.map(rejection => ({
+        severity: "ERROR" as const,
+        code: `TRUST_REJECTED:${rejection.reasonCode}`,
+        message: `${rejection.coordinates}: ${rejection.message}`
+      }))
+    ];
+  }
   return [{
     severity: "ERROR",
     code: "COMPILE_INVALID",

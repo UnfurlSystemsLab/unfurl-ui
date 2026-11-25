@@ -1,7 +1,7 @@
-import type { ReadOnlyCompositionView, StudioDraftSession } from "@unfurl/fabric-scene-model";
+import type { ReadOnlyCompositionView, StudioCompileRecord, StudioDraftSession } from "@unfurl/fabric-scene-model";
 import type { VisualCatalogEntry } from "@unfurl/visual-manifest";
 
-export type { StudioDraftSession } from "@unfurl/fabric-scene-model";
+export type { StudioDraftSession, StudioCompileRecord } from "@unfurl/fabric-scene-model";
 
 export type StudioIntent =
   | AddComponentIntent
@@ -681,8 +681,136 @@ export type ResolveDeploymentResponse =
       readonly reason: string;
       readonly details: string;
       readonly rejectedShapes: readonly string[];
+      /** The typed causes of a `NO_MATCH`, from the same presenter as `details`; empty for any other reason. */
+      readonly reasons: readonly StudioMatchFailureReason[];
+      /** The trust rejections a filesystem `NO_MATCH` considered; a session applies no trust classification. */
+      readonly trustRejections: readonly StudioTrustRejection[];
       readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
     };
+
+/**
+ * One typed cause of a failed match (LLD-fabric-studio-api, Structured match failures and trust rejections). `message`
+ * is the cause's own text, which names its fix; Studio shows it as Fabric wrote it.
+ */
+export type StudioMatchFailureReason = {
+  readonly kind: "UNMET_NEED" | "CONFLICT";
+  /** For an unmet need its reason (`NOT_IN_CATALOG`, ...); for a conflict its variant (`MISSING_CAPABILITY`, ...). */
+  readonly reasonCode: string;
+  readonly capability?: string;
+  /** For a `DEPENDENCY` conflict, the component whose claim declares the dependency. */
+  readonly componentCoordinates?: string;
+  readonly message: string;
+};
+
+/** One reason the trust policy excluded a catalog entry the match considered. */
+export type StudioTrustRejection = {
+  readonly coordinates: string;
+  /** The rejection variant, for example `VendorNotTrusted`. */
+  readonly reasonCode: string;
+  readonly message: string;
+};
+
+/** Why a read model has no value: a stable code and a message naming what changed or is missing. */
+export type StudioAbsentReason = {
+  readonly code:
+    | "COMPILE_REQUIRED"
+    | "COMPILE_STALE"
+    | "COMPILE_RECORD_UNAVAILABLE"
+    | "COMPILE_RECORD_INCONSISTENT"
+    | "NOT_SIGNED"
+    | "TRUST_KEYS_UNAVAILABLE"
+    | (string & {});
+  readonly message: string;
+};
+
+/** Which compile a compile-derived value came from. */
+export type StudioCompileProvenance = {
+  readonly sourceRevision: number;
+  readonly contractHash: string;
+  readonly compiledAt: string;
+};
+
+/** The comparison of two compiled contracts, as Fabric's `ContractDiffer` computes it. Every key list is sorted. */
+export type StudioContractDiff = {
+  readonly leftCanonicalHash: string;
+  readonly rightCanonicalHash: string;
+  readonly canonicalHashChanged: boolean;
+  readonly contractIdChanged: boolean;
+  readonly addedSelections: readonly string[];
+  readonly removedSelections: readonly string[];
+  readonly changedSelections: readonly string[];
+  readonly addedDeploymentEntries: readonly string[];
+  readonly removedDeploymentEntries: readonly string[];
+  readonly changedDeploymentShapes: readonly {
+    readonly key: string;
+    readonly fromShape: string;
+    readonly toShape: string;
+    readonly fromPorts: readonly string[];
+    readonly toPorts: readonly string[];
+  }[];
+  readonly leftSubstrateProfileHash?: string;
+  readonly rightSubstrateProfileHash?: string;
+  readonly substrateProfileHashChanged: boolean;
+  readonly ports?: {
+    readonly added: readonly string[];
+    readonly removed: readonly string[];
+    readonly changed: readonly string[];
+  };
+};
+
+/** `GET .../sessions/{sessionId}/contract-diff`: the base record, and the current one or the one at `revision`. */
+export type ContractDiffRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly sessionId: string;
+  readonly baseRevision: number;
+  readonly revision?: number;
+  /** The policy Studio would compile with now; Fabric hashes it, Studio never does. */
+  readonly deploymentPolicy?: DeploymentPolicyDraft;
+};
+
+/** The contract-diff response; when `available` is false, `absentReason` says why and there is no `diff`. */
+export type ContractDiffResponse = {
+  readonly available: boolean;
+  readonly absentReason?: StudioAbsentReason;
+  readonly base?: StudioCompileProvenance;
+  readonly target?: StudioCompileProvenance;
+  readonly historical: boolean;
+  readonly diff?: StudioContractDiff;
+  readonly diagnosticArtifacts: readonly StudioExportArtifact[];
+};
+
+/** `POST .../sessions/{sessionId}/verify`: the current record by default, or a past one by revision or contract hash. */
+export type VerifyContractRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly sessionId: string;
+  readonly revision?: number;
+  readonly contractHash?: string;
+  /** The policy Studio would compile with now; Fabric hashes it, Studio never does. */
+  readonly deploymentPolicy?: DeploymentPolicyDraft;
+};
+
+/** The verify response; an unsigned compile is `NOT_SIGNED`, never verified. */
+export type VerifyContractResponse = {
+  readonly available: boolean;
+  readonly absentReason?: StudioAbsentReason;
+  readonly provenance?: StudioCompileProvenance;
+  readonly historical: boolean;
+  readonly signature?: {
+    readonly ok: boolean;
+    /** `Ok`, `KeyNotPinned`, `SignatureInvalid` or `HashMismatch`. */
+    readonly result: string;
+    readonly detail: string;
+  };
+  readonly catalogDrift?: {
+    readonly clean: boolean;
+    readonly hashDrifts: readonly { readonly coordinates: string; readonly detail: string }[];
+    readonly missingFromCatalog: readonly { readonly coordinates: string; readonly detail: string }[];
+  };
+  readonly overallOk?: boolean;
+  readonly diagnosticArtifacts: readonly StudioExportArtifact[];
+};
 
 export type StudioToolCallRequest = {
   readonly callId?: string;
@@ -707,6 +835,8 @@ export type CompileDraftCandidateResponse =
       readonly signedContractArtifact?: StudioExportArtifact;
       readonly decisionAudit?: StudioDecisionAudit;
       readonly warnings: readonly string[];
+      /** The record this compile appended to the session; Studio pins the result to its hashes. */
+      readonly compileRecord: StudioCompileRecord;
       readonly supportArtifacts?: readonly StudioExportArtifact[];
       readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
     }
@@ -721,6 +851,9 @@ export type CompileDraftCandidateResponse =
       readonly status: "INVALID";
       readonly reason: string;
       readonly details: string;
+      /** The typed causes of a `NO_MATCH`, from the same presenter as `details`; empty for any other reason. */
+      readonly reasons: readonly StudioMatchFailureReason[];
+      readonly trustRejections: readonly StudioTrustRejection[];
       readonly supportArtifacts?: readonly StudioExportArtifact[];
       readonly diagnosticArtifacts?: readonly StudioExportArtifact[];
     };
@@ -793,6 +926,10 @@ export interface StudioFabricClient {
   readonly callStudioTool?: (request: StudioToolCallRequest & { readonly toolName: string }) => Promise<StudioToolCallResult>;
   readonly converseAuthoring?: (request: AuthoringConverseRequest) => Promise<AuthoringConverseResponse>;
   readonly resolveDeployment?: (request: ResolveDeploymentRequest) => Promise<ResolveDeploymentResponse>;
+  /** Compares two compile records of a session (LLD-fabric-studio-api, Contract diff and verification). */
+  readonly loadContractDiff?: (request: ContractDiffRequest) => Promise<ContractDiffResponse>;
+  /** Verifies a compile record's signed envelope with Fabric's configured trust keys. */
+  readonly verifyContract?: (request: VerifyContractRequest) => Promise<VerifyContractResponse>;
   readonly getVisualAsset: (assetId: string) => Promise<StudioVisualAsset>;
 }
 

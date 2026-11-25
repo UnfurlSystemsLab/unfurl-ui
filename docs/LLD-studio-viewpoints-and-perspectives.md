@@ -1,7 +1,8 @@
 # LLD: Studio Views and Perspective Overlays
 
 **Status:** P1 implemented (`apps/fabric-studio-webapp/src/workbench/`, Fabric's layout extension and permissive
-trust policy warning). P2, P3 and Later are designed. This document is the source of truth for how the Studio workbench
+trust policy warning). P2a implemented: compile records, contract diff and verification in the compile panel, typed
+guided-fix cards, and the verification in Security & Trust (§10). The rest of P2, and P3 and Later, are designed. This document is the source of truth for how the Studio workbench
 is organised. `LLD-unfurl-studio-visual-composition.md` §19A summarises it, and the Fabric endpoints it depends on are
 specified in `unfurl-fabric/docs/LLD-fabric-studio-api.md` ("Views and Overlays").
 
@@ -230,6 +231,11 @@ domain overlay (§4.4).
      date and is not drawn, so a previous composition is never presented as the current one.
    - A section or annotation Fabric reports as `COMPILE_STALE` reads "out of date: compile again", and the old values
      are never shown silently.
+   - A compile-derived answer (the compile result, the contract diff, the verification) is also pinned to the compile
+     record it is about, by that record's contract hash. Every compile is a new record, so a recompile, at the same
+     revision too, signed or not, by this operator or arriving through polling, makes the earlier answers out of date.
+     Polling never takes a record away: a session snapshot with fewer compile records than the one held is older and
+     is ignored. The deployment resolution comes from no compile and is not bound to a record.
    - A historical result (`historical: true`) appears only in the compile and history panels, labelled with its
      revision and hash.
 
@@ -302,7 +308,7 @@ Each retired route redirects to the workbench with deep-link query parameters:
 | `signing` | `view=flow&overlays=security&panel=compile` |
 | `audit` | `view=flow&overlays=compliance&panel=compile`. Until P2, the Compliance overlay is listed as unavailable with its reason, and the decision audit is in the compile panel |
 | `intents` | `view=flow&panel=history` |
-| `diff` | `view=flow&panel=compile`. Until P2, contract diff is listed as unavailable with its reason |
+| `diff` | `view=flow&panel=compile`, where the contract diff compares a past compile record with the current one (P2a) |
 
 A deep-link value outside its set is never coerced. The workbench keeps its default for that parameter and shows a
 notice naming the ignored parameter and value. An unsupported combination, such as `view=data&renderer=3d`, keeps the
@@ -403,6 +409,15 @@ The redesign removes current behaviour that breaks engineering rule 2:
    identity content.
 7. Rule-2 regressions: the inspector renders no literal binding mode, substrate target or isolation pattern that did
    not come from Fabric.
+8. Compile records (P2a):
+   - the contract diff and the verification render Fabric's answer only while current, labelled current or
+     historical, and show Fabric's absent reason otherwise;
+   - an answer asked for another revision or policy, or about a compile record a later compile replaced, reads as
+     out of date;
+   - a polled session with fewer compile records than the one held is ignored;
+   - the verification reaches Security & Trust only while current;
+   - a `NO_MATCH` gives one guided-fix card per typed cause and trust rejection;
+   - the client sends the policy as JSON for Fabric to hash.
 
 ## 10. Phasing
 
@@ -411,23 +426,39 @@ The redesign removes current behaviour that breaks engineering rule 2:
   - Flow & Composition (except typed external owners and `external_protocol`).
   - Substrate & Topology (base plate, shapes, resolution, target).
   - Security & Trust: identity in the composition (a provider of `identity-context`), trust policy id, signing state,
-    and Fabric's `TRUST_POLICY_PERMISSIVE` warning. The signing state follows §4.3 rule 6. Until Fabric's compile records
-    exist (P2), Studio pins each compile and resolution response to the session id, revision and deployment policy it
-    was produced with, and reports it out of date as soon as any of them differs. Only a response produced by that
+    and Fabric's `TRUST_POLICY_PERMISSIVE` warning. The signing state follows §4.3 rule 6. Studio pins each compile and
+    resolution response to the session id, revision and deployment policy it was produced with, and reports it out of
+    date as soon as any of them differs (P2a adds Fabric's own compile records for the contract diff and verification). Only a response produced by that
     request is pinned; a failed compile never re-pins an earlier one.
   - Loading an assembly snapshot restores the snapshot's layout through the same mapping as any stored layout
     (§5.4, §6), so the imported view state is shown and then saved, never overwritten by the previous one. A
     snapshot without a session clears the open session and its inventory (§4.3 rule 6).
   - The guided-fix strip.
   - The §8 conformance fixes.
-- **P2: after the Fabric view and overlay endpoints.**
-  - Data & State and Runtime & Telemetry.
-  - The emit plan preview in Substrate & Topology.
-  - Typed external owners.
-  - The rest of Security & Trust.
-  - Performance & Load timeouts, and Compliance & Governance.
-  - Contract diff and verification.
-  - Resilience & Faults (also needs the DCP fault reconciliation).
+- **P2: after the Fabric view and overlay endpoints.** Built in slices, each on the compile records of P2a.
+  - **P2a, implemented: compile records, contract diff, verification, typed match failures.**
+    - Fabric records every successful compile and keeps the compiled bytes; Studio pins a compile to the record
+      Fabric returns (LLD-fabric-studio-api, *Compile records and freshness*).
+    - The compile panel compares a past record with the current one, and verifies the current compile with
+      Fabric's trust keys. Each answer is Fabric's, including whether it is current; Studio sends its policy draft
+      and never hashes it. An answer is shown only while it matches the session, revision and policy it was asked
+      with, a historical one is labelled with its revision and hash, and an unavailable one shows Fabric's code and
+      message (`COMPILE_REQUIRED`, `COMPILE_STALE`, `COMPILE_RECORD_UNAVAILABLE`, `COMPILE_RECORD_INCONSISTENT`,
+      `NOT_SIGNED`, `TRUST_KEYS_UNAVAILABLE`). Each answer is pinned to the compile record it is about (§4.3 rule 6).
+    - The guided-fix strip shows a `NO_MATCH` as one card per typed cause and trust rejection, in Fabric's words; it
+      never splits `details`.
+    - Security & Trust adds the verification while it is current, and shows a named trust policy as named, not as
+      enforced: Fabric does not apply named trust policies yet (LLD-fabric-studio-api, *Gap: a session's trust
+      policy is not applied*).
+    - Studio still compares its own policy drafts locally (`policyKey`) to tell when a response it holds no longer
+      matches its inputs. The deployment resolution has no Fabric record, so this is the only way to know it is out
+      of date. That comparison never produces a hash for Fabric and is never compared with one.
+  - **P2b:** Data & State and Runtime & Telemetry, typed external owners and `external_protocol`, transports and
+    runtime bindings (`views/*`).
+  - **P2c:** the rest of Security & Trust, Performance & Load timeouts, and Compliance & Governance
+    (`overlays/*`).
+  - **P2d:** the emit plan preview in Substrate & Topology.
+  - **P2e:** Resilience & Faults (also needs the DCP fault reconciliation).
 - **P3: after DCP schema work.**
   - Concurrency semantics, resource budgets and load envelopes.
   - Residency.

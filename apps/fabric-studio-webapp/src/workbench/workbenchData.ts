@@ -1,6 +1,8 @@
 import type {
   CompileDraftCandidateResponse,
+  ContractDiffResponse,
   DeploymentPolicyDraft,
+  VerifyContractResponse,
   DynamicDcpProjectionResponse,
   ResolveDeploymentResponse,
   StudioAssemblySummary
@@ -14,7 +16,16 @@ import type { StudioDraftSession } from "@unfurl/fabric-scene-model";
  *
  * Compile- and resolution-derived values are pinned to the inputs they were produced from, the session, its revision
  * and the deployment policy, so a view never shows them for a draft, session or policy that has changed since (§4.3
- * rule 6). Until Fabric's compile records exist (P2), Studio pins the responses itself to what it sent.
+ * rule 6).
+ *
+ * Two places decide freshness, and they agree by construction:
+ * - **Fabric** decides it for its read models. The contract diff and the verification are answered from Fabric's
+ *   compile records with Fabric's hash of the policy Studio sent (LLD-fabric-studio-api, Compile records and
+ *   freshness), so a stale comparison arrives as `COMPILE_STALE` and Studio shows it as Fabric names it.
+ * - **Studio** decides whether a response it already holds still matches what it holds now: the session, the revision
+ *   and its own policy draft. That compares two drafts Studio itself holds ({@link policyKey}); it never produces a
+ *   hash for Fabric and is never compared with one. The deployment resolution has no Fabric record, so this is the only
+ *   way to know it is out of date.
  */
 export type WorkbenchData = {
   /** The ready draft session, when one is open. */
@@ -30,6 +41,10 @@ export type WorkbenchData = {
   readonly projectionOutOfDate?: ProjectionInputs;
   /** The last compile response and the inputs it compiled. */
   readonly compile?: InputsPinned<CompileDraftCandidateResponse>;
+  /** The last contract diff Fabric answered, and the inputs it was asked with. */
+  readonly contractDiff?: InputsPinned<ContractDiffResponse>;
+  /** The last verification Fabric answered, and the inputs it was asked with. */
+  readonly verification?: InputsPinned<VerifyContractResponse>;
   /** The last deployment resolution and the inputs it resolved. */
   readonly deployment?: InputsPinned<ResolveDeploymentResponse>;
   /** Why the deployment could not be resolved. */
@@ -43,13 +58,19 @@ export type WorkbenchData = {
 };
 
 /**
- * A response and the inputs it was produced from: the session it belongs to, the session revision, and the canonical
- * key of the deployment policy it was compiled or resolved with ({@link policyKey}).
+ * A response and the inputs it was produced from: the session it belongs to, the session revision, the comparison key
+ * of the deployment policy it was compiled or resolved with ({@link policyKey}), and, for a compile-derived answer, the
+ * compile record it was answered for.
+ *
+ * `compileRecord` is the record's `contractHash`, `null` when the session had no record, and absent for a value that
+ * does not come from a compile (the deployment resolution). Every compile has its own contract hash, because its audit
+ * carries its own `compiledAt`, so a recompile at the same revision, signed or not, is a different record.
  */
 export type InputsPinned<T> = {
   readonly sessionId: string;
   readonly revision: number;
   readonly policyKey: string;
+  readonly compileRecord?: string | null;
   readonly response: T;
 };
 
@@ -59,16 +80,29 @@ export type Freshness =
   | { readonly current: false; readonly reason: string };
 
 /**
- * Canonical key of a deployment policy: the same policy always gives the same key, whatever its property order, so a
- * changed policy (shapes, isolation patterns or runtime options) is detected and an unchanged one is not.
+ * Comparison key of a policy draft Studio holds: the same draft always gives the same key, whatever its property order,
+ * so a changed draft (shapes, isolation patterns or runtime options) is detected and an unchanged one is not. It is a
+ * local equality of Studio's own drafts, never sent to Fabric and never compared with Fabric's policy hash.
  */
 export function policyKey(policy: DeploymentPolicyDraft): string {
   return canonical(policy);
 }
 
-/** Pins a response to the inputs it was produced from. */
-export function pin<T>(session: StudioDraftSession, policy: DeploymentPolicyDraft, response: T): InputsPinned<T> {
-  return { sessionId: session.sessionId, revision: session.sceneRevision, policyKey: policyKey(policy), response };
+/**
+ * Pins a response to the inputs it was produced from. Pass `compileRecord` for a compile-derived answer: the contract
+ * hash of the record it is about, or `null` when there was none; leave it out for a value no compile produced.
+ */
+export function pin<T>(session: StudioDraftSession, policy: DeploymentPolicyDraft, response: T,
+  compileRecord?: string | null): InputsPinned<T> {
+  return {
+    sessionId: session.sessionId, revision: session.sceneRevision, policyKey: policyKey(policy),
+    ...(compileRecord === undefined ? {} : { compileRecord }), response
+  };
+}
+
+/** The contract hash of the session's current compile record (its latest), or `null` when nothing is recorded. */
+export function currentCompileRecord(session: StudioDraftSession): string | null {
+  return session.compileRecords?.at(-1)?.contractHash ?? null;
 }
 
 /**
@@ -86,6 +120,19 @@ export function freshness(pinned: InputsPinned<unknown>, data: WorkbenchData): F
   }
   if (pinned.policyKey !== policyKey(data.deploymentPolicy)) {
     return { current: false, reason: "it was produced with a different deployment policy" };
+  }
+  // A compile-derived answer is about one compile record. A later compile, at the same revision too (signed or not,
+  // by this operator or arriving through polling), is a new record, and the answer no longer describes the current one.
+  if (pinned.compileRecord !== undefined) {
+    const latest = session.compileRecords?.at(-1);
+    if ((latest?.contractHash ?? null) !== pinned.compileRecord) {
+      return {
+        current: false,
+        reason: latest
+          ? `it was produced for ${pinned.compileRecord === null ? "no compile" : `contract ${pinned.compileRecord.slice(0, 12)}`}; the current compile is revision ${latest.revision}, contract ${latest.contractHash.slice(0, 12)}`
+          : "the compile it was produced for is no longer the session's"
+      };
+    }
   }
   return { current: true };
 }

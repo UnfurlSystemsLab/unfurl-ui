@@ -1,6 +1,10 @@
 import type {
   CompileDraftCandidateRequest,
   CompileDraftCandidateResponse,
+  ContractDiffRequest,
+  ContractDiffResponse,
+  VerifyContractRequest,
+  VerifyContractResponse,
   AuthoringConverseRequest,
   AuthoringConverseResponse,
   CreateDraftCompositionRequest,
@@ -412,6 +416,34 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
     },
     resolveDeployment: async (body: ResolveDeploymentRequest) =>
       request<ResolveDeploymentResponse>(guardedFetch, baseUrl, "POST", "/studio/deployment/resolve", body),
+    loadContractDiff: async (body: ContractDiffRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      // The policy travels as JSON for Fabric to parse and hash; Studio never hashes it (LLD-fabric-studio-api).
+      const query = queryString({
+        baseRevision: String(body.baseRevision),
+        revision: body.revision === undefined ? undefined : String(body.revision),
+        deploymentPolicy: body.deploymentPolicy === undefined ? undefined : JSON.stringify(body.deploymentPolicy)
+      });
+      return request<ContractDiffResponse>(
+        guardedFetch,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/contract-diff${query}`,
+        undefined,
+        tenantHeaders(scope.tenantId, authContext)
+      );
+    },
+    verifyContract: async (body: VerifyContractRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      return request<VerifyContractResponse>(
+        guardedFetch,
+        baseUrl,
+        "POST",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/verify`,
+        { revision: body.revision, contractHash: body.contractHash, deploymentPolicy: body.deploymentPolicy },
+        tenantHeaders(scope.tenantId, authContext)
+      );
+    },
     getVisualAsset: async (assetId: string) =>
       request<StudioVisualAsset>(
         guardedFetch,

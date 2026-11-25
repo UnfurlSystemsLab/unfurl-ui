@@ -23,7 +23,10 @@ import type {
   ResolveDeploymentResponse,
   StudioVisualAsset,
   StudioFileRecord,
-  StudioSessionHistoryItem
+  StudioSessionHistoryItem,
+  StudioCompileRecord,
+  ContractDiffResponse,
+  VerifyContractResponse
 } from "./index.js";
 import { DEFAULT_STUDIO_ASSEMBLY_ID, DEFAULT_STUDIO_TENANT_ID } from "./httpClient.js";
 
@@ -44,6 +47,8 @@ export type MockStudioApiFixtures = {
   readonly compileResponse?: CompileDraftCandidateResponse;
   readonly authoringResponse?: AuthoringConverseResponse;
   readonly resolveDeploymentResponse?: ResolveDeploymentResponse;
+  readonly contractDiffResponse?: ContractDiffResponse;
+  readonly verifyResponse?: VerifyContractResponse;
   readonly asset?: StudioVisualAsset;
   readonly files?: readonly StudioFileRecord[];
   readonly sessionHistory?: readonly StudioSessionHistoryItem[];
@@ -284,8 +289,19 @@ export const studioApiExampleCompositionView: LoadCompositionViewResponse = {
   }
 };
 
+/** The example compile's record (fixture data, as Fabric returns it). */
+export const studioApiExampleCompileRecord: StudioCompileRecord = {
+  revision: 1,
+  deploymentPolicyHash: "1".repeat(64),
+  contractHash: "2".repeat(64),
+  compiledEnvelopeSha256: "3".repeat(64),
+  substrateProfileSha256: "4".repeat(64),
+  compiledAt: "2026-01-01T00:00:00Z"
+};
+
 export const studioApiExampleCompileResponse: CompileDraftCandidateResponse = {
   status: "COMPILED",
+  compileRecord: studioApiExampleCompileRecord,
   candidateId: "cand-abc123",
   contractArtifact: artifact("contract"),
   substrateProfileArtifact: artifact("profile"),
@@ -317,6 +333,38 @@ export const studioApiExampleResolveDeploymentResponse: ResolveDeploymentRespons
     }
   ],
   warnings: []
+};
+
+/** The example contract-diff answer: the example compile against itself (fixture data). */
+export const studioApiExampleContractDiffResponse: ContractDiffResponse = {
+  available: true,
+  base: { sourceRevision: 1, contractHash: "2".repeat(64), compiledAt: "2026-01-01T00:00:00Z" },
+  target: { sourceRevision: 1, contractHash: "2".repeat(64), compiledAt: "2026-01-01T00:00:00Z" },
+  historical: false,
+  diff: {
+    leftCanonicalHash: "2".repeat(64),
+    rightCanonicalHash: "2".repeat(64),
+    canonicalHashChanged: false,
+    contractIdChanged: false,
+    addedSelections: [],
+    removedSelections: [],
+    changedSelections: [],
+    addedDeploymentEntries: [],
+    removedDeploymentEntries: [],
+    changedDeploymentShapes: [],
+    substrateProfileHashChanged: false,
+    ports: { added: [], removed: [], changed: [] }
+  },
+  diagnosticArtifacts: [artifact("contract-diff", "application/json")]
+};
+
+/** The example verify answer: the example compile is unsigned, so it is not verified (fixture data). */
+export const studioApiExampleVerifyResponse: VerifyContractResponse = {
+  available: false,
+  absentReason: { code: "NOT_SIGNED", message: "the compile at revision 1 was not signed; compile with signing to verify it" },
+  provenance: { sourceRevision: 1, contractHash: "2".repeat(64), compiledAt: "2026-01-01T00:00:00Z" },
+  historical: false,
+  diagnosticArtifacts: [artifact("contract-verify", "application/json")]
 };
 
 export const studioApiExampleAsset: StudioVisualAsset = {
@@ -626,6 +674,12 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
           warnings: []
         }
       });
+    }
+    if (method === "GET" && path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/contract-diff`)) {
+      return ok(fixtures.contractDiffResponse ?? studioApiExampleContractDiffResponse);
+    }
+    if (method === "POST" && path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/verify`)) {
+      return ok(fixtures.verifyResponse ?? studioApiExampleVerifyResponse);
     }
     if (method === "POST" && path === "/studio/deployment/resolve") {
       return ok(fixtures.resolveDeploymentResponse ?? studioApiExampleResolveDeploymentResponse);

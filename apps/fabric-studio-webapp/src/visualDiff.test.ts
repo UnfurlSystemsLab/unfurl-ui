@@ -1,3 +1,4 @@
+import { studioApiExampleCompileRecord } from "@unfurl/fabric-validation-client";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -40,6 +41,7 @@ describe("visual diff", () => {
 function compiled(suffix: string) {
   return {
     status: "COMPILED" as const,
+    compileRecord: studioApiExampleCompileRecord,
     candidateId: `cand-${suffix}`,
     contractArtifact: artifact(`contract-${suffix}`),
     substrateProfileArtifact: artifact(`profile-${suffix}`),

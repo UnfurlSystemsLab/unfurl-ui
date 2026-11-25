@@ -1,10 +1,15 @@
 import type { StudioDraftSession } from "@unfurl/fabric-validation-client";
 
-/** Strategy: accept only matching, monotone authoritative session snapshots. */
+/**
+ * Strategy: accept only matching, monotone authoritative session snapshots. Both the revision and the compile records
+ * only grow (records are append-only in Fabric), so a snapshot with an older revision or fewer records was read before
+ * the one held and is ignored: a poll that started before a compile returned never takes its record away.
+ */
 export function reconcileSession(current: StudioDraftSession, next: StudioDraftSession): StudioDraftSession {
   return current.tenantId === next.tenantId && current.assemblyId === next.assemblyId
     && current.sessionId === next.sessionId && Number.isSafeInteger(next.sceneRevision)
-    && next.sceneRevision >= current.sceneRevision ? next : current;
+    && next.sceneRevision >= current.sceneRevision
+    && (next.compileRecords?.length ?? 0) >= (current.compileRecords?.length ?? 0) ? next : current;
 }
 
 /** Polling Strategy: serialize snapshots, retry transient failures and fence completions after stop. */

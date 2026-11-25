@@ -363,6 +363,47 @@ describe("HTTP Studio Fabric client", () => {
     ]);
   });
 
+  it("asks Fabric for a contract diff, sending the policy as JSON for Fabric to hash", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      defaultTenantId: "tenant-payments",
+      defaultAssemblyId: "assembly-checkout",
+      fetch: fakeFetch(calls, { available: false, historical: false, diagnosticArtifacts: [] })
+    });
+    const policy = { preferredShapes: ["CONTAINERIZED_SERVICE" as const], disallowedShapes: [], requireIsolationForCapabilityPatterns: [], runtime: {} };
+
+    await client.loadContractDiff?.({ sessionId: "s 1", baseRevision: 2, revision: 4, deploymentPolicy: policy });
+    await client.loadContractDiff?.({ sessionId: "s1", baseRevision: 0 });
+
+    const first = new URL(calls[0]!.input);
+    assert.equal(first.pathname, "/studio/tenants/tenant-payments/assemblies/assembly-checkout/sessions/s%201/contract-diff");
+    assert.equal(first.searchParams.get("baseRevision"), "2");
+    assert.equal(first.searchParams.get("revision"), "4");
+    assert.deepEqual(JSON.parse(first.searchParams.get("deploymentPolicy")!), policy);
+    assert.equal(calls[0]!.method, "GET");
+    const second = new URL(calls[1]!.input);
+    assert.equal(second.searchParams.get("baseRevision"), "0", "revision 0 is a revision, not an absent one");
+    assert.equal(second.searchParams.has("revision"), false);
+    assert.equal(second.searchParams.has("deploymentPolicy"), false);
+  });
+
+  it("asks Fabric to verify a compile with the request in the body", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      defaultTenantId: "tenant-payments",
+      defaultAssemblyId: "assembly-checkout",
+      fetch: fakeFetch(calls, { available: false, historical: false, diagnosticArtifacts: [] })
+    });
+
+    await client.verifyContract?.({ sessionId: "s1", contractHash: "a".repeat(64) });
+
+    assert.equal(calls[0]!.input, "http://fabric.local/studio/tenants/tenant-payments/assemblies/assembly-checkout/sessions/s1/verify");
+    assert.equal(calls[0]!.method, "POST");
+    assert.deepEqual(JSON.parse(String(calls[0]!.body)), { contractHash: "a".repeat(64) });
+  });
+
   it("lists a selected catalog file version through the Studio catalog endpoint", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({

@@ -1,3 +1,4 @@
+import { studioApiExampleCompileRecord } from "@unfurl/fabric-validation-client";
 import { useMemo } from "react";
 import { exportBundleFromCompile } from "./draftExport.js";
 import { appendValidatedIntent, createIntentHistory } from "./intentHistory.js";
@@ -69,6 +70,7 @@ export function VisualDiffPanel({ fixture = false, authoritativeDiff }: {
 function compiled(suffix: string) {
   return {
     status: "COMPILED" as const,
+    compileRecord: studioApiExampleCompileRecord,
     candidateId: `cand-${suffix}`,
     contractArtifact: artifact(`contract-${suffix}`),
     substrateProfileArtifact: artifact(`profile-${suffix}`),

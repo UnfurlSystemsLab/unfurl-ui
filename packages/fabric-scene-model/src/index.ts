@@ -43,6 +43,29 @@ export type StudioDraftSession = {
   readonly warnings: readonly PlanningWarning[];
   readonly collaborators?: readonly StudioCollaborator[];
   readonly intentLog?: readonly StudioIntentRecord[];
+  /**
+   * The session's successful compiles, oldest first and never edited (LLD-fabric-studio-api, Compile records and
+   * freshness). Absent from a Fabric that predates them.
+   */
+  readonly compileRecords?: readonly StudioCompileRecord[];
+};
+
+/**
+ * One successful compile of a draft session, as Fabric records it: the revision compiled, Fabric's hash of the effective
+ * deployment policy, the compiled contract's canonical hash, and the hashes of the stored envelopes. Studio pins a
+ * compile to these and never computes a hash itself.
+ */
+export type StudioCompileRecord = {
+  readonly revision: number;
+  readonly deploymentPolicyHash: string;
+  readonly contractHash: string;
+  readonly compiledEnvelopeSha256: string;
+  readonly substrateProfileSha256: string;
+  /** Present only when the compile was signed. */
+  readonly signedEnvelopeSha256?: string;
+  /** Present once runtime bindings are generated from the contract (P2b). */
+  readonly bindingsHash?: string;
+  readonly compiledAt: string;
 };
 
 export type PlanningWarning = {

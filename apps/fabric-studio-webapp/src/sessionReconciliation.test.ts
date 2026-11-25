@@ -10,6 +10,15 @@ it("rejects foreign identities and regressing snapshots while accepting newer re
   assert.equal(reconcileSession(session, { ...session, sceneRevision: 5 }).sceneRevision, 5);
 });
 
+it("never takes a compile record away: a same-revision snapshot with fewer records is older and ignored", () => {
+  const record = (hash: string) => ({ revision: 4, deploymentPolicyHash: "p", contractHash: hash, compiledEnvelopeSha256: "e",
+    substrateProfileSha256: "s", compiledAt: "2026-01-01T00:00:00Z" });
+  const compiled = { ...session, compileRecords: [record("a")] };
+  assert.equal(reconcileSession(compiled, session), compiled, "a poll read before the compile returned");
+  const recompiled = { ...session, compileRecords: [record("a"), record("b")] };
+  assert.equal(reconcileSession(compiled, recompiled), recompiled, "a recompile at the same revision arrives");
+});
+
 it("retries a transient read failure and fences a pending completion after unsubscribe", async () => {
   let retry: (() => void) | undefined;
   let resolve: ((value: typeof session) => void) | undefined;

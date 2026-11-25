@@ -1,3 +1,4 @@
+import { studioApiExampleCompileRecord } from "@unfurl/fabric-validation-client";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { signingHandoffFromCompile } from "./index.js";
@@ -6,6 +7,7 @@ describe("signing handoff", () => {
   it("reports signed contract artifacts when Fabric returns them", () => {
     const handoff = signingHandoffFromCompile({
       status: "COMPILED",
+      compileRecord: studioApiExampleCompileRecord,
       candidateId: "cand-abc123",
       contractArtifact: artifact("contract"),
       substrateProfileArtifact: artifact("profile"),
@@ -23,6 +25,7 @@ describe("signing handoff", () => {
   it("offers unsigned handoff when compile succeeded without signing", () => {
     const handoff = signingHandoffFromCompile({
       status: "COMPILED",
+      compileRecord: studioApiExampleCompileRecord,
       candidateId: "cand-abc123",
       contractArtifact: artifact("contract"),
       substrateProfileArtifact: artifact("profile"),
@@ -35,6 +38,7 @@ describe("signing handoff", () => {
   it("asks for a signed compile when signing was requested but no artifact exists", () => {
     const handoff = signingHandoffFromCompile({
       status: "COMPILED",
+      compileRecord: studioApiExampleCompileRecord,
       candidateId: "cand-abc123",
       contractArtifact: artifact("contract"),
       substrateProfileArtifact: artifact("profile"),
