@@ -4,6 +4,8 @@ import {
   DEFAULT_STUDIO_TENANT_ID,
   type AuthoringProposal,
   type CompileDraftCandidateResponse,
+  type ContractDiffResponse,
+  type VerifyContractResponse,
   type DeploymentPolicyDraft,
   type DeploymentShape,
   type ResolveDeploymentResponse,
@@ -55,6 +57,7 @@ import {
   type ReplacementCandidate
 } from "./draftInventory.js";
 import {
+  currentCompileRecord,
   failedProjectionLoad,
   pin,
   projectionFor,
@@ -71,7 +74,7 @@ export type WorkbenchClient = Pick<
   | "loadDynamicDcpProjection" | "loadReplacementCandidates" | "loadConnectionCandidates" | "listCatalogVisuals"
   | "listStudioFiles" | "listSessionHistory" | "createDraftComposition" | "applyIntent" | "getDraftSession"
   | "compileCandidate" | "resolveDeployment" | "converseAuthoring" | "heartbeatCollaborator" | "sessionEventsUrl"
-  | "listAssemblies"
+  | "listAssemblies" | "loadContractDiff" | "verifyContract"
 >;
 
 /** The hover preview of a catalog entry: what it could connect to or replace, from Fabric. */
@@ -132,6 +135,8 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
   const [deployment, setDeployment] = useState<InputsPinned<ResolveDeploymentResponse> | undefined>();
   const [deploymentError, setDeploymentError] = useState<string | undefined>();
   const [compileResult, setCompileResult] = useState<InputsPinned<CompileDraftCandidateResponse> | undefined>();
+  const [contractDiff, setContractDiff] = useState<InputsPinned<ContractDiffResponse> | undefined>();
+  const [verification, setVerification] = useState<InputsPinned<VerifyContractResponse> | undefined>();
   const [sign, setSign] = useState(false);
   const [assembly, setAssembly] = useState<StudioAssemblySummary | undefined>();
   const [syncError, setSyncError] = useState<string | undefined>();
@@ -286,6 +291,8 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
   /** Forgets every compile and resolution result, when the open session is replaced (§4.3 rule 6). */
   function clearDerivedResults() {
     setCompileResult(undefined);
+    setContractDiff(undefined);
+    setVerification(undefined);
     setDeployment(undefined);
     setDeploymentError(undefined);
   }
@@ -435,7 +442,49 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
       const next = await compileDraftWorkspace(client, state, { sign, deploymentPolicy: policy });
       setState(next);
       const produced = compileResponseProducedBy(state, next);
-      if (produced) setCompileResult(pin(session, policy, produced));
+      // A successful compile is about the record it appended; a refused one about the record that was current then.
+      if (produced) {
+        setCompileResult(pin(session, policy, produced,
+          produced.status === "COMPILED" ? produced.compileRecord.contractHash : currentCompileRecord(session)));
+      }
+    }),
+
+    /**
+     * Compares a past compile record with the current one through Fabric (LLD-fabric-studio-api, Contract diff and
+     * verification), sending the planner's policy for Fabric to check; Studio never hashes it. Fabric answers whether
+     * the comparison is current; the answer is also pinned to the session, revision and policy sent, so an edit after
+     * it makes it out of date here too (§4.3 rule 6). A failed request pins nothing and shows as the command error.
+     */
+    diffContract: (baseRevision: number) => run(async () => {
+      if (state?.status !== "READY") return;
+      if (!client.loadContractDiff) throw new Error("This client cannot compare compile records.");
+      const session = state.session;
+      const policy = deploymentPolicy;
+      const response = await client.loadContractDiff({
+        tenantId: session.tenantId, assemblyId: session.assemblyId, sessionId: session.sessionId, baseRevision,
+        deploymentPolicy: policy
+      });
+      // Pinned to the record Fabric compared against, so a later compile, even at this revision, makes it out of date.
+      setContractDiff(pin(session, policy, response,
+        response.target && !response.historical ? response.target.contractHash : currentCompileRecord(session)));
+    }),
+
+    /**
+     * Verifies the current compile's signed contract through Fabric with its configured trust keys, pinned like the
+     * contract diff. An unsigned compile, or a Fabric without trust keys, answers with its absent reason.
+     */
+    verifyContract: () => run(async () => {
+      if (state?.status !== "READY") return;
+      if (!client.verifyContract) throw new Error("This client cannot verify compiled contracts.");
+      const session = state.session;
+      const policy = deploymentPolicy;
+      const response = await client.verifyContract({
+        tenantId: session.tenantId, assemblyId: session.assemblyId, sessionId: session.sessionId,
+        deploymentPolicy: policy
+      });
+      // Pinned to the record Fabric verified, so a recompile, signed or unsigned, makes it out of date.
+      setVerification(pin(session, policy, response,
+        response.provenance && !response.historical ? response.provenance.contractHash : currentCompileRecord(session)));
     }),
 
     /** Resolves deployment shapes through Fabric, pinning the response to the session, revision and policy sent. */
@@ -526,6 +575,8 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
     ...(projectionView.error ? { projectionError: projectionView.error } : {}),
     ...(projectionView.outOfDate ? { projectionOutOfDate: projectionView.outOfDate } : {}),
     ...(compileResult ? { compile: compileResult } : {}),
+    ...(contractDiff ? { contractDiff } : {}),
+    ...(verification ? { verification } : {}),
     ...(deployment ? { deployment } : {}),
     ...(deploymentError ? { deploymentError } : {}),
     deploymentPolicy,

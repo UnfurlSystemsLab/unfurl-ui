@@ -1,3 +1,4 @@
+import { studioApiExampleCompileRecord } from "@unfurl/fabric-validation-client";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { buildDraftExportBundle, createIntentHistory, renderDraftExportText, type DraftWorkspaceState } from "./index.js";
@@ -7,6 +8,7 @@ describe("draft export bundle", () => {
   it("exposes contract profile and signed contract artifacts from Fabric compile output", () => {
     const bundle = buildDraftExportBundle(readyState({
       status: "COMPILED",
+      compileRecord: studioApiExampleCompileRecord,
       candidateId: "cand-abc123",
       contractArtifact: artifact("contract"),
       substrateProfileArtifact: artifact("profile"),
@@ -44,6 +46,8 @@ describe("draft export bundle", () => {
 
     assert.match(renderDraftExportText(buildDraftExportBundle(readyState({
       status: "INVALID",
+      reasons: [],
+      trustRejections: [],
       reason: "No candidate",
       details: "No valid candidate is selected."
     }))), /No candidate/);

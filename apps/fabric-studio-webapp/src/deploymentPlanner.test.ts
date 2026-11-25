@@ -1,3 +1,4 @@
+import { studioApiExampleCompileRecord } from "@unfurl/fabric-validation-client";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { IntentResponse, StudioFabricClient } from "@unfurl/fabric-validation-client";
@@ -131,6 +132,7 @@ function fakeClient(calls: unknown[]): StudioFabricClient {
       calls.push(request);
       return {
         status: "COMPILED",
+        compileRecord: studioApiExampleCompileRecord,
         candidateId: "cand-abc123",
         contractArtifact: artifact("contract"),
         substrateProfileArtifact: artifact("profile"),

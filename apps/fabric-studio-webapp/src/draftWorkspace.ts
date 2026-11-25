@@ -185,6 +185,17 @@ export async function compileDraftWorkspace(
       };
     }
 
+    if (response.status === "COMPILED") {
+      // Fabric appended this record to the session (LLD-fabric-studio-api, Compile records and freshness); the session
+      // Studio holds gets the same record, so the compile panel can offer it as a contract-diff base.
+      const ready = clearTransientError(state);
+      return {
+        ...ready,
+        session: { ...ready.session, compileRecords: [...(ready.session.compileRecords ?? []), response.compileRecord] },
+        lastCompile: response
+      };
+    }
+
     return {
       ...clearTransientError(state),
       lastCompile: response

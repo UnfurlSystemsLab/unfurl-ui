@@ -71,11 +71,14 @@ const SECURITY: OverlayDefinition = {
       providers.length > 0
         ? { label: "Identity", value: `in the composition, provided by ${providers.map(node => node.label).join(", ")}`, source: "dynamic-dcp nodes[].capabilities" }
         : { label: "Identity", value: "not in the composition: components run unauthenticated on a trusted network", source: "dynamic-dcp nodes[].capabilities" },
+      // A named policy is stored on the session but Fabric does not yet apply it (LLD-fabric-studio-api, "Gap: a
+      // session's trust policy is not applied"), so it is never shown as enforced.
       data.session.trustPolicyId
-        ? { label: "Trust policy", value: data.session.trustPolicyId, source: "session.trustPolicyId" }
+        ? { label: "Trust policy", value: `${data.session.trustPolicyId} (named on the session; Fabric does not apply named trust policies yet)`, source: "session.trustPolicyId" }
         : { label: "Trust policy", value: "none set", source: "session.trustPolicyId" },
       ...(permissive ? [{ label: "Warning", value: `${permissive.code}: ${permissive.message}`, source: "session.warnings[]" }] : []),
-      signingFact(data)
+      signingFact(data),
+      ...verificationFacts(data)
     ];
     return { overlay: "SECURITY", available: true, annotations, section: { title: overlayTitle("SECURITY"), facts } };
   }
@@ -96,6 +99,25 @@ function signingFact(data: WorkbenchData): Fact {
       ? `UNSIGNED_READY: ${handoff.message}`
       : handoff.status === "REQUEST_SIGNED_COMPILE" ? handoff.message : `unavailable: ${handoff.reason}`;
   return { label: "Signing", value, source: "compile response signedContractArtifact" };
+}
+
+/**
+ * The verification Fabric answered, only while it is current (§4.3 rule 6): a result for an earlier revision, session or
+ * policy is left out, and the compile panel names it as out of date. An unavailable result shows Fabric's reason.
+ */
+function verificationFacts(data: WorkbenchData): readonly Fact[] {
+  if (!data.verification || !isCurrent(data.verification, data)) return [];
+  const result = data.verification.response;
+  if (!result.available) {
+    return [{ label: "Verification", value: `${result.absentReason?.code ?? "UNAVAILABLE"}: ${result.absentReason?.message ?? ""}`, source: "verify absentReason" }];
+  }
+  const signature = result.signature;
+  const drift = result.catalogDrift;
+  return [{
+    label: "Verification",
+    value: `${result.overallOk ? "verified" : "not verified"}: signature ${signature?.result ?? "unknown"}; catalog ${drift?.clean ? "clean" : "drifted"}`,
+    source: "verify signature, catalogDrift"
+  }];
 }
 
 /** An overlay whose data needs Fabric's P2 overlay endpoint: listed with its reason, never shown as an empty layer. */

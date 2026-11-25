@@ -56,6 +56,7 @@ import {
   type WorkbenchPanel
 } from "./viewState.js";
 import { PROJECTION_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
+import { CompileRecordsSection } from "./compileRecords.js";
 import { currentResponse, isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
 
 export type WorkbenchProps = {
@@ -714,7 +715,7 @@ function CompilePanel({ composition, onClose, onSnapshotLayout }: {
           {audit && <section aria-label="Decision audit"><h3>Decision audit</h3><ul>{audit.map(line => <li key={line}>{line}</li>)}</ul></section>}
         </>
       )}
-      <p className="absent-reason">Contract diff and verification arrive with Fabric's compile records (LLD-fabric-studio-api, Contract diff and verification).</p>
+      <CompileRecordsSection composition={composition} />
       <h3>Save</h3>
       <label>Deployment target<input value={target} onChange={event => setTarget(event.target.value)} /></label>
       <label>Deployment shape
@@ -739,8 +740,9 @@ function CompilePanel({ composition, onClose, onSnapshotLayout }: {
 
 /**
  * Guided-fix strip (LLD §4.3 rule 5): always on. It renders Fabric's planning warnings, intent results and compile
- * failures as plain-language cards (`buildDraftWorkspaceOverlay`), plus the last command failure. No fix is applied from a
- * card in P1: Fabric's typed fix data arrives with the structured match failures (LLD-fabric-studio-api).
+ * failures as plain-language cards (`buildDraftWorkspaceOverlay`), plus the last command failure. A `NO_MATCH` gives one
+ * card per typed cause and trust rejection, in Fabric's words (LLD-fabric-studio-api, Structured match failures and
+ * trust rejections). No fix is applied from a card: Fabric's causes name their fix in text and carry no fix action.
  *
  * Compile cards come from the pinned compile only while it is current (§4.3 rule 6), never from the state machine's
  * `lastCompile`, which a failed or superseded compile leaves in place; the compile panel names an out-of-date one.

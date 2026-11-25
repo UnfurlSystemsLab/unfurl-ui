@@ -1,3 +1,4 @@
+import { studioApiExampleCompileRecord, type ContractDiffResponse, type VerifyContractResponse } from "@unfurl/fabric-validation-client";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { renderToString } from "react-dom/server";
@@ -27,6 +28,7 @@ import { badgesByElement, evaluateOverlays, overlayAvailability, OVERLAY_REGISTR
 import { projectCompiledContract, projectFlow, projectTopology } from "./projectors.js";
 import { TableRenderer, TwoDRenderer, sceneModeFor, viewForSceneMode } from "./renderers.js";
 import {
+  currentCompileRecord,
   currentResponse,
   failedProjectionLoad,
   freshness,
@@ -39,6 +41,7 @@ import {
   type WorkbenchData
 } from "./workbenchData.js";
 import { Workbench } from "./Workbench.js";
+import { ContractDiffResult, diffBaseRevisions, VerificationResult } from "./compileRecords.js";
 import { RETIRED_ROUTES, retiredRouteTarget } from "../StudioRoutes.js";
 
 /**
@@ -91,7 +94,8 @@ function data(overrides: { readonly [K in keyof WorkbenchData]?: WorkbenchData[K
 }
 
 const COMPILED: CompileDraftCandidateResponse = {
-  status: "COMPILED", candidateId: "cand-1",
+  status: "COMPILED",
+  compileRecord: studioApiExampleCompileRecord, candidateId: "cand-1",
   contractArtifact: { artifactId: "c", label: "contract", fileName: "c.yaml", sha256: "1", downloadUrl: "/c" } as never,
   substrateProfileArtifact: { artifactId: "p", label: "profile", fileName: "p.yaml", sha256: "2", downloadUrl: "/p" } as never,
   warnings: []
@@ -233,7 +237,9 @@ describe("views and overlays", () => {
     assert.ok(shown.available && shown.section.facts.some(fact => fact.value.startsWith(TRUST_POLICY_PERMISSIVE)));
     const governed = evaluateOverlays(["SECURITY"], projectFlow(PROJECTION), data({ session: session({ trustPolicyId: "trust-acme" }) }))[0]!;
     assert.ok(governed.available && !governed.section.facts.some(fact => fact.label === "Warning"));
-    assert.ok(governed.available && governed.section.facts.some(fact => fact.value === "trust-acme"));
+    // A named policy is shown with the fact that Fabric does not apply it yet, never as enforced.
+    assert.ok(governed.available && governed.section.facts.some(fact => fact.label === "Trust policy"
+      && fact.value.startsWith("trust-acme") && fact.value.includes("does not apply named trust policies")));
   });
 
   it("reports an out-of-date compile and resolution instead of showing them as current (§4.3 rule 6)", () => {
@@ -309,6 +315,108 @@ describe("views and overlays", () => {
       assert.deepEqual(Object.keys(state).sort(), ["colourOverlay", "layout", "overlays", "renderer", "selectedSurface", "semanticZoomLevel", "view"]
         .filter(key => key !== "layout" || state.layout !== undefined));
     }
+  });
+});
+
+describe("compile records, contract diff and verification (P2a)", () => {
+  const record = (revision: number, hash: string) => ({ ...studioApiExampleCompileRecord, revision, contractHash: hash.repeat(64) });
+  const provenance = (revision: number, hash: string) => ({ sourceRevision: revision, contractHash: hash.repeat(64), compiledAt: "2026-01-01T00:00:00Z" });
+  const DIFF = {
+    available: true, historical: false, base: provenance(2, "a"), target: provenance(4, "b"), diagnosticArtifacts: [],
+    diff: { leftCanonicalHash: "a", rightCanonicalHash: "b", canonicalHashChanged: true, contractIdChanged: false,
+      addedSelections: [], removedSelections: [], changedSelections: [], addedDeploymentEntries: [], removedDeploymentEntries: [],
+      changedDeploymentShapes: [{ key: "flow/workflow.execute", fromShape: "CONTAINERIZED_SERVICE", toShape: "IN_PROCESS_LIBRARY", fromPorts: [], toPorts: [] }],
+      substrateProfileHashChanged: false, ports: { added: [], removed: [], changed: [] } }
+  } satisfies ContractDiffResponse;
+  const VERIFIED = {
+    available: true, historical: false, provenance: provenance(4, "b"), overallOk: true, diagnosticArtifacts: [],
+    signature: { ok: true, result: "Ok", detail: "signed by key k1 with SHA256withECDSA" },
+    catalogDrift: { clean: true, hashDrifts: [], missingFromCatalog: [] }
+  } satisfies VerifyContractResponse;
+
+  it("offers as a base every revision whose latest record is not the current one", () => {
+    assert.deepEqual(diffBaseRevisions([]), []);
+    assert.deepEqual(diffBaseRevisions([record(2, "a")]), [], "the current compile is not compared with itself");
+    assert.deepEqual(diffBaseRevisions([record(2, "a"), record(4, "b"), record(4, "c")]), [2]);
+    assert.deepEqual(diffBaseRevisions([record(2, "a"), record(4, "b"), record(6, "c")]), [2, 4]);
+  });
+
+  it("shows Fabric's comparison while current, labelled current or historical", () => {
+    const html = renderToString(<ContractDiffResult data={data({ contractDiff: pin(session(), POLICY, DIFF) })} />);
+    assert.match(html, /revision 2, contract aaaaaaaaaaaa/);
+    assert.match(html, /revision 4, contract bbbbbbbbbbbb \(current\)/);
+    assert.match(html, /CONTAINERIZED_SERVICE -&gt; IN_PROCESS_LIBRARY/);
+    const historical = renderToString(<ContractDiffResult data={data({ contractDiff: pin(session(), POLICY, { ...DIFF, historical: true }) })} />);
+    assert.match(historical, /\(historical\)/);
+  });
+
+  it("shows Fabric's absent reason as Fabric names it, and no comparison", () => {
+    const stale = { available: false, historical: false, diagnosticArtifacts: [],
+      absentReason: { code: "COMPILE_STALE", message: "compiled at revision 4 with a different deployment policy than the one this request names" } } satisfies ContractDiffResponse;
+    const html = renderToString(<ContractDiffResult data={data({ contractDiff: pin(session(), POLICY, stale) })} />);
+    assert.match(html, /COMPILE_STALE: compiled at revision 4 with a different deployment policy/);
+    assert.doesNotMatch(html, /Contract hash changed/);
+  });
+
+  it("never shows an answer asked for another revision or policy as current (§4.3 rule 6)", () => {
+    const moved = renderToString(<ContractDiffResult data={data({ contractDiff: pin(session({ sceneRevision: 3 }), POLICY, DIFF) })} />);
+    assert.match(moved, /Out of date: the contract diff; it was produced at revision 3; the draft is at revision 4/);
+    assert.doesNotMatch(moved, /IN_PROCESS_LIBRARY/);
+    const otherPolicy = renderToString(<VerificationResult data={data({ verification: pin(session(), { ...POLICY, preferredShapes: ["CONTAINERIZED_SERVICE"] }, VERIFIED) })} />);
+    assert.match(otherPolicy, /Out of date: the verification; it was produced with a different deployment policy/);
+  });
+
+  it("shows a verification with its signature and catalog, and an unsigned compile as NOT_SIGNED", () => {
+    const html = renderToString(<VerificationResult data={data({ verification: pin(session(), POLICY, VERIFIED) })} />);
+    assert.match(html, /Ok: signed by key k1/);
+    assert.match(html, /clean/);
+    assert.match(html, />verified</);
+    const unsigned = { available: false, historical: false, diagnosticArtifacts: [],
+      absentReason: { code: "NOT_SIGNED", message: "the compile at revision 4 was not signed; compile with signing to verify it" } } satisfies VerifyContractResponse;
+    assert.match(renderToString(<VerificationResult data={data({ verification: pin(session(), POLICY, unsigned) })} />), /NOT_SIGNED: the compile at revision 4 was not signed/);
+  });
+
+  it("regression: a recompile, even at the same revision and unsigned, makes earlier answers out of date", () => {
+    const signed = { ...record(4, "b"), signedEnvelopeSha256: "d".repeat(64) };
+    const unsigned = record(4, "c");
+    const before = session({ compileRecords: [signed] });
+    const after = session({ compileRecords: [signed, unsigned] });
+    const verification = pin(before, POLICY, VERIFIED, signed.contractHash);
+    const diff = pin(before, POLICY, DIFF, signed.contractHash);
+
+    assert.ok(freshness(verification, data({ session: before })).current);
+    const result = freshness(verification, data({ session: after }));
+    assert.equal(result.current, false);
+    assert.match(result.current ? "" : result.reason, /the current compile is revision 4, contract cccccccccccc/);
+    assert.match(renderToString(<VerificationResult data={data({ session: after, verification })} />), /Out of date: the verification/);
+    assert.match(renderToString(<ContractDiffResult data={data({ session: after, contractDiff: diff })} />), /Out of date: the contract diff/);
+    const facts = evaluateOverlays(["SECURITY"], projectFlow(PROJECTION), data({ session: after, verification }))[0]!;
+    assert.ok(facts.available && !facts.section.facts.some(fact => fact.label === "Verification"));
+  });
+
+  it("an answer given before any compile is out of date once a compile is recorded", () => {
+    const required = { available: false, historical: false, diagnosticArtifacts: [],
+      absentReason: { code: "COMPILE_REQUIRED", message: "no compile is recorded for session s1; compile the draft first" } } satisfies VerifyContractResponse;
+    const pinned = pin(session(), POLICY, required, currentCompileRecord(session()));
+    assert.equal(pinned.compileRecord, null);
+    assert.ok(freshness(pinned, data()).current);
+    assert.equal(freshness(pinned, data({ session: session({ compileRecords: [record(4, "b")] }) })).current, false);
+  });
+
+  it("a value no compile produced is not bound to a record", () => {
+    const resolved = pin(session(), POLICY, RESOLVED);
+    assert.equal("compileRecord" in resolved, false);
+    assert.ok(freshness(resolved, data({ session: session({ compileRecords: [record(4, "b")] }) })).current);
+  });
+
+  it("adds the verification to Security & Trust only while it is current", () => {
+    const facts = (verification: WorkbenchData["verification"]) => {
+      const result = evaluateOverlays(["SECURITY"], projectFlow(PROJECTION), data({ verification }))[0]!;
+      return result.available ? result.section.facts.filter(fact => fact.label === "Verification") : [];
+    };
+    assert.deepEqual(facts(undefined), []);
+    assert.equal(facts(pin(session(), POLICY, VERIFIED))[0]?.value, "verified: signature Ok; catalog clean");
+    assert.deepEqual(facts(pin(session({ sceneRevision: 1 }), POLICY, VERIFIED)), [], "an out-of-date verification is left out");
   });
 });
 

@@ -1,3 +1,4 @@
+import { studioApiExampleCompileRecord } from "@unfurl/fabric-validation-client";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -173,6 +174,7 @@ describe("draft workspace", () => {
       session: session({ sceneRevision: 7 }),
       compileResponse: {
         status: "COMPILED",
+        compileRecord: studioApiExampleCompileRecord,
         candidateId: "cand-abc123",
         contractArtifact: artifact("contract"),
         substrateProfileArtifact: artifact("profile"),
@@ -233,6 +235,7 @@ describe("draft workspace", () => {
   it("reports only the compile response a call produced, never the earlier one a failure keeps (Studio LLD §4.3 rule 6)", async () => {
     const compiled = {
       status: "COMPILED" as const,
+      compileRecord: studioApiExampleCompileRecord,
       candidateId: "cand-abc123",
       contractArtifact: artifact("contract"),
       substrateProfileArtifact: artifact("profile"),
@@ -303,6 +306,8 @@ function fakeClient(options: {
     readonly status: "INVALID";
     readonly reason: string;
     readonly details: string;
+    readonly reasons: readonly [];
+    readonly trustRejections: readonly [];
   };
   readonly compileError?: Error;
   readonly calls?: unknown[];
@@ -353,6 +358,7 @@ function fakeClient(options: {
 function compiled() {
   return {
     status: "COMPILED" as const,
+    compileRecord: studioApiExampleCompileRecord,
     candidateId: "cand-abc123",
     contractArtifact: artifact("contract"),
     substrateProfileArtifact: artifact("profile"),
