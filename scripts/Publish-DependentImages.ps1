@@ -1,3 +1,20 @@
+<#
+.SYNOPSIS
+Builds the Lab service images (Fabric Studio, Foundry, Flow) and optionally pushes them to the registry.
+
+.DESCRIPTION
+Default: builds registry-named images (<Registry>/<Owner>/<name>:<ImageTag>, plus :latest) and pushes them with -Push.
+
+-Local: builds images from the local checkouts for local use only, named unfurl-<name>:local with no registry prefix, so
+they can never be confused with, or replaced by, a registry image. Maven runs offline (-o) against ~/.m2, and each
+service module is cleaned before it is packaged, so a shaded jar never keeps stale classes. -Local refuses -Push.
+
+.PARAMETER Local
+Build unfurl-<name>:local images from the local checkouts, offline, for Startup.ps1 / launch-studio.ps1 -LocalImages.
+
+.PARAMETER SkipBuild
+Skip the Maven build and only build the Docker images from the jars already in each repo's target folder.
+#>
 param(
     [string]$Registry = 'ghcr.io',
     [string]$Owner = 'unfurlsystemslab',
@@ -5,10 +22,22 @@ param(
     [switch]$Push,
     [switch]$SkipBuild,
     [switch]$NoLatest,
-    [switch]$NoCache
+    [switch]$NoCache,
+    [switch]$Local
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($Local -and $Push) {
+    throw '-Local builds images for this machine only; it cannot be combined with -Push'
+}
+
+# Naming rule: the image a service is built as. Local images carry no registry prefix and the tag 'local'.
+function Get-ServiceImageName {
+    param([Parameter(Mandatory=$true)]$Service, [Parameter(Mandatory=$true)][string]$Tag)
+    if ($Local) { return "$($Service.ImageName):local".ToLowerInvariant() }
+    return "$Registry/$Owner/$($Service.ImageName):$Tag".ToLowerInvariant()
+}
 
 # Guard: resolves required command-line tools before image work starts.
 function Resolve-Tool {
@@ -18,7 +47,9 @@ function Resolve-Tool {
     throw "$Name was not found on PATH"
 }
 
-# Runner: invokes a native command and converts non-zero exits into clear script failures.
+# Runner: invokes a native command and converts non-zero exits into clear script failures. Success is the exit code
+# alone: docker and compose write progress to stderr, which Windows PowerShell turns into error records when output is
+# redirected (for example `.\Startup.ps1 *> startup.log`), so stderr must not stop the script.
 function Invoke-Checked {
     param(
         [Parameter(Mandatory=$true)][string]$FilePath,
@@ -27,13 +58,17 @@ function Invoke-Checked {
     )
     Write-Host ">> $FilePath $($Arguments -join ' ')" -ForegroundColor DarkCyan
     Push-Location $WorkingDirectory
+    $previous = $ErrorActionPreference
     try {
-        & $FilePath @Arguments
-        if ($LASTEXITCODE -ne 0) {
-            throw "Command failed with exit code ${LASTEXITCODE}: $FilePath $($Arguments -join ' ')"
-        }
+        $ErrorActionPreference = 'Continue'
+        & $FilePath @Arguments 2>&1 | ForEach-Object { Write-Host "$_" }
+        $exitCode = $LASTEXITCODE
     } finally {
+        $ErrorActionPreference = $previous
         Pop-Location
+    }
+    if ($exitCode -ne 0) {
+        throw "Command failed with exit code ${exitCode}: $FilePath $($Arguments -join ' ')"
     }
 }
 
@@ -74,16 +109,24 @@ function Build-ServiceImage {
     }
 
     if (-not $SkipBuild) {
+        # Local images build offline from ~/.m2 and clean the service module first, so the shaded jar holds exactly
+        # the checkout's classes.
+        $mavenFlags = @('--batch-mode', '--no-transfer-progress', '-DskipTests')
+        if ($Local) { $mavenFlags += '-o' }
         foreach ($prerequisite in $Service.Prerequisites) {
-            Invoke-Checked -FilePath $Maven -Arguments @('--batch-mode', '--no-transfer-progress', '-DskipTests', '-f', $prerequisite, 'install') -WorkingDirectory $repoPath
+            Invoke-Checked -FilePath $Maven -Arguments ($mavenFlags + @('-f', $prerequisite, 'install')) -WorkingDirectory $repoPath
         }
-        Invoke-Checked -FilePath $Maven -Arguments @('--batch-mode', '--no-transfer-progress', '-DskipTests', 'package') -WorkingDirectory $repoPath
+        $goals = if ($Local) { @('clean', 'package') } else { @('package') }
+        Invoke-Checked -FilePath $Maven -Arguments ($mavenFlags + $goals) -WorkingDirectory $repoPath
+    }
+    if (-not (Test-Path (Join-Path $repoPath $Service.JarFile))) {
+        throw "The jar for $($Service.Name) is missing: $($Service.JarFile). Build it first, or run without -SkipBuild."
     }
 
-    $image = "$Registry/$Owner/$($Service.ImageName):$ImageTag".ToLowerInvariant()
-    $latest = "$Registry/$Owner/$($Service.ImageName):latest".ToLowerInvariant()
+    $image = Get-ServiceImageName -Service $Service -Tag $ImageTag
+    $latest = Get-ServiceImageName -Service $Service -Tag 'latest'
     $args = @('build', '-f', $Service.Dockerfile, '--build-arg', "JAR_FILE=$($Service.JarFile)", '-t', $image)
-    if (-not $NoLatest) {
+    if (-not $NoLatest -and -not $Local) {
         $args += @('-t', $latest)
     }
     if ($NoCache) {
@@ -154,5 +197,5 @@ foreach ($service in $services) {
 
 Write-Host 'Dependent images are ready:' -ForegroundColor Green
 foreach ($service in $services) {
-    Write-Host ("  {0}/{1}/{2}:{3}" -f $Registry, $Owner, $service.ImageName, $ImageTag).ToLowerInvariant()
+    Write-Host "  $(Get-ServiceImageName -Service $service -Tag $ImageTag)"
 }
