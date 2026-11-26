@@ -1,8 +1,8 @@
 import type {
-  DynamicDcpProjectionResponse, ResolveDeploymentResponse, StudioViewSection, StudioViewpoint, ViewProjectionResponse
+  DynamicDcpProjectionResponse, EmitPlanBinding, ResolveDeploymentResponse, StudioViewSection, StudioViewpoint, ViewProjectionResponse
 } from "@unfurl/fabric-validation-client";
 import type { ReadOnlyCompositionView } from "@unfurl/fabric-scene-model";
-import { isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
+import { currentEmitPlan, isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
 
 /**
  * Renderer-neutral view model (LLD-studio-viewpoints-and-perspectives §7): what every renderer of a view draws. Each fact
@@ -215,6 +215,9 @@ export function projectTopology(projection: DynamicDcpProjectionResponse, data: 
   // is a note with Fabric's reason, never a guessed transport.
   const transports = itemsByNode(topology?.transports, transport => transport.providerNodeId ?? "");
   if (topology?.transports && !topology.transports.available) notes.push(...absentNotes([["Transports", topology.transports]]));
+  // Runtime bindings come from the current emit plan for the chosen environment (LLD-fabric-studio-api,
+  // StudioEmitPlanPreview), each on its provider node; an out-of-date plan contributes nothing (§4.3 rule 6).
+  const bindings = runtimeBindingsByNode(data);
   const components: ModelNode[] = projection.nodes.map(node => {
     const shape = node.catalogEntryId === undefined ? undefined : shapes.get(node.catalogEntryId);
     return {
@@ -231,6 +234,11 @@ export function projectTopology(projection: DynamicDcpProjectionResponse, data: 
         ]),
         ...(transports.get(node.nodeId) ?? []).map(transport => ({
           label: "Transport", value: `${transport.kind} (${transport.childContractId})`, source: `views/topology ${transport.source}`
+        })),
+        ...(bindings.get(node.nodeId) ?? []).map(binding => ({
+          label: `Runtime binding (${binding.capability})`,
+          value: `${binding.deploymentKind ?? "deployment kind not given"}${binding.baseUrl ? ` at ${binding.baseUrl}` : ""}${binding.enabled ? "" : ", disabled"}`,
+          source: `emit-plan runtimeBindings[${binding.bindingId}]`
         }))
       ]
     };
@@ -258,6 +266,21 @@ export function projectTopology(projection: DynamicDcpProjectionResponse, data: 
     }
   }
   return { view: "TOPOLOGY", nodes: [...components, ...ports], edges, notes };
+}
+
+/**
+ * The current emit plan's child bindings by provider node: only a current, available plan's, and only bindings Fabric
+ * mapped to a draft node. Shared by Substrate & Topology and the overlays' runtime facts.
+ */
+export function runtimeBindingsByNode(data: WorkbenchData): ReadonlyMap<string, readonly EmitPlanBinding[]> {
+  const plan = currentEmitPlan(data);
+  const byNode = new Map<string, EmitPlanBinding[]>();
+  if (!plan?.available) return byNode;
+  for (const binding of plan.runtimeBindings) {
+    if (binding.capability === undefined || binding.providerNodeId === undefined) continue;
+    byNode.set(binding.providerNodeId, [...(byNode.get(binding.providerNodeId) ?? []), binding]);
+  }
+  return byNode;
 }
 
 /**

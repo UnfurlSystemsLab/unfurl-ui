@@ -864,6 +864,139 @@ export type ViewProjectionResponse = {
   readonly diagnosticArtifacts: readonly StudioExportArtifact[];
 };
 
+/** A deployment target, as the CLI's `--target` file holds it (LLD-fabric-studio-api, Deployment Environments). */
+export type StudioDeploymentTarget = {
+  readonly kind?: string;
+  readonly environment?: string;
+  readonly region?: string;
+  readonly endpoint?: string;
+  readonly options: Readonly<Record<string, string>>;
+  /** Credential names or labels, never values. */
+  readonly credentialRefs: readonly string[];
+};
+
+/** The identity-provider binding settings: every reference a `secret://` or `config://` URI, never a value. */
+export type StudioDeploymentIdentity = {
+  readonly issuer?: string;
+  readonly audiences: Readonly<Record<string, string>>;
+  readonly tenantClaim?: string;
+  readonly rolesClaim?: string;
+  readonly permissionsClaim?: string;
+  readonly tokenEndpointRef?: string;
+  readonly verificationKeysRef?: string;
+  readonly clientCredentialsRef?: string;
+  readonly serviceCredentials: Readonly<Record<string, string>>;
+};
+
+/** The API catalog's documentation settings; `visibility` is a documentation-visibility file's text. */
+export type StudioDeploymentDocumentation = {
+  readonly visibilityDefault?: string;
+  readonly visibility?: string;
+  readonly observationIntervalMs?: number;
+  readonly observationMaxBackoffMs?: number;
+};
+
+/** The runtime-binding inputs, with the meaning the `fabric runtime-bindings` flags give them. */
+export type StudioDeploymentBindings = {
+  readonly serviceBaseUrls: Readonly<Record<string, string>>;
+  readonly timeoutMs?: number;
+  readonly telemetryNamespace?: string;
+  readonly identity?: StudioDeploymentIdentity;
+  readonly componentConfig: readonly string[];
+  readonly documentation?: StudioDeploymentDocumentation;
+  readonly disabledBindings: readonly string[];
+};
+
+/**
+ * A tenant's deployment environment. `revision` grows by one with each save and is for concurrent editing only (a
+ * re-created environment starts at 1 again); `contentSha256` is Fabric's hash of its target and bindings.
+ */
+export type StudioDeploymentEnvironment = {
+  readonly name: string;
+  readonly revision: number;
+  readonly updatedAt: string;
+  readonly contentSha256: string;
+  readonly target: StudioDeploymentTarget;
+  readonly bindings: StudioDeploymentBindings;
+};
+
+/** `PUT .../deployment-environments/{name}`: 0 creates, the stored revision replaces. */
+export type SaveDeploymentEnvironmentRequest = {
+  readonly tenantId?: string;
+  readonly name: string;
+  readonly expectedRevision: number;
+  readonly target: StudioDeploymentTarget;
+  readonly bindings: StudioDeploymentBindings;
+};
+
+/** `DELETE .../deployment-environments/{name}?expectedRevision`. */
+export type DeleteDeploymentEnvironmentRequest = {
+  readonly tenantId?: string;
+  readonly name: string;
+  readonly expectedRevision: number;
+};
+
+/** One problem of a refused environment save, by field path. */
+export type StudioEnvironmentProblem = { readonly path: string; readonly message: string };
+
+/** `GET .../sessions/{sessionId}/emit-plan?environment`. */
+export type EmitPlanRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly sessionId: string;
+  readonly environment: string;
+  /** The policy Studio would compile with now; Fabric hashes it, Studio never does. */
+  readonly deploymentPolicy?: DeploymentPolicyDraft;
+};
+
+/** One emitted artifact, with this preview run's hash. */
+export type EmitPlanArtifact = { readonly path: string; readonly kind: string; readonly sha256: string };
+
+/** One secret the deployment needs, by name only: never a value. */
+export type EmitPlanSecretRequest = { readonly name: string; readonly boundComponentId: string; readonly targetStoreHint: string };
+
+/** One generated runtime binding, by reference names only. */
+export type EmitPlanBinding = {
+  readonly bindingId: string;
+  readonly contractId: string;
+  /** Null for the root binding. */
+  readonly capability?: string;
+  readonly providerComponent?: string;
+  /** The provider's draft node; absent for the root binding or a provider outside the draft. */
+  readonly providerNodeId?: string;
+  readonly deploymentKind?: string;
+  readonly baseUrl?: string;
+  readonly enabled: boolean;
+  readonly timeoutMs?: number;
+  readonly auditEnabled: boolean;
+  readonly telemetryNamespace?: string;
+  readonly secretRefNames: readonly string[];
+  readonly configRefNames: readonly string[];
+};
+
+/** The emit-plan preview (LLD-fabric-studio-api, StudioEmitPlanPreview); available exactly when it has no absent reason. */
+export type EmitPlanResponse = {
+  readonly tenantId: string;
+  readonly assemblyId: string;
+  readonly sessionId: string;
+  readonly revision: number;
+  readonly environment: string;
+  readonly environmentRevision?: number;
+  /** The `contentSha256` of the environment the preview read; Studio pins the answer to it. */
+  readonly environmentSha256?: string;
+  /** The compile record read, current or not; absent before any compile. */
+  readonly provenance?: StudioCompileProvenance;
+  readonly available: boolean;
+  readonly absentReason?: StudioAbsentReason;
+  readonly targetKind?: string;
+  readonly artifacts: readonly EmitPlanArtifact[];
+  readonly requiredSecrets: readonly EmitPlanSecretRequest[];
+  readonly runtimeBindings: readonly EmitPlanBinding[];
+  readonly bindingsSha256?: string;
+  readonly emitManifestSha256?: string;
+  readonly diagnosticArtifacts: readonly StudioExportArtifact[];
+};
+
 /** An overlay's id on Fabric's route (LLD-fabric-studio-api, StudioOverlayAnnotations); resilience arrives in P2e. */
 export type StudioOverlayId = "security" | "performance" | "compliance";
 
@@ -1082,6 +1215,14 @@ export interface StudioFabricClient {
   readonly verifyContract?: (request: VerifyContractRequest) => Promise<VerifyContractResponse>;
   /** One workbench view's typed data (LLD-fabric-studio-api, StudioViewProjection). */
   readonly loadView?: (request: ViewProjectionRequest) => Promise<ViewProjectionResponse>;
+  /** The tenant's deployment environments, by name (LLD-fabric-studio-api, Deployment Environments). */
+  readonly listEnvironments?: (request: { readonly tenantId?: string }) => Promise<readonly StudioDeploymentEnvironment[]>;
+  /** Creates or replaces one; a refusal is a `StudioApiError` with Fabric's problems or current revision. */
+  readonly saveEnvironment?: (request: SaveDeploymentEnvironmentRequest) => Promise<StudioDeploymentEnvironment>;
+  /** Deletes one, revision-checked. */
+  readonly deleteEnvironment?: (request: DeleteDeploymentEnvironmentRequest) => Promise<void>;
+  /** The emit-plan preview of the session's current compile for one environment (StudioEmitPlanPreview). */
+  readonly loadEmitPlan?: (request: EmitPlanRequest) => Promise<EmitPlanResponse>;
   /** One perspective overlay's annotations and findings (LLD-fabric-studio-api, StudioOverlayAnnotations). */
   readonly loadOverlay?: (request: OverlayAnnotationsRequest) => Promise<OverlayAnnotationsResponse>;
   readonly getVisualAsset: (assetId: string) => Promise<StudioVisualAsset>;

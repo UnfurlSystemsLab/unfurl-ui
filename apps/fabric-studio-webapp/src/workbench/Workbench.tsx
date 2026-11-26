@@ -57,6 +57,7 @@ import {
 } from "./viewState.js";
 import { PROJECTION_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
 import { CompileRecordsSection } from "./compileRecords.js";
+import { EmitPlanSection, EnvironmentSection } from "./environmentEditor.js";
 import { currentResponse, currentView, isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
 
 export type WorkbenchProps = {
@@ -498,7 +499,8 @@ function Inspector({ viewState, model, overlayResults, composition, selection, o
       {overlayResults.map(result => result.available ? (
         <section className="inspector-card" key={result.overlay} aria-label={result.section.title}>
           <h2>{result.section.title}</h2>
-          <dl>{result.section.facts.map(fact => <FactRow key={fact.label} label={fact.label} value={fact.value} source={fact.source} />)}</dl>
+          <dl>{[...result.section.facts, ...(result.section.notes ?? [])].map(fact =>
+            <FactRow key={fact.label} label={fact.label} value={fact.value} source={fact.source} />)}</dl>
         </section>
       ) : (
         <section className="inspector-card" key={result.overlay}>
@@ -622,14 +624,17 @@ function FlowSections({ composition, selection, node, ready, onSelect }: {
 }
 
 /**
- * Substrate & Topology's inspector: the assembly's deployment target as Fabric reports it, the deployment planner, and
- * Fabric's resolution while it is current (§4.3 rule 6).
+ * Substrate & Topology's inspector: the deployment environment and the emit plan for it (§5.5, P2d), the assembly's
+ * deployment target as Fabric reports it, the deployment planner, and Fabric's resolution while it is current (§4.3
+ * rule 6).
  */
 function TopologySections({ composition, ready }: { readonly composition: WorkbenchComposition; readonly ready: boolean }) {
   const data = composition.data;
   const current = currentResponse(data.deployment, data);
   return (
     <>
+      <EnvironmentSection composition={composition} />
+      <EmitPlanSection data={data} />
       <section className="inspector-card" aria-label="Deployment target">
         <h2>Deployment Target</h2>
         <dl>
