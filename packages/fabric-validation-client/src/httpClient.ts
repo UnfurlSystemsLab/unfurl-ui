@@ -5,6 +5,8 @@ import type {
   ContractDiffResponse,
   VerifyContractRequest,
   VerifyContractResponse,
+  ViewProjectionRequest,
+  ViewProjectionResponse,
   AuthoringConverseRequest,
   AuthoringConverseResponse,
   CreateDraftCompositionRequest,
@@ -429,6 +431,21 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/contract-diff${query}`,
+        undefined,
+        tenantHeaders(scope.tenantId, authContext)
+      );
+    },
+    loadView: async (body: ViewProjectionRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      const query = queryString({
+        sessionId: body.sessionId,
+        deploymentPolicy: body.deploymentPolicy === undefined ? undefined : JSON.stringify(body.deploymentPolicy)
+      });
+      return request<ViewProjectionResponse>(
+        guardedFetch,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/views/${encodeURIComponent(body.view)}${query}`,
         undefined,
         tenantHeaders(scope.tenantId, authContext)
       );

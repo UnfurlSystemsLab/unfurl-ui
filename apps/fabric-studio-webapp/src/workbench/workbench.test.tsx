@@ -1,4 +1,4 @@
-import { studioApiExampleCompileRecord, type ContractDiffResponse, type VerifyContractResponse } from "@unfurl/fabric-validation-client";
+import { studioApiExampleCompileRecord, type ContractDiffResponse, type VerifyContractResponse, type ViewProjectionResponse } from "@unfurl/fabric-validation-client";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { renderToString } from "react-dom/server";
@@ -23,14 +23,16 @@ import {
   viewStateReducer,
   type StudioViewState
 } from "./viewState.js";
-import { NOT_YET_PROVIDED_BY_FABRIC, PROJECTION_LOADING, PROJECTION_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
+import { NOT_YET_PROVIDED_BY_FABRIC, PROJECTION_LOADING, PROJECTION_UNAVAILABLE, VIEW_DATA_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
 import { badgesByElement, evaluateOverlays, overlayAvailability, OVERLAY_REGISTRY, TRUST_POLICY_PERMISSIVE } from "./overlays.js";
-import { projectCompiledContract, projectFlow, projectTopology } from "./projectors.js";
-import { TableRenderer, TwoDRenderer, sceneModeFor, viewForSceneMode } from "./renderers.js";
+import { projectCompiledContract, projectData, projectFlow, projectRuntime, projectTopology } from "./projectors.js";
+import { OwnershipMatrixRenderer, TableRenderer, TwoDRenderer, sceneModeFor, viewForSceneMode } from "./renderers.js";
 import {
   currentCompileRecord,
   currentResponse,
+  currentView,
   failedProjectionLoad,
+  pinView,
   freshness,
   isCurrent,
   pin,
@@ -70,6 +72,37 @@ const PROJECTION: DynamicDcpProjectionResponse = {
   ],
   warnings: []
 };
+
+const section = <T,>(items: readonly T[]) => ({ available: true, items });
+const absentSection = (code: string, message: string) => ({ available: false, items: [], absentReason: { code, message } });
+const VIEW_BASE = { tenantId: "tenant-a", assemblyId: "assembly-a", sessionId: "s1", revision: 4, diagnostics: [], diagnosticArtifacts: [] };
+const SCHEMA = (name: string) => ({ path: `dcp/schemas/${name}.schema.json`, mediaType: "application/schema+json", sha256: "a".repeat(64) });
+const DATA_VIEW: ViewProjectionResponse = { ...VIEW_BASE, view: "data",
+  ownedState: section([{ nodeId: "flow", concern: "workflow-execution", resource: "workflow-runs", description: "Run state", sensitivity: "CONFIDENTIAL", source: "claim.domain.concerns[0].owns_state[0]" }]),
+  ownedDecisions: section([{ nodeId: "flow", concern: "workflow-execution", decision: "run-admission", description: "Admits runs", authority: "EXCLUSIVE", source: "claim.domain.concerns[0].owns_decisions[0]" }]),
+  operations: section([{ nodeId: "flow", capability: "workflow.execute", operation: "start", requestSchema: SCHEMA("start.request"), responseSchema: SCHEMA("start.response"), source: "claim.offers[0].documentation.operations[0]" }]),
+  dataMappings: absentSection("COMPILE_REQUIRED", "no compile is recorded for session s1; compile the draft first") };
+const DATA_VIEW_EMPTY: ViewProjectionResponse = { ...VIEW_BASE, view: "data",
+  ownedState: absentSection("NO_OWNED_STATE_DECLARED", "no selected component's concerns declare owned state (owns_state)"),
+  ownedDecisions: absentSection("NO_OWNED_DECISIONS_DECLARED", "no selected component's concerns declare owned decisions (owns_decisions)"),
+  operations: absentSection("NO_OPERATIONS_DOCUMENTED", "no selected component documents its offers' operations (documentation.operations)"),
+  dataMappings: absentSection("COMPILE_REQUIRED", "no compile is recorded for session s1; compile the draft first") };
+const NOT_SIGNED_RESULT = { available: false, historical: false, diagnosticArtifacts: [],
+  absentReason: { code: "NOT_SIGNED", message: "the compile at revision 4 was not signed; compile with signing to verify it" } };
+const RUNTIME_VIEW: ViewProjectionResponse = { ...VIEW_BASE, view: "runtime",
+  monitoring: section([{ nodeId: "flow", required: true, healthEndpoints: ["/health/live", "/health/ready"], readinessRequired: true, livenessRequired: true, source: "claim.integration_ports.monitoring" }]),
+  telemetry: section([{ nodeId: "flow", required: false, signals: ["LOGS", "AUDIT_EVENTS"], correlationIdRequired: false, source: "claim.integration_ports.telemetry" }]),
+  verification: NOT_SIGNED_RESULT };
+const RUNTIME_VIEW_EMPTY: ViewProjectionResponse = { ...VIEW_BASE, view: "runtime",
+  monitoring: absentSection("NO_MONITORING_DECLARED", "no selected component declares monitoring (integration_ports.monitoring)"),
+  telemetry: absentSection("NO_TELEMETRY_DECLARED", "no selected component declares telemetry (integration_ports.telemetry)"),
+  verification: { ...NOT_SIGNED_RESULT, absentReason: { code: "COMPILE_REQUIRED", message: "no compile is recorded" } } };
+const FLOW_VIEW: ViewProjectionResponse = { ...VIEW_BASE, view: "flow",
+  externalOwners: section([{ boundaryNodeId: "owner:host", owner: "host", dependency: "host.config@v1?owner=host", neededByNodeId: "flow", source: "claim.dependencies.needs[0]" }]),
+  externalProtocolOffers: section([{ nodeId: "idp", capability: "identity-context", protocol: "oauth2", source: "claim.offers[0].interface.details.protocol" }]) };
+const TOPOLOGY_VIEW: ViewProjectionResponse = { ...VIEW_BASE, view: "topology",
+  transports: { ...section([{ childContractId: "urn:contract:flow", providerNodeId: "flow", kind: "IN_PROCESS", details: {}, source: "contract.child_contracts[0].transport" }]),
+    provenance: { sourceRevision: 4, contractHash: "b".repeat(64), compiledAt: "2026-01-01T00:00:00Z" } } };
 
 const POLICY = { preferredShapes: [], disallowedShapes: [], requireIsolationForCapabilityPatterns: [], runtime: {} };
 
@@ -182,7 +215,17 @@ describe("views and overlays", () => {
   it("lists Data & State and Runtime & Telemetry under More views with their reason, never empty", () => {
     const menu = viewMenu(data());
     assert.deepEqual(menu.switcher.map(view => view.id), ["FLOW", "TOPOLOGY"]);
-    assert.deepEqual(menu.more.map(entry => [entry.view.id, entry.reason.reasonCode]), [["DATA", NOT_YET_PROVIDED_BY_FABRIC], ["RUNTIME", NOT_YET_PROVIDED_BY_FABRIC]]);
+    assert.deepEqual(menu.more.map(entry => [entry.view.id, entry.reason.reasonCode]), [["DATA", PROJECTION_LOADING], ["RUNTIME", PROJECTION_LOADING]],
+      "before Fabric answers, the views are loading, never shown empty");
+    const absent = viewMenu(data({ views: { DATA: pin(session(), POLICY, DATA_VIEW_EMPTY, null), RUNTIME: pin(session(), POLICY, RUNTIME_VIEW_EMPTY, null) } }));
+    assert.deepEqual(absent.more.map(entry => entry.reason.reasonCode), ["NO_OWNED_STATE_DECLARED", "NO_MONITORING_DECLARED"]);
+    assert.match(absent.more[0]!.reason.message, /NO_OPERATIONS_DOCUMENTED: no selected component documents/);
+    const offered = viewMenu(data({ views: { DATA: pin(session(), POLICY, DATA_VIEW, null), RUNTIME: pin(session(), POLICY, RUNTIME_VIEW, null) } }));
+    assert.deepEqual(offered.switcher.map(view => view.id), ["FLOW", "DATA", "TOPOLOGY", "RUNTIME"]);
+    const failed = viewMenu(data({ viewErrors: { DATA: "HTTP 503" } }));
+    assert.equal(failed.more[0]!.reason.reasonCode, VIEW_DATA_UNAVAILABLE);
+    const stale = viewMenu(data({ views: { DATA: pin(session({ sceneRevision: 3 }), POLICY, DATA_VIEW, null) } }));
+    assert.equal(stale.more[0]!.reason.reasonCode, PROJECTION_LOADING, "another revision's data never offers the view");
     const without = viewMenu(data({ projection: undefined, projectionError: "HTTP 503" }));
     assert.deepEqual(without.switcher.map(view => view.id), ["FLOW", "TOPOLOGY"], "always-offered views stay, and explain themselves");
     const flow = without.switcher[0]!.availability(data({ projection: undefined, projectionError: "HTTP 503" }));
@@ -417,6 +460,99 @@ describe("compile records, contract diff and verification (P2a)", () => {
     assert.deepEqual(facts(undefined), []);
     assert.equal(facts(pin(session(), POLICY, VERIFIED))[0]?.value, "verified: signature Ok; catalog clean");
     assert.deepEqual(facts(pin(session({ sceneRevision: 1 }), POLICY, VERIFIED)), [], "an out-of-date verification is left out");
+  });
+});
+
+describe("typed views (P2b)", () => {
+  it("projects Data & State: owners, owned resources and decisions joined by labelled edges, operations as facts", () => {
+    const model = projectData(PROJECTION, DATA_VIEW);
+    assert.deepEqual(model.nodes.map(node => [node.id, node.kind]), [
+      ["flow", "COMPONENT"], ["state:flow:workflow-runs", "OWNED_STATE"], ["decision:flow:run-admission", "OWNED_DECISION"]]);
+    assert.deepEqual(model.edges.map(edge => [edge.kind, edge.label]), [["OWNS_STATE", "CONFIDENTIAL"], ["OWNS_DECISION", "EXCLUSIVE"]]);
+    assert.ok(model.nodes[0]!.facts.some(fact => fact.label === "Operation workflow.execute/start" && fact.source.includes("documentation.operations[0]")));
+    assert.match(model.notes.join(" "), /Data mappings: COMPILE_REQUIRED/);
+  });
+
+  it("draws the ownership matrix with exactly the Table's elements (renderer parity)", () => {
+    const model = projectData(PROJECTION, DATA_VIEW);
+    const props = { model, badges: new Map(), selectedId: "", onSelect: () => undefined };
+    const matrix = renderToString(<OwnershipMatrixRenderer {...props} />);
+    const table = renderToString(<TableRenderer {...props} />);
+    const ids = (html: string) => new Set([...html.matchAll(/data-element-id="([^"]+)"/g)].map(match => match[1]));
+    assert.deepEqual(ids(matrix), ids(table));
+    assert.match(matrix, />CONFIDENTIAL</);
+    assert.match(table, /owned decision/);
+  });
+
+  it("projects Runtime & Telemetry: declared ports as facts, the verification as a note", () => {
+    const model = projectRuntime(PROJECTION, RUNTIME_VIEW);
+    assert.deepEqual(model.nodes.map(node => node.id), ["flow"]);
+    assert.ok(model.nodes[0]!.facts.some(fact => fact.label === "Health endpoints" && fact.value === "/health/live, /health/ready"));
+    assert.ok(model.nodes[0]!.facts.some(fact => fact.label === "Telemetry signals" && fact.value === "LOGS, AUDIT_EVENTS"));
+    assert.match(model.notes.join(" "), /Verification: NOT_SIGNED/);
+  });
+
+  it("adds external owners as boundary nodes and external-protocol offers as facts to Flow & Composition", () => {
+    const model = projectFlow(PROJECTION, FLOW_VIEW);
+    const owner = model.nodes.find(node => node.id === "owner:host");
+    assert.equal(owner?.kind, "EXTERNAL_OWNER");
+    assert.ok(model.edges.some(edge => edge.kind === "NEEDS_OWNER" && edge.from === "flow" && edge.to === "owner:host"));
+    assert.ok(model.nodes.find(node => node.id === "idp")!.facts.some(fact => fact.value === "identity-context over oauth2"));
+    assert.equal(projectFlow(PROJECTION).nodes.some(node => node.kind === "EXTERNAL_OWNER"), false, "without Fabric's data, nothing is added");
+  });
+
+  it("adds transports to Substrate & Topology, or notes why there are none", () => {
+    const withTransports = projectTopology(PROJECTION, data(), TOPOLOGY_VIEW);
+    assert.ok(withTransports.nodes.find(node => node.id === "flow")!.facts.some(fact => fact.label === "Transport" && fact.value.startsWith("IN_PROCESS")));
+    const stale = projectTopology(PROJECTION, data(), { ...TOPOLOGY_VIEW, transports: { available: false, items: [],
+      absentReason: { code: "COMPILE_STALE", message: "compiled at revision 3; the draft is at revision 4" } } });
+    assert.match(stale.notes.join(" "), /Transports: COMPILE_STALE/);
+    assert.ok(!stale.nodes.some(node => node.facts.some(fact => fact.label === "Transport")));
+  });
+
+  it("regression: an answer for a later revision than held is not drawn until the session reaches it", () => {
+    const answered = { ...DATA_VIEW, revision: 5 };
+    const result = pinView(session({ sceneRevision: 4 }), POLICY, "DATA", answered);
+    assert.equal(result.status, "PINNED");
+    if (result.status !== "PINNED") return;
+    assert.equal(result.newerRevision, true, "the session is refreshed to reach the answer");
+    assert.equal(result.pinned.revision, 5, "pinned to the revision Fabric answered for, not the one asked");
+    assert.equal(currentView(data({ session: session({ sceneRevision: 4 }), views: { DATA: result.pinned } }), "DATA"), undefined);
+    assert.ok(currentView(data({ session: session({ sceneRevision: 5 }), views: { DATA: result.pinned } }), "DATA"));
+  });
+
+  it("refuses an answer for another session or view, and pins compile sections to the record Fabric names", () => {
+    const other = pinView(session(), POLICY, "DATA", { ...DATA_VIEW, sessionId: "s-other" });
+    assert.equal(other.status, "REFUSED");
+    assert.match(other.status === "REFUSED" ? other.reason : "", /Fabric answered for session s-other/);
+    assert.equal(pinView(session(), POLICY, "DATA", { ...DATA_VIEW, view: "runtime" }).status, "REFUSED");
+
+    const record = { ...studioApiExampleCompileRecord, revision: 4, contractHash: "b".repeat(64) };
+    const answered = pinView(session({ compileRecords: [record] }), POLICY, "TOPOLOGY", TOPOLOGY_VIEW);
+    assert.equal(answered.status === "PINNED" ? answered.pinned.compileRecord : "", "b".repeat(64));
+    const otherRecord = session({ compileRecords: [{ ...record, contractHash: "c".repeat(64) }] });
+    assert.equal(answered.status === "PINNED" && currentView(data({ session: otherRecord, views: { TOPOLOGY: answered.pinned } }), "TOPOLOGY"),
+      undefined, "an answer about another compile record is not drawn");
+    const flow = pinView(session(), POLICY, "FLOW", FLOW_VIEW);
+    assert.equal(flow.status === "PINNED" && "compileRecord" in flow.pinned, false, "the Flow view reads no compile");
+  });
+
+  it("shows a port member the claim did not write as not declared, never as a default", () => {
+    const model = projectRuntime(PROJECTION, { ...RUNTIME_VIEW,
+      monitoring: section([{ nodeId: "flow", source: "claim.integration_ports.monitoring" }]),
+      telemetry: section([{ nodeId: "flow", source: "claim.integration_ports.telemetry" }]) });
+    const facts = model.nodes[0]!.facts;
+    for (const label of ["Health endpoints", "Readiness check", "Liveness check", "Telemetry signals", "Correlation id"]) {
+      assert.equal(facts.find(fact => fact.label === label)?.value, "not declared", label);
+    }
+  });
+
+  it("regression: view data from before a recompile is not drawn (pinned to the compile record)", () => {
+    const record = { ...studioApiExampleCompileRecord, revision: 4, contractHash: "b".repeat(64) };
+    const pinned = pin(session({ compileRecords: [record] }), POLICY, DATA_VIEW, record.contractHash);
+    const recompiled = session({ compileRecords: [record, { ...record, contractHash: "c".repeat(64) }] });
+    assert.ok(currentView(data({ session: session({ compileRecords: [record] }), views: { DATA: pinned } }), "DATA"));
+    assert.equal(currentView(data({ session: recompiled, views: { DATA: pinned } }), "DATA"), undefined);
   });
 });
 

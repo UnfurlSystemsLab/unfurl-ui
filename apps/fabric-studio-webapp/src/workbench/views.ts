@@ -1,6 +1,7 @@
 import type { StudioRenderer, StudioViewpoint } from "@unfurl/fabric-validation-client";
 import { SUPPORTED_RENDERERS, viewTitle } from "./viewState.js";
-import { describeProjectionInputs, type WorkbenchData } from "./workbenchData.js";
+import type { StudioViewSection, ViewProjectionResponse } from "@unfurl/fabric-validation-client";
+import { currentView, describeProjectionInputs, type WorkbenchData } from "./workbenchData.js";
 
 /** Whether a view or overlay can be shown, and if not, the stable reason code and message (LLD §1 rule 2). */
 export type Availability =
@@ -45,30 +46,59 @@ function projectionAvailability(data: WorkbenchData): Availability {
   return { available: false, reasonCode: PROJECTION_LOADING, message: `Loading Fabric's projection for ${wanted}.${outOfDate}` };
 }
 
-/** A view whose data needs Fabric's P2 endpoints: listed with its reason, never shown empty. */
-function waitsForFabric(what: string): (data: WorkbenchData) => Availability {
-  return () => ({
-    available: false,
-    reasonCode: NOT_YET_PROVIDED_BY_FABRIC,
-    message: `Fabric does not provide ${what} yet; it arrives with Fabric's view endpoint (LLD-fabric-studio-api, Views and Overlays).`
-  });
+/** Reason code of a view whose data request failed for the current inputs. */
+export const VIEW_DATA_UNAVAILABLE = "VIEW_DATA_UNAVAILABLE";
+
+/**
+ * A view offered only when Fabric supplies its data (LLD §3.2, §3.4): available while Fabric's current view projection
+ * has at least one available section; otherwise unavailable with Fabric's own reasons, while loading, or with the
+ * request's error. An out-of-date projection counts as not loaded, so a previous draft's data never offers the view.
+ */
+function viewDataAvailability(view: "DATA" | "RUNTIME",
+  sections: (response: ViewProjectionResponse) => readonly ({ readonly available: boolean; readonly absentReason?: { readonly code: string; readonly message: string } } | undefined)[]):
+  (data: WorkbenchData) => Availability {
+  return data => {
+    if (!data.session) {
+      return { available: false, reasonCode: "NO_DRAFT", message: `${viewTitle(view)} reads the open draft session; start or open a draft.` };
+    }
+    const response = currentView(data, view);
+    if (!response) {
+      const error = data.viewErrors?.[view];
+      return error
+        ? { available: false, reasonCode: VIEW_DATA_UNAVAILABLE, message: `Fabric's ${viewTitle(view)} data could not be loaded: ${error.replace(/\.$/, "")}.` }
+        : { available: false, reasonCode: PROJECTION_LOADING, message: `Loading Fabric's ${viewTitle(view)} data for revision ${data.session.sceneRevision} of session ${data.session.sessionId}.` };
+    }
+    const present = sections(response).filter((section): section is NonNullable<typeof section> => section !== undefined);
+    if (present.some(section => section.available)) return { available: true };
+    const reasons = present.map(section => section.absentReason).filter(reason => reason !== undefined);
+    return {
+      available: false,
+      reasonCode: reasons[0]?.code ?? "NO_VIEW_DATA",
+      message: reasons.length > 0 ? reasons.map(reason => `${reason.code}: ${reason.message}`).join("; ") : `Fabric supplied no ${viewTitle(view)} data.`
+    };
+  };
+}
+
+/** The sections a view projection carries, in display order. */
+export function dataSections(response: ViewProjectionResponse): readonly (StudioViewSection<unknown> | undefined)[] {
+  return [response.ownedState, response.ownedDecisions, response.operations, response.dataMappings];
 }
 
 /**
  * Registry: the four views, in switcher order. Flow & Composition and Substrate & Topology are always offered (§3.1,
- * §3.3); Data & State and Runtime & Telemetry are offered only when Fabric supplies their data (§3.2, §3.4), which in P1
- * it does not, so they are listed under "More views" with that reason.
+ * §3.3); Data & State and Runtime & Telemetry are offered only when Fabric's view projection has data for them (§3.2,
+ * §3.4), and are otherwise listed under "More views" with Fabric's reasons.
  */
 export const VIEW_REGISTRY: readonly ViewDefinition[] = [
   { id: "FLOW", title: viewTitle("FLOW"), alwaysOffered: true, renderers: SUPPORTED_RENDERERS.FLOW, availability: projectionAvailability },
   {
     id: "DATA", title: viewTitle("DATA"), alwaysOffered: false, renderers: SUPPORTED_RENDERERS.DATA,
-    availability: waitsForFabric("owned state, owned decisions, data mappings or operation schemas")
+    availability: viewDataAvailability("DATA", dataSections)
   },
   { id: "TOPOLOGY", title: viewTitle("TOPOLOGY"), alwaysOffered: true, renderers: SUPPORTED_RENDERERS.TOPOLOGY, availability: projectionAvailability },
   {
     id: "RUNTIME", title: viewTitle("RUNTIME"), alwaysOffered: false, renderers: SUPPORTED_RENDERERS.RUNTIME,
-    availability: waitsForFabric("declared monitoring, telemetry or a verification result")
+    availability: viewDataAvailability("RUNTIME", response => [response.monitoring, response.telemetry, response.verification])
   }
 ];
 

@@ -5,7 +5,9 @@ import {
   type AuthoringProposal,
   type CompileDraftCandidateResponse,
   type ContractDiffResponse,
+  type StudioViewpoint,
   type VerifyContractResponse,
+  type ViewProjectionResponse,
   type DeploymentPolicyDraft,
   type DeploymentShape,
   type ResolveDeploymentResponse,
@@ -60,6 +62,9 @@ import {
   currentCompileRecord,
   failedProjectionLoad,
   pin,
+  pinView,
+  policyKey,
+  VIEW_ROUTE_IDS,
   projectionFor,
   projectionInputsFor,
   type InputsPinned,
@@ -74,7 +79,7 @@ export type WorkbenchClient = Pick<
   | "loadDynamicDcpProjection" | "loadReplacementCandidates" | "loadConnectionCandidates" | "listCatalogVisuals"
   | "listStudioFiles" | "listSessionHistory" | "createDraftComposition" | "applyIntent" | "getDraftSession"
   | "compileCandidate" | "resolveDeployment" | "converseAuthoring" | "heartbeatCollaborator" | "sessionEventsUrl"
-  | "listAssemblies" | "loadContractDiff" | "verifyContract"
+  | "listAssemblies" | "loadContractDiff" | "verifyContract" | "loadView"
 >;
 
 /** The hover preview of a catalog entry: what it could connect to or replace, from Fabric. */
@@ -137,6 +142,8 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
   const [compileResult, setCompileResult] = useState<InputsPinned<CompileDraftCandidateResponse> | undefined>();
   const [contractDiff, setContractDiff] = useState<InputsPinned<ContractDiffResponse> | undefined>();
   const [verification, setVerification] = useState<InputsPinned<VerifyContractResponse> | undefined>();
+  const [views, setViews] = useState<Partial<Record<StudioViewpoint, InputsPinned<ViewProjectionResponse>>>>({});
+  const [viewErrors, setViewErrors] = useState<Partial<Record<StudioViewpoint, string>>>({});
   const [sign, setSign] = useState(false);
   const [assembly, setAssembly] = useState<StudioAssemblySummary | undefined>();
   const [syncError, setSyncError] = useState<string | undefined>();
@@ -154,6 +161,47 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
   const projectionView = projectionFor(projectionLoad, currentProjectionInputs);
   const projection = projectionView.projection;
   const displayProjection = useMemo(() => filterProjectionForDraftDisplay(projection, draftComponents), [projection, draftComponents]);
+
+  // Views: every view's typed data for the current session, revision, policy and compile record (LLD-fabric-studio-api,
+  // StudioViewProjection). All four are loaded, because Data & State and Runtime & Telemetry are offered only when their
+  // data exists (LLD §3.2, §3.4). Each answer is pinned to the inputs it was asked with, so a stale one is never drawn
+  // and a recompile or an edit asks again (§4.3 rule 6). A failed request pins nothing and is named per view.
+  const viewSessionKey = readySession ? `${readySession.sessionId}@${readySession.sceneRevision}` : "";
+  const viewRecordKey = readySession ? currentCompileRecord(readySession) : null;
+  const viewPolicyKey = policyKey(deploymentPolicy);
+  useEffect(() => {
+    const session = readySession;
+    if (!session || !client.loadView) return;
+    let cancelled = false;
+    const policy = deploymentPolicy;
+    for (const view of Object.keys(VIEW_ROUTE_IDS) as StudioViewpoint[]) {
+      void client.loadView({ tenantId: session.tenantId, assemblyId: session.assemblyId, sessionId: session.sessionId,
+        view: VIEW_ROUTE_IDS[view], deploymentPolicy: policy })
+        .then(response => {
+          if (cancelled) return;
+          // Pinned to what Fabric answered, not to what was asked (§4.3 rule 6): an answer for a later revision is held
+          // back until the session reaches it, and the session is refreshed now to get there.
+          const result = pinView(session, policy, view, response);
+          if (result.status === "REFUSED") {
+            setViewErrors(current => ({ ...current, [view]: result.reason }));
+            return;
+          }
+          setViews(current => ({ ...current, [view]: result.pinned }));
+          setViewErrors(current => { const { [view]: _cleared, ...rest } = current; return rest; });
+          if (result.newerRevision) {
+            void client.getDraftSession({ tenantId: session.tenantId, assemblyId: session.assemblyId, sessionId: session.sessionId })
+              .then(next => {
+                if (!cancelled) setState(current => current?.status === "READY" ? { ...current, session: reconcileSession(current.session, next) } : current);
+              })
+              .catch(() => { /* the session watcher keeps refreshing; the held answer stays undrawn until it matches */ });
+          }
+        })
+        .catch(error => { if (!cancelled) setViewErrors(current => ({ ...current, [view]: message(error) })); });
+    }
+    return () => { cancelled = true; };
+    // The keys name exactly the inputs a view depends on; the objects themselves change identity on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, viewSessionKey, viewRecordKey, viewPolicyKey]);
 
   // Catalog: the tenant's catalog files and the selected file's visual entries.
   useEffect(() => {
@@ -290,6 +338,8 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
 
   /** Forgets every compile and resolution result, when the open session is replaced (§4.3 rule 6). */
   function clearDerivedResults() {
+    setViews({});
+    setViewErrors({});
     setCompileResult(undefined);
     setContractDiff(undefined);
     setVerification(undefined);
@@ -577,6 +627,8 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
     ...(compileResult ? { compile: compileResult } : {}),
     ...(contractDiff ? { contractDiff } : {}),
     ...(verification ? { verification } : {}),
+    views,
+    viewErrors,
     ...(deployment ? { deployment } : {}),
     ...(deploymentError ? { deploymentError } : {}),
     deploymentPolicy,

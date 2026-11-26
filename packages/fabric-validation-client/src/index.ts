@@ -780,6 +780,90 @@ export type ContractDiffResponse = {
   readonly diagnosticArtifacts: readonly StudioExportArtifact[];
 };
 
+/** A view's id on Fabric's route (LLD-fabric-studio-api, StudioViewProjection). */
+export type StudioViewId = "flow" | "data" | "topology" | "runtime";
+
+/**
+ * One section of a view projection: Fabric's items, or why there are none. `items` is non-empty exactly when
+ * `available` is true; a section with nothing to show is never an empty list.
+ */
+export type StudioViewSection<T> = {
+  readonly available: boolean;
+  readonly absentReason?: StudioAbsentReason;
+  /** The compile record a compile-derived section was read from. */
+  readonly provenance?: StudioCompileProvenance;
+  readonly items: readonly T[];
+};
+
+/** Every view item names the DCP field it was read from. */
+type Sourced = { readonly source: string };
+
+export type StudioExternalOwner = Sourced & {
+  readonly boundaryNodeId: string; readonly owner: string; readonly dependency: string; readonly neededByNodeId: string;
+};
+export type StudioExternalProtocolOffer = Sourced & { readonly nodeId: string; readonly capability: string; readonly protocol: string };
+export type StudioOwnedState = Sourced & {
+  readonly nodeId: string; readonly concern: string; readonly resource: string; readonly description: string; readonly sensitivity: string;
+};
+export type StudioOwnedDecision = Sourced & {
+  readonly nodeId: string; readonly concern: string; readonly decision: string; readonly description: string; readonly authority: string;
+};
+export type StudioArtifactRef = { readonly path: string; readonly mediaType: string; readonly sha256: string };
+export type StudioOperation = Sourced & {
+  readonly nodeId: string; readonly capability: string; readonly operation: string; readonly summary?: string;
+  readonly requestSchema: StudioArtifactRef; readonly responseSchema: StudioArtifactRef;
+};
+export type StudioDataMapping = Sourced & {
+  readonly childContractId: string; readonly providerNodeId?: string;
+  readonly inbound: Readonly<Record<string, string>>; readonly outbound: Readonly<Record<string, string>>;
+};
+export type StudioTransport = Sourced & {
+  readonly childContractId: string; readonly providerNodeId?: string; readonly kind: string;
+  readonly details: Readonly<Record<string, unknown>>;
+};
+/**
+ * A declared monitoring or telemetry port as DCP holds it (HLD-C2 A.9). A member the claim did not write is absent,
+ * never defaulted; a valid claim writes every member A.9 requires, and `healthEndpoints` is optional.
+ */
+export type StudioMonitoring = Sourced & {
+  readonly nodeId: string; readonly required?: boolean; readonly healthEndpoints?: readonly string[];
+  readonly readinessRequired?: boolean; readonly livenessRequired?: boolean; readonly notes?: string;
+};
+export type StudioTelemetry = Sourced & {
+  readonly nodeId: string; readonly required?: boolean; readonly signals?: readonly string[];
+  readonly correlationIdRequired?: boolean; readonly notes?: string;
+};
+
+/** `GET .../views/{view}?sessionId`: only the requested view's sections are present. */
+export type ViewProjectionRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly sessionId: string;
+  readonly view: StudioViewId;
+  /** The policy Studio would compile with now; Fabric hashes it, Studio never does. */
+  readonly deploymentPolicy?: DeploymentPolicyDraft;
+};
+
+export type ViewProjectionResponse = {
+  readonly view: StudioViewId;
+  readonly tenantId: string;
+  readonly assemblyId: string;
+  readonly sessionId: string;
+  readonly revision: number;
+  readonly externalOwners?: StudioViewSection<StudioExternalOwner>;
+  readonly externalProtocolOffers?: StudioViewSection<StudioExternalProtocolOffer>;
+  readonly ownedState?: StudioViewSection<StudioOwnedState>;
+  readonly ownedDecisions?: StudioViewSection<StudioOwnedDecision>;
+  readonly operations?: StudioViewSection<StudioOperation>;
+  readonly dataMappings?: StudioViewSection<StudioDataMapping>;
+  readonly transports?: StudioViewSection<StudioTransport>;
+  readonly monitoring?: StudioViewSection<StudioMonitoring>;
+  readonly telemetry?: StudioViewSection<StudioTelemetry>;
+  readonly verification?: VerifyContractResponse;
+  readonly diagnostics: readonly StudioDcpDiagnostic[];
+  readonly diagnosticArtifacts: readonly StudioExportArtifact[];
+};
+
 /** `POST .../sessions/{sessionId}/verify`: the current record by default, or a past one by revision or contract hash. */
 export type VerifyContractRequest = {
   readonly tenantId?: string;
@@ -930,6 +1014,8 @@ export interface StudioFabricClient {
   readonly loadContractDiff?: (request: ContractDiffRequest) => Promise<ContractDiffResponse>;
   /** Verifies a compile record's signed envelope with Fabric's configured trust keys. */
   readonly verifyContract?: (request: VerifyContractRequest) => Promise<VerifyContractResponse>;
+  /** One workbench view's typed data (LLD-fabric-studio-api, StudioViewProjection). */
+  readonly loadView?: (request: ViewProjectionRequest) => Promise<ViewProjectionResponse>;
   readonly getVisualAsset: (assetId: string) => Promise<StudioVisualAsset>;
 }
 
