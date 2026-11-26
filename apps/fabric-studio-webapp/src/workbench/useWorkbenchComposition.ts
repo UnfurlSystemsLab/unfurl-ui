@@ -5,6 +5,8 @@ import {
   type AuthoringProposal,
   type CompileDraftCandidateResponse,
   type ContractDiffResponse,
+  type OverlayAnnotationsResponse,
+  type StudioOverlay,
   type StudioViewpoint,
   type VerifyContractResponse,
   type ViewProjectionResponse,
@@ -61,7 +63,9 @@ import {
 import {
   currentCompileRecord,
   failedProjectionLoad,
+  OVERLAY_ROUTE_IDS,
   pin,
+  pinOverlay,
   pinView,
   policyKey,
   VIEW_ROUTE_IDS,
@@ -79,7 +83,7 @@ export type WorkbenchClient = Pick<
   | "loadDynamicDcpProjection" | "loadReplacementCandidates" | "loadConnectionCandidates" | "listCatalogVisuals"
   | "listStudioFiles" | "listSessionHistory" | "createDraftComposition" | "applyIntent" | "getDraftSession"
   | "compileCandidate" | "resolveDeployment" | "converseAuthoring" | "heartbeatCollaborator" | "sessionEventsUrl"
-  | "listAssemblies" | "loadContractDiff" | "verifyContract" | "loadView"
+  | "listAssemblies" | "loadContractDiff" | "verifyContract" | "loadView" | "loadOverlay"
 >;
 
 /** The hover preview of a catalog entry: what it could connect to or replace, from Fabric. */
@@ -103,6 +107,8 @@ export type WorkbenchCompositionOptions = {
   readonly onSelect: (selection: ThreeAssemblySelection) => void;
   /** Start the planner allowing every shape (`policy=all-shapes`, kept from the retired planner route). */
   readonly allShapesPolicy?: boolean;
+  /** The view the workbench shows; Fabric's overlays are asked for it. */
+  readonly activeView?: StudioViewpoint;
 };
 
 /**
@@ -144,6 +150,8 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
   const [verification, setVerification] = useState<InputsPinned<VerifyContractResponse> | undefined>();
   const [views, setViews] = useState<Partial<Record<StudioViewpoint, InputsPinned<ViewProjectionResponse>>>>({});
   const [viewErrors, setViewErrors] = useState<Partial<Record<StudioViewpoint, string>>>({});
+  const [overlays, setOverlays] = useState<Partial<Record<StudioOverlay, InputsPinned<OverlayAnnotationsResponse>>>>({});
+  const [overlayErrors, setOverlayErrors] = useState<Partial<Record<StudioOverlay, string>>>({});
   const [sign, setSign] = useState(false);
   const [assembly, setAssembly] = useState<StudioAssemblySummary | undefined>();
   const [syncError, setSyncError] = useState<string | undefined>();
@@ -202,6 +210,41 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
     // The keys name exactly the inputs a view depends on; the objects themselves change identity on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, viewSessionKey, viewRecordKey, viewPolicyKey]);
+
+  // Overlays: Fabric's Security, Performance and Compliance answers for the active view and the current inputs
+  // (LLD-fabric-studio-api, StudioOverlayAnnotations), pinned to what each answer describes (§4.3 rule 6), like views.
+  const overlayView = VIEW_ROUTE_IDS[options.activeView ?? "FLOW"];
+  useEffect(() => {
+    const session = readySession;
+    if (!session || !client.loadOverlay) return;
+    let cancelled = false;
+    const policy = deploymentPolicy;
+    for (const overlay of Object.keys(OVERLAY_ROUTE_IDS) as StudioOverlay[]) {
+      void client.loadOverlay({ tenantId: session.tenantId, assemblyId: session.assemblyId, sessionId: session.sessionId,
+        overlay: OVERLAY_ROUTE_IDS[overlay]!, view: overlayView, deploymentPolicy: policy })
+        .then(response => {
+          if (cancelled) return;
+          const result = pinOverlay(session, policy, overlay, response);
+          if (result.status === "REFUSED") {
+            setOverlayErrors(current => ({ ...current, [overlay]: result.reason }));
+            return;
+          }
+          setOverlays(current => ({ ...current, [overlay]: result.pinned }));
+          setOverlayErrors(current => { const { [overlay]: _cleared, ...rest } = current; return rest; });
+          if (result.newerRevision) {
+            void client.getDraftSession({ tenantId: session.tenantId, assemblyId: session.assemblyId, sessionId: session.sessionId })
+              .then(next => {
+                if (!cancelled) setState(current => current?.status === "READY" ? { ...current, session: reconcileSession(current.session, next) } : current);
+              })
+              .catch(() => { /* the session watcher keeps refreshing; the held answer stays undrawn until it matches */ });
+          }
+        })
+        .catch(error => { if (!cancelled) setOverlayErrors(current => ({ ...current, [overlay]: message(error) })); });
+    }
+    return () => { cancelled = true; };
+    // The keys name exactly the inputs an overlay depends on; the objects themselves change identity on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, viewSessionKey, viewRecordKey, viewPolicyKey, overlayView]);
 
   // Catalog: the tenant's catalog files and the selected file's visual entries.
   useEffect(() => {
@@ -340,6 +383,8 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
   function clearDerivedResults() {
     setViews({});
     setViewErrors({});
+    setOverlays({});
+    setOverlayErrors({});
     setCompileResult(undefined);
     setContractDiff(undefined);
     setVerification(undefined);
@@ -629,6 +674,8 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
     ...(verification ? { verification } : {}),
     views,
     viewErrors,
+    overlays,
+    overlayErrors,
     ...(deployment ? { deployment } : {}),
     ...(deploymentError ? { deploymentError } : {}),
     deploymentPolicy,

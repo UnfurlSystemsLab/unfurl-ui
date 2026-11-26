@@ -7,6 +7,8 @@ import type {
   VerifyContractResponse,
   ViewProjectionRequest,
   ViewProjectionResponse,
+  OverlayAnnotationsRequest,
+  OverlayAnnotationsResponse,
   AuthoringConverseRequest,
   AuthoringConverseResponse,
   CreateDraftCompositionRequest,
@@ -431,6 +433,22 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         baseUrl,
         "GET",
         `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/contract-diff${query}`,
+        undefined,
+        tenantHeaders(scope.tenantId, authContext)
+      );
+    },
+    loadOverlay: async (body: OverlayAnnotationsRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      const query = queryString({
+        sessionId: body.sessionId,
+        view: body.view,
+        deploymentPolicy: body.deploymentPolicy === undefined ? undefined : JSON.stringify(body.deploymentPolicy)
+      });
+      return request<OverlayAnnotationsResponse>(
+        guardedFetch,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/overlays/${encodeURIComponent(body.overlay)}${query}`,
         undefined,
         tenantHeaders(scope.tenantId, authContext)
       );

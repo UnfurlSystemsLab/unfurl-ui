@@ -28,7 +28,9 @@ import type {
   ContractDiffResponse,
   VerifyContractResponse,
   StudioViewId,
-  ViewProjectionResponse
+  ViewProjectionResponse,
+  StudioOverlayId,
+  OverlayAnnotationsResponse
 } from "./index.js";
 import { DEFAULT_STUDIO_ASSEMBLY_ID, DEFAULT_STUDIO_TENANT_ID } from "./httpClient.js";
 
@@ -53,6 +55,8 @@ export type MockStudioApiFixtures = {
   readonly verifyResponse?: VerifyContractResponse;
   /** Fixture view projections by view id; a view without one answers with every section unavailable. */
   readonly viewResponses?: Partial<Record<StudioViewId, ViewProjectionResponse>>;
+  /** Fixture overlay answers by overlay id; an overlay without one answers unavailable with a fixture reason. */
+  readonly overlayResponses?: Partial<Record<StudioOverlayId, OverlayAnnotationsResponse>>;
   readonly asset?: StudioVisualAsset;
   readonly files?: readonly StudioFileRecord[];
   readonly sessionHistory?: readonly StudioSessionHistoryItem[];
@@ -684,6 +688,16 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     }
     if (method === "POST" && path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/verify`)) {
       return ok(fixtures.verifyResponse ?? studioApiExampleVerifyResponse);
+    }
+    const overlayPrefix = `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/overlays/`;
+    if (method === "GET" && path.startsWith(overlayPrefix)) {
+      const overlay = decodeURIComponent(path.slice(overlayPrefix.length)) as StudioOverlayId;
+      return ok(fixtures.overlayResponses?.[overlay] ?? {
+        overlay, view: (url.searchParams.get("view") ?? "flow") as StudioViewId, tenantId: session.tenantId, assemblyId: session.assemblyId,
+        sessionId: session.sessionId, revision: session.sceneRevision, available: false,
+        absentReason: { code: "FIXTURE_NO_DATA", message: "the fixture supplies no data for this overlay" },
+        annotations: [], findings: [], staleSources: [], diagnostics: [], diagnosticArtifacts: []
+      });
     }
     const viewPrefix = `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/views/`;
     if (method === "GET" && path.startsWith(viewPrefix)) {

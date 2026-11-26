@@ -864,6 +864,72 @@ export type ViewProjectionResponse = {
   readonly diagnosticArtifacts: readonly StudioExportArtifact[];
 };
 
+/** An overlay's id on Fabric's route (LLD-fabric-studio-api, StudioOverlayAnnotations); resilience arrives in P2e. */
+export type StudioOverlayId = "security" | "performance" | "compliance";
+
+/** An overlay annotation on one `/dynamic-dcp` node; provenance is present exactly on compile-derived ones. */
+export type StudioOverlayAnnotation = {
+  readonly elementId: string;
+  readonly elementKind: "NODE";
+  readonly kind: string;
+  readonly severity: "INFO" | "WARNING" | "ERROR";
+  readonly label: string;
+  readonly detail: string;
+  readonly source: string;
+  readonly sourceRevision?: number;
+  readonly contractHash?: string;
+};
+
+/** An overlay-level fact that belongs to no element, such as the decision audit. */
+export type StudioOverlayFinding = {
+  readonly label: string;
+  readonly value: string;
+  readonly source: string;
+  readonly sourceRevision?: number;
+  readonly contractHash?: string;
+};
+
+/** A compile-derived source the overlay left out because the record is not current or consistent. */
+export type StudioOverlayStaleSource = {
+  readonly source: string;
+  readonly sourceRevision?: number;
+  readonly contractHash?: string;
+  readonly reason: StudioAbsentReason;
+};
+
+/** `GET .../overlays/{overlay}?sessionId&view`. */
+export type OverlayAnnotationsRequest = {
+  readonly tenantId?: string;
+  readonly assemblyId?: string;
+  readonly sessionId: string;
+  readonly overlay: StudioOverlayId;
+  readonly view: StudioViewId;
+  /** The policy Studio would compile with now; Fabric hashes it, Studio never does. */
+  readonly deploymentPolicy?: DeploymentPolicyDraft;
+};
+
+/** An overlay's answer: available exactly when it has annotations or findings; otherwise `absentReason` says why. */
+export type OverlayAnnotationsResponse = {
+  readonly overlay: StudioOverlayId;
+  readonly view: StudioViewId;
+  readonly tenantId: string;
+  readonly assemblyId: string;
+  readonly sessionId: string;
+  readonly revision: number;
+  /**
+   * The compile record Fabric read, for an overlay that reads the compile (performance, compliance) when the session
+   * has one, current or not, even when nothing came of it; never set for security, which reads claims only.
+   */
+  readonly provenance?: StudioCompileProvenance;
+  readonly available: boolean;
+  readonly absentReason?: StudioAbsentReason;
+  readonly annotations: readonly StudioOverlayAnnotation[];
+  readonly findings: readonly StudioOverlayFinding[];
+  readonly staleSources: readonly StudioOverlayStaleSource[];
+  readonly diagnostics: readonly StudioDcpDiagnostic[];
+  readonly diagnosticArtifacts: readonly StudioExportArtifact[];
+};
+
 /** `POST .../sessions/{sessionId}/verify`: the current record by default, or a past one by revision or contract hash. */
 export type VerifyContractRequest = {
   readonly tenantId?: string;
@@ -1016,6 +1082,8 @@ export interface StudioFabricClient {
   readonly verifyContract?: (request: VerifyContractRequest) => Promise<VerifyContractResponse>;
   /** One workbench view's typed data (LLD-fabric-studio-api, StudioViewProjection). */
   readonly loadView?: (request: ViewProjectionRequest) => Promise<ViewProjectionResponse>;
+  /** One perspective overlay's annotations and findings (LLD-fabric-studio-api, StudioOverlayAnnotations). */
+  readonly loadOverlay?: (request: OverlayAnnotationsRequest) => Promise<OverlayAnnotationsResponse>;
   readonly getVisualAsset: (assetId: string) => Promise<StudioVisualAsset>;
 }
 
