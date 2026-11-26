@@ -26,7 +26,9 @@ import type {
   StudioSessionHistoryItem,
   StudioCompileRecord,
   ContractDiffResponse,
-  VerifyContractResponse
+  VerifyContractResponse,
+  StudioViewId,
+  ViewProjectionResponse
 } from "./index.js";
 import { DEFAULT_STUDIO_ASSEMBLY_ID, DEFAULT_STUDIO_TENANT_ID } from "./httpClient.js";
 
@@ -49,6 +51,8 @@ export type MockStudioApiFixtures = {
   readonly resolveDeploymentResponse?: ResolveDeploymentResponse;
   readonly contractDiffResponse?: ContractDiffResponse;
   readonly verifyResponse?: VerifyContractResponse;
+  /** Fixture view projections by view id; a view without one answers with every section unavailable. */
+  readonly viewResponses?: Partial<Record<StudioViewId, ViewProjectionResponse>>;
   readonly asset?: StudioVisualAsset;
   readonly files?: readonly StudioFileRecord[];
   readonly sessionHistory?: readonly StudioSessionHistoryItem[];
@@ -681,6 +685,11 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     if (method === "POST" && path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/verify`)) {
       return ok(fixtures.verifyResponse ?? studioApiExampleVerifyResponse);
     }
+    const viewPrefix = `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/views/`;
+    if (method === "GET" && path.startsWith(viewPrefix)) {
+      const view = decodeURIComponent(path.slice(viewPrefix.length)) as StudioViewId;
+      return ok(fixtures.viewResponses?.[view] ?? emptyViewProjection(session, view));
+    }
     if (method === "POST" && path === "/studio/deployment/resolve") {
       return ok(fixtures.resolveDeploymentResponse ?? studioApiExampleResolveDeploymentResponse);
     }
@@ -693,6 +702,26 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
       statusText: "Not Found",
       json: async () => ({})
     };
+  };
+}
+
+/**
+ * The fixture answer for a view with no fixture: every section of that view unavailable with a fixture reason, so an
+ * offline preview never shows invented data.
+ */
+function emptyViewProjection(session: StudioDraftSession, view: StudioViewId): ViewProjectionResponse {
+  const absent = { available: false, absentReason: { code: "FIXTURE_NO_DATA", message: "the fixture supplies no data for this view" }, items: [] };
+  const sections: Record<StudioViewId, readonly string[]> = {
+    flow: ["externalOwners", "externalProtocolOffers"],
+    data: ["ownedState", "ownedDecisions", "operations", "dataMappings"],
+    topology: ["transports"],
+    runtime: ["monitoring", "telemetry"]
+  };
+  return {
+    view, tenantId: session.tenantId, assemblyId: session.assemblyId, sessionId: session.sessionId, revision: session.sceneRevision,
+    ...Object.fromEntries(sections[view].map(name => [name, absent])),
+    ...(view === "runtime" ? { verification: studioApiExampleVerifyResponse } : {}),
+    diagnostics: [], diagnosticArtifacts: []
   };
 }
 

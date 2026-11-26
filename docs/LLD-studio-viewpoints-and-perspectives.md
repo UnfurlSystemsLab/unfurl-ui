@@ -2,7 +2,9 @@
 
 **Status:** P1 implemented (`apps/fabric-studio-webapp/src/workbench/`, Fabric's layout extension and permissive
 trust policy warning). P2a implemented: compile records, contract diff and verification in the compile panel, typed
-guided-fix cards, and the verification in Security & Trust (§10). The rest of P2, and P3 and Later, are designed. This document is the source of truth for how the Studio workbench
+guided-fix cards, and the verification in Security & Trust (§10). P2b implemented: Data & State, Runtime & Telemetry,
+external owners and `external_protocol` offers in Flow & Composition, and transports in Substrate & Topology, all from
+Fabric's `views/*` (§10). The rest of P2, and P3 and Later, are designed. This document is the source of truth for how the Studio workbench
 is organised. `LLD-unfurl-studio-visual-composition.md` §19A summarises it, and the Fabric endpoints it depends on are
 specified in `unfurl-fabric/docs/LLD-fabric-studio-api.md` ("Views and Overlays").
 
@@ -59,8 +61,8 @@ and overlay endpoints. **P3** means it needs DCP schema work first (register in 
 | Needs-to-offers wiring with per-connection status and reason | `/dynamic-dcp` `connections` | P1 |
 | Refusals as capped ports (VC §8) | visual manifest ports of kind `REFUSAL` | P1 |
 | Replacement candidates (ALLOWED / BLOCKED plus reason) | `/dynamic-dcp/replacements` | P1 |
-| External owners as boundary nodes: dependencies qualified `owner=host`, `owner=fabric`, `owner=customer-controlled` or a concrete customer owner such as `owner=customer-idp` | claim `dependencies` strings (`unfurl-fabric/docs/HLD-unfurl-fabric.md` Core Flow step 3). These arrive today only inside `rawNeeds`, and Fabric excludes them from `connections` by design | P2: Fabric types the owner qualifier. Studio does not parse dependency strings. |
-| Offers reached over the provider's own protocol (`interface.kind: external_protocol`) | DCP HLD-C2 A.6 | P2 |
+| External owners as boundary nodes: dependencies qualified `owner=host`, `owner=fabric`, `owner=customer-controlled` or a concrete customer owner such as `owner=customer-idp` | Fabric `views/flow` `externalOwners` (DCP `Dependencies.ownerOf` over claim `dependencies`); one boundary node per owner, joined to each component needing it | P2b. Studio does not parse dependency strings. |
+| Offers reached over the provider's own protocol (`interface.kind: external_protocol`) | Fabric `views/flow` `externalProtocolOffers` (DCP HLD-C2 A.6), as a fact on the provider | P2b |
 
 This view replaces today's Assembly, Exploded and Ports tabs. The context content is shown at the boundary of the
 same canvas rather than in a separate context diagram. That keeps one picture of the system, which is the main reason
@@ -70,20 +72,22 @@ for merging the two book viewpoints.
 
 *Rozanski and Woods:* Information.
 
-**Offered when** at least one selected claim declares `domain.concerns[].owns_state` or `owns_decisions`, or the emit
-plan preview declares a state store or named volume. The preview can do that only after the `EmitManifest` gap in
-HLD-E §3 is closed.
+**Offered when** Fabric's `views/data` has at least one available section: a selected claim declares
+`domain.concerns[].owns_state` or `owns_decisions`, or documents its operations, or the current compile has a data
+mapping. Otherwise the view is under "More views" with Fabric's reasons. Later the emit plan preview's state store or
+named volumes will count too, once the `EmitManifest` gap in HLD-E §3 is closed.
 
 | Content | Source | Status |
 |---|---|---|
-| Owned state per concern, by `sensitivity` (`public`, `internal`, `confidential`, `secret`) | DCP HLD-C2 A.3.2 (`owns_state`) | P2 |
-| Owned decisions by `authority` (`exclusive`, `consulted`, `advisory`) | DCP HLD-C2 A.3.3 | P2 |
-| Contract `data_mapping` (inbound and outbound) | DCP HLD-C2 §B | P2 |
-| Operation request and response schemas | claim `documentation.operations[]`, `api_documents` (DCP HLD-C2 A.13) | P2 |
+| Owned state per concern, by `sensitivity` (`public`, `internal`, `confidential`, `secret`) | DCP HLD-C2 A.3.2 (`owns_state`), through `views/data` | P2b |
+| Owned decisions by `authority` (`exclusive`, `consulted`, `advisory`) | DCP HLD-C2 A.3.3, through `views/data` | P2b |
+| Contract `data_mapping` (inbound and outbound) | DCP HLD-C2 §B, from the current compile record through `views/data` | P2b |
+| Operation request and response schemas | claim `documentation.operations[]` through `views/data` | P2b; `api_documents` (DCP HLD-C2 A.13) are not projected yet |
 | Runtime state store mode (for example `stateStore: IN_MEMORY`) and named volumes (for example `foundry-state`) | emit plan preview, once `EmitManifest` declares them (HLD-E §3, "Gap: deployment facts the manifest does not declare") | P2, after that emitter change |
 
-**Rendering:** an ownership matrix (components × owned resources, cells marked with sensitivity and authority) plus a
-table. There is no 3D renderer.
+**Rendering:** the 2D renderer is an ownership matrix (components × owned resources and decisions, cells marked with
+sensitivity and authority, `OwnershipMatrixRenderer`), and the Table lists the same elements and ownership edges.
+Documented operations and data mappings are facts on their component. There is no 3D renderer.
 
 **Not shown, because DCP carries no such data:** retention periods, PII flows, data residency. These remain absent until
 the DCP schema carries them (DCP HLD-C2 §I.1).
@@ -100,7 +104,8 @@ the DCP schema carries them (DCP HLD-C2 §I.1).
 | Deployment target (for example `local` → `local-compose`, `k8s-dev` → `k8s`) | deployment policy; emit target | P1 for the chosen target, P2 for the emitted plan |
 | Emit plan preview: emitted artifacts, and **secret requests by name, bound component and store hint only, never a value** (for example `UNFURL_FOUNDRY_CREDENTIAL_KEY`, bound to `foundry`, store hint `local-compose-env`) | `EmitManifest` and `SecretRequest` (HLD-E §3, §5.3) | P2 |
 | Named volumes, published ports, `substrateProfileMode` (`STRICT` vs `LEGACY_OPEN_WORLD`) | emit plan preview, once `EmitManifest` declares them (HLD-E §3 gap) | P2, after that emitter change |
-| Contract transport kind (`in_process`, `http_json`, `grpc`) and runtime bindings (target environment, deployment kind) | DCP HLD-C2 §B `transport`, §C | P2 |
+| Contract transport kind (`in_process`, `http_json`, `grpc`) | DCP HLD-C2 §B `transport`, from the current compile record through `views/topology`, as a fact on the provider | P2b |
+| Runtime bindings (target environment, deployment kind) | DCP HLD-C2 §C, generated with the emit plan | P2d |
 | Concurrency semantics (single instance vs horizontally scalable, ordering, delivery) as badges on components | not yet in DCP | P3 |
 | Resource budgets (memory, CPU, worker pools) for embedded and high-load targets | not yet in DCP (quantities and units) | P3 |
 
@@ -114,14 +119,15 @@ nothing about concurrency is drawn.
 
 *Rozanski and Woods:* Operational, limited to design time and pre-release.
 
-**Offered when** a selected claim declares `integration_ports.monitoring` or `integration_ports.telemetry`, or a
-verification result exists for the current contract.
+**Offered when** Fabric's `views/runtime` has at least one available section: a selected claim declares
+`integration_ports.monitoring` or `integration_ports.telemetry` (typed in DCP HLD-C2 A.9), or a verification result
+exists for the current contract.
 
 | Content | Source | Status |
 |---|---|---|
-| Declared health, readiness and liveness endpoints | `integration_ports.monitoring` (DCP HLD-C2 A.9) | P2 |
-| Declared telemetry signals (logs, metrics, traces, audit events) and whether a correlation ID is required | `integration_ports.telemetry` (DCP HLD-C2 A.9) | P2 |
-| Signed-contract verification result (signature, catalog drift, trust keys) | Fabric verification endpoint, reusing `com.unfurl.fabric.verify` (today CLI-only) | P2 |
+| Declared health, readiness and liveness endpoints | `integration_ports.monitoring` (DCP HLD-C2 A.9) through `views/runtime` | P2b |
+| Declared telemetry signals (logs, metrics, traces, audit events) and whether a correlation ID is required | `integration_ports.telemetry` (DCP HLD-C2 A.9) through `views/runtime` | P2b |
+| Signed-contract verification result (signature, catalog drift, trust keys) | Fabric `verify` (P2a), carried by `views/runtime` | P2b |
 | Verification evidence from a *test deployment* (trace-derived bottlenecks, load results) | separate design (performance verification; not yet written) | Later |
 
 Live production monitoring is not part of Studio. VC §17 reserves runtime operations for Cockpit. Telemetry shown here
@@ -236,6 +242,12 @@ domain overlay (§4.4).
      revision too, signed or not, by this operator or arriving through polling, makes the earlier answers out of date.
      Polling never takes a record away: a session snapshot with fewer compile records than the one held is older and
      is ignored. The deployment resolution comes from no compile and is not bound to a record.
+   - A view answer (`views/*`) is pinned to what the answer itself describes, never to what was asked: its tenant,
+     assembly, session and revision, and the compile record its compile-derived sections name (their provenance).
+     A collaborator can edit between the request and Fabric's processing it, so an answer can describe a later
+     revision than the one Studio holds. Such an answer is not drawn until the session Studio holds reaches that
+     revision, and Studio refreshes the session at once to get there. An answer for another tenant, assembly or
+     session is refused and named as the view's error.
    - A historical result (`historical: true`) appears only in the compile and history panels, labelled with its
      revision and hash.
 
@@ -415,6 +427,12 @@ The redesign removes current behaviour that breaks engineering rule 2:
    - an answer asked for another revision or policy, or about a compile record a later compile replaced, reads as
      out of date;
    - a polled session with fewer compile records than the one held is ignored;
+9. Typed views (P2b):
+   - Data & State and Runtime & Telemetry with data are offered, and without it are under "More views" with Fabric's
+     reasons;
+   - the ownership matrix and the Table draw the same elements;
+   - external owners, external-protocol facts and transports appear only from Fabric's data;
+   - view data from before a recompile is not drawn.
    - the verification reaches Security & Trust only while current;
    - a `NO_MATCH` gives one guided-fix card per typed cause and trust rejection;
    - the client sends the policy as JSON for Fabric to hash.
@@ -453,11 +471,16 @@ The redesign removes current behaviour that breaks engineering rule 2:
     - Studio still compares its own policy drafts locally (`policyKey`) to tell when a response it holds no longer
       matches its inputs. The deployment resolution has no Fabric record, so this is the only way to know it is out
       of date. That comparison never produces a hash for Fabric and is never compared with one.
-  - **P2b:** Data & State and Runtime & Telemetry, typed external owners and `external_protocol`, transports and
-    runtime bindings (`views/*`).
+  - **P2b, implemented: the typed views (`views/*`).**
+    - Studio loads all four views for the current session, revision, policy and compile record, and pins each answer
+      to those inputs (§4.3 rule 6), so an out-of-date view is never drawn.
+    - Data & State and Runtime & Telemetry are offered only while one of their sections has data, and are otherwise
+      under "More views" with Fabric's reasons.
+    - Flow & Composition adds external owners and `external_protocol` facts; Substrate & Topology adds transports.
+    - Runtime bindings moved to P2d, where the emit plan generates them.
   - **P2c:** the rest of Security & Trust, Performance & Load timeouts, and Compliance & Governance
     (`overlays/*`).
-  - **P2d:** the emit plan preview in Substrate & Topology.
+  - **P2d:** the emit plan preview in Substrate & Topology, and its runtime bindings.
   - **P2e:** Resilience & Faults (also needs the DCP fault reconciliation).
 - **P3: after DCP schema work.**
   - Concurrency semantics, resource budgets and load envelopes.

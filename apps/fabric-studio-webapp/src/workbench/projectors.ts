@@ -1,4 +1,6 @@
-import type { DynamicDcpProjectionResponse, ResolveDeploymentResponse, StudioViewpoint } from "@unfurl/fabric-validation-client";
+import type {
+  DynamicDcpProjectionResponse, ResolveDeploymentResponse, StudioViewSection, StudioViewpoint, ViewProjectionResponse
+} from "@unfurl/fabric-validation-client";
 import type { ReadOnlyCompositionView } from "@unfurl/fabric-scene-model";
 import { isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
 
@@ -14,10 +16,13 @@ export type Fact = {
   readonly source: string;
 };
 
+/** What a model element is: a component, a substrate port, an owner outside the catalog, or owned state or a decision. */
+export type ModelNodeKind = "COMPONENT" | "SUBSTRATE_PORT" | "EXTERNAL_OWNER" | "OWNED_STATE" | "OWNED_DECISION";
+
 export type ModelNode = {
   readonly id: string;
   readonly label: string;
-  readonly kind: "COMPONENT" | "SUBSTRATE_PORT";
+  readonly kind: ModelNodeKind;
   readonly level?: string;
   readonly parentId?: string;
   readonly facts: readonly Fact[];
@@ -48,14 +53,20 @@ const SUBSTRATE_ENDPOINTS = new Set(["substrate", "substrate:runtime"]);
  * Projector: Flow & Composition (§3.1) from the draft's `/dynamic-dcp` projection: components and their nesting, the
  * projection's relationships, and needs-to-offers wiring with each connection's status and reason.
  */
-export function projectFlow(projection: DynamicDcpProjectionResponse): ViewModel {
-  const nodes = projection.nodes.map(node => ({
+export function projectFlow(projection: DynamicDcpProjectionResponse, flow?: ViewProjectionResponse): ViewModel {
+  const protocols = itemsByNode(flow?.externalProtocolOffers, offer => offer.nodeId);
+  const nodes: ModelNode[] = projection.nodes.map(node => ({
     id: node.nodeId,
     label: node.label,
     kind: "COMPONENT" as const,
     level: node.level,
     ...(node.parentNodeId === undefined ? {} : { parentId: node.parentNodeId }),
-    facts: componentFacts(node)
+    facts: [
+      ...componentFacts(node),
+      ...(protocols.get(node.nodeId) ?? []).map(offer => ({
+        label: "External protocol", value: `${offer.capability} over ${offer.protocol}`, source: `views/flow ${offer.source}`
+      }))
+    ]
   }));
   const known = new Set(nodes.map(node => node.id));
   const edges: ModelEdge[] = projection.edges
@@ -70,7 +81,126 @@ export function projectFlow(projection: DynamicDcpProjectionResponse): ViewModel
     if (!known.has(connection.sourceNodeId) || !known.has(connection.targetNodeId)) continue;
     edges.push(connectionEdge(connection));
   }
+  // External owners (§3.1): one boundary node per owner Fabric names, joined to each component that needs it.
+  for (const owner of flow?.externalOwners?.available ? flow.externalOwners.items : []) {
+    if (!known.has(owner.neededByNodeId)) continue;
+    if (!known.has(owner.boundaryNodeId)) {
+      known.add(owner.boundaryNodeId);
+      nodes.push({ id: owner.boundaryNodeId, label: `${owner.owner} (outside the catalog)`, kind: "EXTERNAL_OWNER",
+        facts: [{ label: "Owner", value: owner.owner, source: "views/flow externalOwners[].owner" }] });
+    }
+    edges.push({ id: `NEEDS_OWNER:${owner.neededByNodeId}->${owner.boundaryNodeId}:${owner.dependency}`, from: owner.neededByNodeId,
+      to: owner.boundaryNodeId, kind: "NEEDS_OWNER", label: owner.dependency });
+  }
   return { view: "FLOW", nodes, edges, notes: [] };
+}
+
+/**
+ * Projector: Data & State (§3.2) from Fabric's data view: the components that own something, each owned resource and
+ * decision as its own element joined to its owner (labelled with its sensitivity or authority), each documented
+ * operation and data mapping as a fact on its component. A section Fabric reports as unavailable is a note with its
+ * reason, never an empty layer.
+ */
+export function projectData(projection: DynamicDcpProjectionResponse, data: ViewProjectionResponse): ViewModel {
+  const labels = new Map(projection.nodes.map(node => [node.nodeId, node.label]));
+  const operations = itemsByNode(data.operations, operation => operation.nodeId);
+  const mappings = itemsByNode(data.dataMappings, mapping => mapping.providerNodeId ?? "");
+  const owners = new Set<string>([
+    ...(data.ownedState?.items ?? []).map(item => item.nodeId),
+    ...(data.ownedDecisions?.items ?? []).map(item => item.nodeId),
+    ...operations.keys(),
+    ...[...mappings.keys()].filter(id => id !== "")
+  ]);
+  const nodes: ModelNode[] = [...owners].filter(id => labels.has(id)).map(id => ({
+    id, label: labels.get(id)!, kind: "COMPONENT" as const,
+    facts: [
+      ...(operations.get(id) ?? []).map(operation => ({
+        label: `Operation ${operation.capability}/${operation.operation}`,
+        value: `request ${operation.requestSchema.path}, response ${operation.responseSchema.path}`, source: `views/data ${operation.source}`
+      })),
+      ...(mappings.get(id) ?? []).map(mapping => ({
+        label: "Data mapping", value: `${mapping.childContractId}: ${Object.keys(mapping.inbound).length} inbound, ${Object.keys(mapping.outbound).length} outbound`,
+        source: `views/data ${mapping.source}`
+      }))
+    ]
+  }));
+  const edges: ModelEdge[] = [];
+  for (const state of data.ownedState?.items ?? []) {
+    if (!labels.has(state.nodeId)) continue;
+    const id = `state:${state.nodeId}:${state.resource}`;
+    nodes.push({ id, label: state.resource, kind: "OWNED_STATE", facts: [
+      { label: "Concern", value: state.concern, source: `views/data ${state.source}` },
+      { label: "Sensitivity", value: state.sensitivity, source: `views/data ${state.source}.sensitivity` },
+      { label: "Description", value: state.description, source: `views/data ${state.source}.description` }] });
+    edges.push({ id: `OWNS_STATE:${state.nodeId}->${id}`, from: state.nodeId, to: id, kind: "OWNS_STATE", label: state.sensitivity });
+  }
+  for (const decision of data.ownedDecisions?.items ?? []) {
+    if (!labels.has(decision.nodeId)) continue;
+    const id = `decision:${decision.nodeId}:${decision.decision}`;
+    nodes.push({ id, label: decision.decision, kind: "OWNED_DECISION", facts: [
+      { label: "Concern", value: decision.concern, source: `views/data ${decision.source}` },
+      { label: "Authority", value: decision.authority, source: `views/data ${decision.source}.authority` },
+      { label: "Description", value: decision.description, source: `views/data ${decision.source}.description` }] });
+    edges.push({ id: `OWNS_DECISION:${decision.nodeId}->${id}`, from: decision.nodeId, to: id, kind: "OWNS_DECISION", label: decision.authority });
+  }
+  return { view: "DATA", nodes, edges, notes: absentNotes([
+    ["Owned state", data.ownedState], ["Owned decisions", data.ownedDecisions], ["Operations", data.operations], ["Data mappings", data.dataMappings]]) };
+}
+
+/**
+ * Projector: Runtime & Telemetry (§3.4) from Fabric's runtime view: each component's declared monitoring and telemetry
+ * as facts, and the current compile's verification as a note. Unavailable sections are notes with Fabric's reasons.
+ */
+export function projectRuntime(projection: DynamicDcpProjectionResponse, runtime: ViewProjectionResponse): ViewModel {
+  const monitoring = itemsByNode(runtime.monitoring, item => item.nodeId);
+  const telemetry = itemsByNode(runtime.telemetry, item => item.nodeId);
+  const nodes: ModelNode[] = projection.nodes
+    .filter(node => monitoring.has(node.nodeId) || telemetry.has(node.nodeId))
+    .map(node => ({
+      id: node.nodeId, label: node.label, kind: "COMPONENT" as const,
+      facts: [
+        // Members are shown as DCP holds them: one the claim did not write reads "not declared", never a default.
+        ...(monitoring.get(node.nodeId) ?? []).flatMap(item => [
+          { label: "Health endpoints", value: item.healthEndpoints === undefined ? NOT_DECLARED : item.healthEndpoints.join(", ") || "none", source: `views/runtime ${item.source}.health_endpoints` },
+          { label: "Readiness check", value: requiredText(item.readinessRequired), source: `views/runtime ${item.source}.readiness_required` },
+          { label: "Liveness check", value: requiredText(item.livenessRequired), source: `views/runtime ${item.source}.liveness_required` }
+        ]),
+        ...(telemetry.get(node.nodeId) ?? []).flatMap(item => [
+          { label: "Telemetry signals", value: item.signals === undefined ? NOT_DECLARED : item.signals.join(", ") || "none", source: `views/runtime ${item.source}.signals` },
+          { label: "Correlation id", value: requiredText(item.correlationIdRequired), source: `views/runtime ${item.source}.correlation_id_required` }
+        ])
+      ]
+    }));
+  const verification = runtime.verification;
+  const verificationNote = verification === undefined ? [] : [verification.available
+    ? `Verification: ${verification.overallOk ? "verified" : "not verified"} (signature ${verification.signature?.result ?? "unknown"}, catalog ${verification.catalogDrift?.clean ? "clean" : "drifted"}).`
+    : `Verification: ${verification.absentReason?.code ?? "UNAVAILABLE"}: ${verification.absentReason?.message ?? ""}`];
+  return { view: "RUNTIME", nodes, edges: [], notes: [...absentNotes([["Monitoring", runtime.monitoring], ["Telemetry", runtime.telemetry]]), ...verificationNote] };
+}
+
+/** How a port member the claim did not write reads: never as a default. */
+const NOT_DECLARED = "not declared";
+
+/** A required/not-required flag as DCP holds it, or "not declared" when the claim did not write it. */
+function requiredText(flag: boolean | undefined): string {
+  return flag === undefined ? NOT_DECLARED : flag ? "required" : "not required";
+}
+
+/** A section's items grouped by the node they belong to; none when the section is unavailable. */
+function itemsByNode<T>(section: StudioViewSection<T> | undefined, nodeOf: (item: T) => string): Map<string, T[]> {
+  const grouped = new Map<string, T[]>();
+  for (const item of section?.available ? section.items : []) {
+    const key = nodeOf(item);
+    grouped.set(key, [...(grouped.get(key) ?? []), item]);
+  }
+  return grouped;
+}
+
+/** Notes for the sections Fabric reported as unavailable, each with its code and message. */
+function absentNotes(sections: readonly (readonly [string, StudioViewSection<unknown> | undefined])[]): string[] {
+  return sections
+    .filter(([, section]) => section !== undefined && !section.available)
+    .map(([title, section]) => `${title}: ${section!.absentReason?.code ?? "UNAVAILABLE"}: ${section!.absentReason?.message ?? ""}`);
 }
 
 /**
@@ -78,9 +208,13 @@ export function projectFlow(projection: DynamicDcpProjectionResponse): ViewModel
  * component-to-substrate wiring. Deployment shapes come from the last resolution only while it is current (§4.3 rule 6);
  * an out-of-date or failed resolution is a note, never shown as the current shapes.
  */
-export function projectTopology(projection: DynamicDcpProjectionResponse, data: WorkbenchData): ViewModel {
+export function projectTopology(projection: DynamicDcpProjectionResponse, data: WorkbenchData, topology?: ViewProjectionResponse): ViewModel {
   const notes: string[] = [];
   const shapes = shapesByComponent(data, notes);
+  // Transports come from the current compile record (LLD-fabric-studio-api, StudioViewProjection); an unavailable section
+  // is a note with Fabric's reason, never a guessed transport.
+  const transports = itemsByNode(topology?.transports, transport => transport.providerNodeId ?? "");
+  if (topology?.transports && !topology.transports.available) notes.push(...absentNotes([["Transports", topology.transports]]));
   const components: ModelNode[] = projection.nodes.map(node => {
     const shape = node.catalogEntryId === undefined ? undefined : shapes.get(node.catalogEntryId);
     return {
@@ -94,7 +228,10 @@ export function projectTopology(projection: DynamicDcpProjectionResponse, data: 
         ...(shape === undefined ? [] : [
           { label: "Deployment shape", value: shape.shape, source: "deployment/resolve selections[].deploymentShape" },
           { label: "Required ports", value: shape.requiredPorts.join(", ") || "none", source: "deployment/resolve selections[].requiredPorts" }
-        ])
+        ]),
+        ...(transports.get(node.nodeId) ?? []).map(transport => ({
+          label: "Transport", value: `${transport.kind} (${transport.childContractId})`, source: `views/topology ${transport.source}`
+        }))
       ]
     };
   });

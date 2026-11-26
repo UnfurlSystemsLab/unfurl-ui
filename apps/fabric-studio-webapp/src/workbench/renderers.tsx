@@ -19,6 +19,15 @@ export type RendererProps = {
   readonly onSelect: (selection: ThreeAssemblySelection) => void;
 };
 
+/** Plain-language name of each element kind, as the Table renderer lists it. */
+export const NODE_KIND_LABELS: Readonly<Record<ModelNode["kind"], string>> = {
+  COMPONENT: "component",
+  SUBSTRATE_PORT: "substrate port",
+  EXTERNAL_OWNER: "owner outside the catalog",
+  OWNED_STATE: "owned state",
+  OWNED_DECISION: "owned decision"
+};
+
 /** The scene selection for a model element. */
 export function selectionFor(node: ModelNode): ThreeAssemblySelection {
   return node.kind === "SUBSTRATE_PORT"
@@ -55,7 +64,7 @@ export function TwoDRenderer({ model, badges, selectedId, onSelect }: RendererPr
           return (
             <li key={node.id} style={{ left: point.x + 40, top: point.y + 40 }}>
               <button type="button" data-element-id={node.id} aria-pressed={selectedId === node.id}
-                className={`workbench-node ${node.kind === "SUBSTRATE_PORT" ? "substrate" : "component"}`} onClick={() => onSelect(selectionFor(node))}>
+                className={`workbench-node ${node.kind === "SUBSTRATE_PORT" ? "substrate" : node.kind === "COMPONENT" ? "component" : node.kind.toLowerCase().replace("_", "-")}`} onClick={() => onSelect(selectionFor(node))}>
                 <strong>{node.label}</strong>
                 <Badges annotations={badges.get(node.id)} />
               </button>
@@ -81,7 +90,7 @@ export function TableRenderer({ model, badges, selectedId, onSelect }: RendererP
           {model.nodes.map(node => (
             <tr key={node.id} data-element-id={node.id} aria-selected={selectedId === node.id}>
               <td><button type="button" className="link-button" onClick={() => onSelect(selectionFor(node))}>{node.label}</button></td>
-              <td>{node.kind === "SUBSTRATE_PORT" ? "substrate port" : "component"}</td>
+              <td>{NODE_KIND_LABELS[node.kind]}</td>
               <td>{node.level ?? ""}</td>
               <td>{node.facts.map(fact => <div key={fact.label}>{fact.label}: {fact.value}</div>)}</td>
               <td><Badges annotations={badges.get(node.id)} /></td>
@@ -101,6 +110,52 @@ export function TableRenderer({ model, badges, selectedId, onSelect }: RendererP
                 <td>{edge.status ?? ""}</td><td>{edge.reason ?? ""}</td><td><Badges annotations={badges.get(edge.id)} /></td>
               </tr>
             ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Strategy (2D renderer of Data & State, §3.2): the ownership matrix. Rows are the components, columns the owned
+ * resources and decisions, and a cell holds the sensitivity or authority of an ownership edge. It draws exactly the
+ * model's elements, the same set the Table renderer lists (LLD §9 renderer parity), and every element is a button.
+ */
+export function OwnershipMatrixRenderer({ model, badges, selectedId, onSelect }: RendererProps) {
+  const owners = model.nodes.filter(node => node.kind === "COMPONENT");
+  const owned = model.nodes.filter(node => node.kind === "OWNED_STATE" || node.kind === "OWNED_DECISION");
+  const cell = new Map(model.edges.map(edge => [`${edge.from}|${edge.to}`, edge]));
+  return (
+    <div className="workbench-matrix" aria-label="2D renderer: ownership matrix">
+      <table>
+        <caption>Ownership: components by owned state and decisions</caption>
+        <thead>
+          <tr>
+            <th scope="col">Component</th>
+            {owned.map(node => (
+              <th scope="col" key={node.id} data-element-id={node.id}>
+                <button type="button" className="link-button" aria-pressed={selectedId === node.id} onClick={() => onSelect(selectionFor(node))}>
+                  {node.label}</button>
+                <small>{NODE_KIND_LABELS[node.kind]}</small>
+                <Badges annotations={badges.get(node.id)} />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {owners.map(owner => (
+            <tr key={owner.id} data-element-id={owner.id}>
+              <th scope="row">
+                <button type="button" className="link-button" aria-pressed={selectedId === owner.id} onClick={() => onSelect(selectionFor(owner))}>
+                  {owner.label}</button>
+                <Badges annotations={badges.get(owner.id)} />
+              </th>
+              {owned.map(node => {
+                const edge = cell.get(`${owner.id}|${node.id}`);
+                return <td key={node.id} {...(edge ? { "data-element-id": edge.id } : {})}>{edge?.label ?? ""}</td>;
+              })}
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>

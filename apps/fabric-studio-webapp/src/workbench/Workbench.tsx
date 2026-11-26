@@ -39,8 +39,8 @@ import {
 } from "./draftInventory.js";
 import { readLocalViewState, writeLocalViewState } from "./layoutPersistence.js";
 import { badgesByElement, evaluateOverlays, OVERLAY_REGISTRY, overlayAvailability, type OverlayResult } from "./overlays.js";
-import { projectCompiledContract, projectFlow, projectTopology, type ModelNode, type ViewModel } from "./projectors.js";
-import { TableRenderer, ThreeDRenderer, TwoDRenderer, viewForSceneMode } from "./renderers.js";
+import { projectCompiledContract, projectData, projectFlow, projectRuntime, projectTopology, type ModelNode, type ViewModel } from "./projectors.js";
+import { OwnershipMatrixRenderer, TableRenderer, ThreeDRenderer, TwoDRenderer, viewForSceneMode } from "./renderers.js";
 import { useWorkbenchComposition, type WorkbenchClient, type WorkbenchComposition } from "./useWorkbenchComposition.js";
 import {
   INITIAL_VIEW_STATE,
@@ -57,7 +57,7 @@ import {
 } from "./viewState.js";
 import { PROJECTION_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
 import { CompileRecordsSection } from "./compileRecords.js";
-import { currentResponse, isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
+import { currentResponse, currentView, isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
 
 export type WorkbenchProps = {
   readonly client: WorkbenchClient;
@@ -167,7 +167,13 @@ function ScopedWorkbench({ client, tenantId, assemblyId, initialBaseCatalogHash,
   const availability = definition.availability(data);
   const model: ViewModel | undefined = useMemo(() => {
     if (!availability.available || !data.projection) return undefined;
-    return viewState.view === "TOPOLOGY" ? projectTopology(data.projection, data) : projectFlow(data.projection);
+    // Each view's projector over the draft's projection and, where it has one, Fabric's current view data (P2b).
+    switch (viewState.view) {
+      case "TOPOLOGY": return projectTopology(data.projection, data, currentView(data, "TOPOLOGY"));
+      case "DATA": { const view = currentView(data, "DATA"); return view ? projectData(data.projection, view) : undefined; }
+      case "RUNTIME": { const view = currentView(data, "RUNTIME"); return view ? projectRuntime(data.projection, view) : undefined; }
+      default: return projectFlow(data.projection, currentView(data, "FLOW"));
+    }
   }, [availability.available, data, viewState.view]);
   const overlayResults: readonly OverlayResult[] = useMemo(
     () => model ? evaluateOverlays(viewState.overlays, model, data) : [], [model, viewState.overlays, data]);
@@ -456,7 +462,9 @@ function Stage({ viewState, dispatch, model, badges, composition, selection, onS
   return (
     <div className="composition-plane" aria-label={`${viewTitle(viewState.view)}, ${rendererTitle(viewState.renderer)}`}>
       {notes}
-      {viewState.renderer === "TWO_D" ? <TwoDRenderer {...props} /> : <TableRenderer {...props} />}
+      {viewState.renderer === "TWO_D"
+        ? (viewState.view === "DATA" ? <OwnershipMatrixRenderer {...props} /> : <TwoDRenderer {...props} />)
+        : <TableRenderer {...props} />}
     </div>
   );
 }

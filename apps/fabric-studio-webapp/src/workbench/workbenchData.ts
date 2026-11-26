@@ -2,7 +2,10 @@ import type {
   CompileDraftCandidateResponse,
   ContractDiffResponse,
   DeploymentPolicyDraft,
+  StudioViewId,
+  StudioViewpoint,
   VerifyContractResponse,
+  ViewProjectionResponse,
   DynamicDcpProjectionResponse,
   ResolveDeploymentResponse,
   StudioAssemblySummary
@@ -45,6 +48,13 @@ export type WorkbenchData = {
   readonly contractDiff?: InputsPinned<ContractDiffResponse>;
   /** The last verification Fabric answered, and the inputs it was asked with. */
   readonly verification?: InputsPinned<VerifyContractResponse>;
+  /**
+   * Each view's typed data from Fabric (LLD-fabric-studio-api, StudioViewProjection), pinned to the session, revision,
+   * policy and compile record it was loaded for (§4.3 rule 6). Read only through {@link currentView}.
+   */
+  readonly views?: Partial<Record<StudioViewpoint, InputsPinned<ViewProjectionResponse>>>;
+  /** Why a view's data could not be loaded for the current inputs. */
+  readonly viewErrors?: Partial<Record<StudioViewpoint, string>>;
   /** The last deployment resolution and the inputs it resolved. */
   readonly deployment?: InputsPinned<ResolveDeploymentResponse>;
   /** Why the deployment could not be resolved. */
@@ -98,6 +108,69 @@ export function pin<T>(session: StudioDraftSession, policy: DeploymentPolicyDraf
     sessionId: session.sessionId, revision: session.sceneRevision, policyKey: policyKey(policy),
     ...(compileRecord === undefined ? {} : { compileRecord }), response
   };
+}
+
+/** Fabric's route id of each workbench view. */
+export const VIEW_ROUTE_IDS: Readonly<Record<StudioViewpoint, StudioViewId>> = {
+  FLOW: "flow", DATA: "data", TOPOLOGY: "topology", RUNTIME: "runtime"
+};
+
+/**
+ * The outcome of pinning a view answer: pinned to what the answer describes (and whether it describes a later revision
+ * than the session Studio holds, so the session should be refreshed), or refused with the reason.
+ */
+export type ViewPin =
+  | { readonly status: "PINNED"; readonly pinned: InputsPinned<ViewProjectionResponse>; readonly newerRevision: boolean }
+  | { readonly status: "REFUSED"; readonly reason: string };
+
+/**
+ * Pins a view answer to what the answer itself describes, never to what was asked (§4.3 rule 6): its scope and revision,
+ * the policy Studio sent, and the compile record its compile-derived sections name. A collaborator can edit between the
+ * request and Fabric's processing it, so the answer's revision can be later than the session held; the pinned answer is
+ * then drawn only once the session reaches that revision. An answer for another tenant, assembly, session or view is
+ * refused.
+ */
+export function pinView(requested: StudioDraftSession, policy: DeploymentPolicyDraft, view: StudioViewpoint,
+  response: ViewProjectionResponse): ViewPin {
+  if (response.tenantId !== requested.tenantId || response.assemblyId !== requested.assemblyId
+    || response.sessionId !== requested.sessionId) {
+    return { status: "REFUSED", reason: `Fabric answered for session ${response.sessionId} of ${response.tenantId}/${response.assemblyId};`
+      + ` session ${requested.sessionId} of ${requested.tenantId}/${requested.assemblyId} was asked` };
+  }
+  if (response.view !== VIEW_ROUTE_IDS[view]) {
+    return { status: "REFUSED", reason: `Fabric answered the ${response.view} view for the ${VIEW_ROUTE_IDS[view]} view` };
+  }
+  if (!Number.isSafeInteger(response.revision)) {
+    return { status: "REFUSED", reason: "Fabric's answer names no revision" };
+  }
+  const compileRecord = answeredCompileRecord(view, response);
+  return {
+    status: "PINNED",
+    pinned: {
+      sessionId: response.sessionId, revision: response.revision, policyKey: policyKey(policy),
+      ...(compileRecord === undefined ? {} : { compileRecord }), response
+    },
+    newerRevision: response.revision > requested.sceneRevision
+  };
+}
+
+/**
+ * The compile record a view answer's compile-derived sections were read from (their provenance), `null` when they name
+ * none, and absent for the Flow view, which reads no compile.
+ */
+function answeredCompileRecord(view: StudioViewpoint, response: ViewProjectionResponse): string | null | undefined {
+  switch (view) {
+    case "DATA": return response.dataMappings?.provenance?.contractHash ?? null;
+    case "TOPOLOGY": return response.transports?.provenance?.contractHash ?? null;
+    case "RUNTIME": return response.verification?.provenance && !response.verification.historical
+      ? response.verification.provenance.contractHash : null;
+    default: return undefined;
+  }
+}
+
+/** A view's Fabric data, only while it is current for the session, revision, policy and compile record (§4.3 rule 6). */
+export function currentView(data: WorkbenchData, view: StudioViewpoint): ViewProjectionResponse | undefined {
+  return currentResponse(data.views?.[view], data);
 }
 
 /** The contract hash of the session's current compile record (its latest), or `null` when nothing is recorded. */
