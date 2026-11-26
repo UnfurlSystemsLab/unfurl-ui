@@ -157,13 +157,17 @@ an assembly. It is tenant-level curation:
 | Overlay | Rozanski and Woods | Content | Status |
 |---|---|---|---|
 | **Security & Trust** | Security | identity in the composition: a `/dynamic-dcp` node whose typed `capabilities` include `identity-context` (`unfurl-fabric/docs/HLD-needs-driven-identity.md`); trust policy id (`StudioDraftSession.trustPolicyId`); signing state from the current compile (`SIGNED`, `UNSIGNED_READY`, unsigned-without-keys warning); the session's `TRUST_POLICY_PERMISSIVE` planning warning, which Fabric emits when no trust policy is set (`unfurl-fabric/docs/LLD-fabric-studio-api.md`, *Permissive trust policy warning*) | P1 |
-| | | whether the needs *require* `identity-context` (the needs are not typed in Studio; an unmet identity need already appears as a guided fix) | P2 |
-| | | `integration_ports.authentication` and `authorization` (DCP HLD-C2 A.9); structured trust rejections; verification result; secret-request names from the emit plan | P2 |
-| **Performance & Load** | Performance & Scalability | contract `expectations.timeout_ms` and the `runtime_policy.timeout_ms` override (DCP HLD-C2 §B, §C) | P2 |
+| | | the verification result while current (§4.3 rule 6) | P2a |
+| | | Fabric's `overlays/security`: each node's `integration_ports.authentication` and `authorization` (DCP HLD-C2 A.9), labelled "enforced" when a node in the composition provides `identity-context` and "trusted network" otherwise, with the decision owner and permission prefixes; Fabric's "Identity" finding | P2c |
+| | | structured trust rejections (empty in session mode until named trust policies are applied: LLD-fabric-studio-api, *Gap: a session's trust policy is not applied*) | after that gap |
+| | | whether the needs *require* `identity-context` (the needs are not typed in Studio; an unmet identity need already appears as a guided fix); secret-request names from the emit plan | P2d |
+| **Performance & Load** | Performance & Scalability | Fabric's `overlays/performance`: each child contract's `expectations.timeout_ms` on its provider node, from the current compile only (DCP HLD-C2 §B) | P2c |
+| | | the `runtime_policy.timeout_ms` override (DCP HLD-C2 §C), which lives in the runtime bindings | P2d |
 | | | throughput, latency and resource envelopes | P3 |
 | | | bottleneck evidence from a test deployment | Later |
-| **Resilience & Faults** | Availability & Resilience | declared faults: `code`, `category`, `severity`, `affects`, `propagation.parent_impact`, `propagates_when`, `remediation.allowed_actions` (DCP HLD-C2 A.10), drawn as propagation paths up the `CONTAINS` tree | P2, and needs the DCP fault-schema reconciliation (DCP HLD-C2 §I.1) |
-| **Compliance & Governance** | Regulation + Location | decision audit (selection mode, alternatives, score breakdown, planning warnings); runtime `audit_enabled`; telemetry `audit_events`; trust policy provenance | P2 |
+| **Resilience & Faults** | Availability & Resilience | declared faults: `code`, `category`, `severity`, `affects`, `propagation.parent_impact`, `propagates_when`, `remediation.allowed_actions` (DCP HLD-C2 A.10), drawn as propagation paths up the `CONTAINS` tree | P2e, and needs the DCP fault-schema reconciliation (DCP HLD-C2 §I.1) |
+| **Compliance & Governance** | Regulation + Location | Fabric's `overlays/compliance`: the trust-policy provenance finding (always present, never shown as applied while the gap stands); the current compile's decision audit (selection mode, alternatives considered, selection reasons, score breakdown, planning warnings) with its record, or "Left out" with Fabric's reason; one annotation per node whose telemetry declares `audit_events` | P2c |
+| | | runtime `audit_enabled`, which lives in the runtime bindings | P2d |
 | | | data residency and region constraints | P3 (no DCP field) |
 
 ### 4.1 Overlay applicability
@@ -207,7 +211,9 @@ domain overlay (§4.4).
 2. At most one overlay at a time owns the colour channel. Other active overlays use badges. Turning on a second
    colour overlay moves the first one to badges.
 3. An overlay with no data for the active view is listed as unavailable with its reason (for example "no selected
-   component declares faults"). It is never shown as an empty layer.
+   component declares faults"). It is never shown as an empty layer. Availability is decided after the rule-1 guard
+   drops annotations on elements the view does not draw: an overlay left with no annotation and no inspector fact is
+   unavailable with `NOTHING_IN_VIEW`.
 4. **Overlays never gate.** `substrateProfileMode`, trust policy, refusal alignment, substrate derivation and every
    VC §16 rule run in Fabric whatever the overlays show. No overlay, preset or customer segment selects them.
 5. The always-on **guided-fix layer** is not an overlay. It renders `NoMatchExplanation` reasons, candidate conflicts
@@ -248,6 +254,13 @@ domain overlay (§4.4).
      revision than the one Studio holds. Such an answer is not drawn until the session Studio holds reaches that
      revision, and Studio refreshes the session at once to get there. An answer for another tenant, assembly or
      session is refused and named as the view's error.
+   - An overlay answer (`overlays/*`) is pinned the same way as a view answer: to its tenant, assembly, session and
+     revision. An overlay that reads the compile (Performance & Load, Compliance & Governance) is also pinned to the
+     compile record Fabric names in its `provenance`, which Fabric sets even when nothing came of that record; an
+     answer naming none is about no compile, so it is out of date once a compile is recorded. Security & Trust reads
+     claims only and is never pinned to a compile, so a compile leaves its answer current. An answer for another
+     overlay or scope is refused and named as the overlay's error; while an overlay's answer is loading or failed, the
+     overlay reads so, and P1's Security facts stand.
    - A historical result (`historical: true`) appears only in the compile and history panels, labelled with its
      revision and hash.
 
@@ -416,9 +429,9 @@ The redesign removes current behaviour that breaks engineering rule 2:
 4. Layout migration: each old `activeView` value maps as in §5.4, and writes carry only the new fields.
 5. Deep links and redirects: each retired route lands on the workbench with the mapped view state (Playwright, extending
    `scripts/verify-host-runtime.mjs`).
-6. Security & Trust is tested both with `identity-context` in the needs and without it (engineering rule 6). With it,
-   the overlay shows authentication and authorization. Without it, it shows the trusted-network state and no
-   identity content.
+6. Security & Trust is tested both with an `identity-context` provider in the composition and without it (engineering
+   rule 6), in Fabric and in Studio. With it, the authentication and authorization ports read "enforced". Without it,
+   they read "trusted network" and the identity finding says identity is not in the composition.
 7. Rule-2 regressions: the inspector renders no literal binding mode, substrate target or isolation pattern that did
    not come from Fabric.
 8. Compile records (P2a):
@@ -436,6 +449,16 @@ The redesign removes current behaviour that breaks engineering rule 2:
    - the verification reaches Security & Trust only while current;
    - a `NO_MATCH` gives one guided-fix card per typed cause and trust rejection;
    - the client sends the policy as JSON for Fabric to hash.
+10. Overlays (P2c):
+   - Performance & Load and Compliance & Governance read "loading" until Fabric answers, Fabric's reason when it has no
+     data, and Fabric's annotations and findings only while current; Resilience & Faults stays not yet provided;
+   - a Compliance answer that names no compile is not drawn once a compile is recorded;
+   - a compile leaves Security & Trust's claim-only annotations current;
+   - a compile-reading overlay is pinned to the record Fabric names even when nothing came of it
+     (`NO_TIMEOUTS_DECLARED` shows Fabric's reason, not "loading"), and a later compile makes it out of date;
+   - an overlay whose annotations all fall outside the active view is unavailable with `NOTHING_IN_VIEW`;
+   - an answer for another session is refused, and one for a later revision is held back until the session reaches it;
+   - Security & Trust adds Fabric's port annotations in both identity paths, and keeps P1's facts while loading.
 
 ## 10. Phasing
 
@@ -478,9 +501,17 @@ The redesign removes current behaviour that breaks engineering rule 2:
       under "More views" with Fabric's reasons.
     - Flow & Composition adds external owners and `external_protocol` facts; Substrate & Topology adds transports.
     - Runtime bindings moved to P2d, where the emit plan generates them.
-  - **P2c:** the rest of Security & Trust, Performance & Load timeouts, and Compliance & Governance
-    (`overlays/*`).
-  - **P2d:** the emit plan preview in Substrate & Topology, and its runtime bindings.
+  - **P2c, implemented: the perspective overlays (`overlays/*`).**
+    - Studio loads Security & Trust, Performance & Load and Compliance & Governance for the active view and the
+      current inputs, and pins each answer like a view answer (§4.3 rule 6).
+    - Security & Trust adds each node's declared authentication and authorization, "enforced" or "trusted network"
+      by whether identity is in the composition. Flow, Foundry and the API catalog declare both ports, not required,
+      and enforce them only when `identity-context` is in the contract.
+    - Performance & Load shows the contract timeouts; Compliance & Governance the trust-policy provenance, the
+      decision audit and the audit-event emitters. Both are unavailable with Fabric's reason when they have no data.
+    - The runtime `timeout_ms` override and `audit_enabled` moved to P2d with the runtime bindings.
+  - **P2d:** the emit plan preview in Substrate & Topology, its runtime bindings, and the overlays' runtime-binding
+    facts (the `timeout_ms` override, `audit_enabled`, secret-request names).
   - **P2e:** Resilience & Faults (also needs the DCP fault reconciliation).
 - **P3: after DCP schema work.**
   - Concurrency semantics, resource budgets and load envelopes.

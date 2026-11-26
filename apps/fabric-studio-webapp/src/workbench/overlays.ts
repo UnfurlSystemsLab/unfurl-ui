@@ -3,7 +3,8 @@ import { signingHandoffFromCompile } from "../signingHandoff.js";
 import { overlayTitle } from "./viewState.js";
 import type { Fact, ViewModel } from "./projectors.js";
 import { NOT_YET_PROVIDED_BY_FABRIC, type Availability } from "./views.js";
-import { isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
+import type { OverlayAnnotationsResponse } from "@unfurl/fabric-validation-client";
+import { currentOverlay, isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
 
 /** One annotation on an element the view already contains: a badge, styling hint and its source (LLD §4.3 rule 1). */
 export type OverlayAnnotation = {
@@ -78,9 +79,14 @@ const SECURITY: OverlayDefinition = {
         : { label: "Trust policy", value: "none set", source: "session.trustPolicyId" },
       ...(permissive ? [{ label: "Warning", value: `${permissive.code}: ${permissive.message}`, source: "session.warnings[]" }] : []),
       signingFact(data),
-      ...verificationFacts(data)
+      ...verificationFacts(data),
+      ...fabricSecurityFacts(data)
     ];
-    return { overlay: "SECURITY", available: true, annotations, section: { title: overlayTitle("SECURITY"), facts } };
+    // Fabric's authentication and authorization annotations (P2c), only while its answer is current.
+    const fabric = currentOverlay(data, "SECURITY");
+    const fabricAnnotations = fabric?.available ? fabric.annotations.map(fromFabric) : [];
+    return { overlay: "SECURITY", available: true, annotations: [...annotations, ...fabricAnnotations],
+      section: { title: overlayTitle("SECURITY"), facts } };
   }
 };
 
@@ -120,6 +126,73 @@ function verificationFacts(data: WorkbenchData): readonly Fact[] {
   }];
 }
 
+/**
+ * The facts Security & Trust adds from Fabric's answer (P2c): its findings while current, Fabric's reason when it found
+ * nothing, or that the answer is loading or failed. P1's facts stand either way.
+ */
+function fabricSecurityFacts(data: WorkbenchData): readonly Fact[] {
+  const fabric = currentOverlay(data, "SECURITY");
+  if (!fabric) {
+    const error = data.overlayErrors?.SECURITY;
+    return [{ label: "Authentication & authorization", value: error ? `could not be loaded: ${error}` : "loading from Fabric",
+      source: "overlays/security" }];
+  }
+  if (!fabric.available) {
+    return [{ label: "Authentication & authorization", value: `${fabric.absentReason?.code ?? "UNAVAILABLE"}: ${fabric.absentReason?.message ?? ""}`,
+      source: "overlays/security absentReason" }];
+  }
+  return findingFacts(fabric);
+}
+
+/** A Fabric annotation as a workbench annotation: the same element, label, detail, severity and source. */
+function fromFabric(annotation: OverlayAnnotationsResponse["annotations"][number]): OverlayAnnotation {
+  return { elementId: annotation.elementId, label: annotation.label, detail: annotation.detail,
+    severity: annotation.severity, source: `overlays ${annotation.source}` };
+}
+
+/** Fabric's findings and left-out sources as inspector facts, each with its source and, if compile-derived, its record. */
+function findingFacts(fabric: OverlayAnnotationsResponse): readonly Fact[] {
+  return [
+    ...fabric.findings.map(finding => ({
+      label: finding.label,
+      value: finding.sourceRevision === undefined ? finding.value : `${finding.value} (compile at revision ${finding.sourceRevision})`,
+      source: `overlays/${fabric.overlay} ${finding.source}`
+    })),
+    ...fabric.staleSources.map(stale => ({
+      label: "Left out", value: `${stale.source}: ${stale.reason.code}: ${stale.reason.message}`, source: `overlays/${fabric.overlay} staleSources`
+    }))
+  ];
+}
+
+/**
+ * An overlay read entirely from Fabric's answer (P2c): its annotations and findings while the answer is current, and
+ * otherwise unavailable with Fabric's reason, or loading, or the request's error (§4.3 rules 3 and 6).
+ */
+function fromFabricOverlay(id: "PERFORMANCE" | "COMPLIANCE"): OverlayDefinition {
+  return {
+    id,
+    title: overlayTitle(id),
+    appliesTo: ALL_VIEWS,
+    evaluate(_model, data) {
+      if (!data.session) {
+        return { overlay: id, available: false, reasonCode: "NO_DRAFT", message: `${overlayTitle(id)} reads the open draft session; start or open a draft.` };
+      }
+      const fabric = currentOverlay(data, id);
+      if (!fabric) {
+        const error = data.overlayErrors?.[id];
+        return error
+          ? { overlay: id, available: false, reasonCode: "OVERLAY_DATA_UNAVAILABLE", message: `Fabric's ${overlayTitle(id)} answer could not be loaded: ${error}` }
+          : { overlay: id, available: false, reasonCode: "OVERLAY_LOADING", message: `Loading Fabric's ${overlayTitle(id)} answer for revision ${data.session.sceneRevision}.` };
+      }
+      if (!fabric.available) {
+        return { overlay: id, available: false, reasonCode: fabric.absentReason?.code ?? "UNAVAILABLE", message: fabric.absentReason?.message ?? "" };
+      }
+      return { overlay: id, available: true, annotations: fabric.annotations.map(fromFabric),
+        section: { title: overlayTitle(id), facts: findingFacts(fabric) } };
+    }
+  };
+}
+
 /** An overlay whose data needs Fabric's P2 overlay endpoint: listed with its reason, never shown as an empty layer. */
 function waitsForFabric(id: StudioOverlay, what: string): OverlayDefinition {
   return {
@@ -138,9 +211,9 @@ function waitsForFabric(id: StudioOverlay, what: string): OverlayDefinition {
 /** Registry: the four overlays (§4), in pill order. */
 export const OVERLAY_REGISTRY: readonly OverlayDefinition[] = [
   SECURITY,
-  waitsForFabric("PERFORMANCE", "contract and runtime timeouts"),
+  fromFabricOverlay("PERFORMANCE"),
   waitsForFabric("RESILIENCE", "declared faults and their propagation"),
-  waitsForFabric("COMPLIANCE", "the decision audit, audit flags or trust policy provenance")
+  fromFabricOverlay("COMPLIANCE")
 ];
 
 /** The definition of an overlay. */
@@ -155,19 +228,31 @@ export function overlayAvailability(overlay: StudioOverlay, model: ViewModel | u
   if (!definition.appliesTo.includes(model.view)) {
     return { available: false, reasonCode: "NOT_APPLICABLE", message: `${definition.title} does not apply to this view.` };
   }
-  const result = definition.evaluate(model, data);
+  // Availability is decided on the guarded result, so an overlay is never offered with nothing to show (§4.3 rule 3).
+  const result = evaluateOverlays([overlay], model, data)[0]!;
   return result.available ? { available: true } : { available: false, reasonCode: result.reasonCode, message: result.message };
 }
 
+/** An overlay whose annotations all fall outside the active view and which has no inspector fact: nothing applies. */
+export const NOTHING_IN_VIEW = "NOTHING_IN_VIEW";
+
 /**
- * Guard (§4.3 rule 1): evaluates the active overlays on a model and keeps only annotations on elements the model already
- * contains, so an overlay can never introduce an element.
+ * Guard (§4.3 rules 1 and 3): evaluates the active overlays on a model and keeps only annotations on elements the model
+ * already contains, so an overlay can never introduce an element. Availability is decided after that filter: an overlay
+ * left with no annotation and no inspector fact is unavailable with {@link NOTHING_IN_VIEW}, never an empty layer.
  */
 export function evaluateOverlays(overlays: readonly StudioOverlay[], model: ViewModel, data: WorkbenchData): readonly OverlayResult[] {
   const ids = new Set([...model.nodes.map(node => node.id), ...model.edges.map(edge => edge.id)]);
   return overlays.map(overlay => {
     const result = overlayDefinition(overlay).evaluate(model, data);
-    return result.available ? { ...result, annotations: result.annotations.filter(annotation => ids.has(annotation.elementId)) } : result;
+    if (!result.available) return result;
+    const annotations = result.annotations.filter(annotation => ids.has(annotation.elementId));
+    if (annotations.length === 0 && result.section.facts.length === 0) {
+      const dropped = result.annotations.length;
+      return { overlay, available: false, reasonCode: NOTHING_IN_VIEW,
+        message: `${overlayTitle(overlay)} has nothing for this view: its ${dropped} annotation${dropped === 1 ? " is" : "s are"} on elements this view does not draw.` };
+    }
+    return { ...result, annotations };
   });
 }
 

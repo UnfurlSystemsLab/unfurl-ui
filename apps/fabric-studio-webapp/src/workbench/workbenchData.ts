@@ -2,6 +2,9 @@ import type {
   CompileDraftCandidateResponse,
   ContractDiffResponse,
   DeploymentPolicyDraft,
+  OverlayAnnotationsResponse,
+  StudioOverlay,
+  StudioOverlayId,
   StudioViewId,
   StudioViewpoint,
   VerifyContractResponse,
@@ -55,6 +58,13 @@ export type WorkbenchData = {
   readonly views?: Partial<Record<StudioViewpoint, InputsPinned<ViewProjectionResponse>>>;
   /** Why a view's data could not be loaded for the current inputs. */
   readonly viewErrors?: Partial<Record<StudioViewpoint, string>>;
+  /**
+   * Fabric's overlay answers (LLD-fabric-studio-api, StudioOverlayAnnotations), pinned like views to what each answer
+   * describes. Read only through {@link currentOverlay}.
+   */
+  readonly overlays?: Partial<Record<StudioOverlay, InputsPinned<OverlayAnnotationsResponse>>>;
+  /** Why an overlay's answer could not be loaded for the current inputs. */
+  readonly overlayErrors?: Partial<Record<StudioOverlay, string>>;
   /** The last deployment resolution and the inputs it resolved. */
   readonly deployment?: InputsPinned<ResolveDeploymentResponse>;
   /** Why the deployment could not be resolved. */
@@ -166,6 +176,49 @@ function answeredCompileRecord(view: StudioViewpoint, response: ViewProjectionRe
       ? response.verification.provenance.contractHash : null;
     default: return undefined;
   }
+}
+
+/** Fabric's route id of each overlay Fabric annotates; Resilience & Faults arrives in P2e. */
+export const OVERLAY_ROUTE_IDS: Readonly<Partial<Record<StudioOverlay, StudioOverlayId>>> = {
+  SECURITY: "security", PERFORMANCE: "performance", COMPLIANCE: "compliance"
+};
+
+/**
+ * The overlays whose answers read the compile, as {@link answeredCompileRecord} knows the views that do. Security &
+ * Trust reads claims only, so its answer is never pinned to a compile record and a compile does not make it stale.
+ */
+const OVERLAYS_READING_COMPILE: ReadonlySet<StudioOverlay> = new Set<StudioOverlay>(["PERFORMANCE", "COMPLIANCE"]);
+
+/**
+ * Pins an overlay answer to what it describes, as {@link pinView} does for views (§4.3 rule 6): its scope and revision,
+ * the policy Studio sent, and, for an overlay that reads the compile, the record Fabric names in `provenance` (`null`
+ * when it names none, so the answer goes out of date once a compile is recorded). An answer for another tenant,
+ * assembly, session or overlay is refused.
+ */
+export function pinOverlay(requested: StudioDraftSession, policy: DeploymentPolicyDraft, overlay: StudioOverlay,
+  response: OverlayAnnotationsResponse): { readonly status: "PINNED"; readonly pinned: InputsPinned<OverlayAnnotationsResponse>; readonly newerRevision: boolean }
+  | { readonly status: "REFUSED"; readonly reason: string } {
+  if (response.tenantId !== requested.tenantId || response.assemblyId !== requested.assemblyId
+    || response.sessionId !== requested.sessionId) {
+    return { status: "REFUSED", reason: `Fabric answered for session ${response.sessionId} of ${response.tenantId}/${response.assemblyId};`
+      + ` session ${requested.sessionId} of ${requested.tenantId}/${requested.assemblyId} was asked` };
+  }
+  if (response.overlay !== OVERLAY_ROUTE_IDS[overlay]) {
+    return { status: "REFUSED", reason: `Fabric answered the ${response.overlay} overlay for the ${OVERLAY_ROUTE_IDS[overlay] ?? overlay} overlay` };
+  }
+  if (!Number.isSafeInteger(response.revision)) return { status: "REFUSED", reason: "Fabric's answer names no revision" };
+  const record = OVERLAYS_READING_COMPILE.has(overlay) ? response.provenance?.contractHash ?? null : undefined;
+  return {
+    status: "PINNED",
+    pinned: { sessionId: response.sessionId, revision: response.revision, policyKey: policyKey(policy),
+      ...(record === undefined ? {} : { compileRecord: record }), response },
+    newerRevision: response.revision > requested.sceneRevision
+  };
+}
+
+/** An overlay's Fabric answer, only while it is current (§4.3 rule 6). */
+export function currentOverlay(data: WorkbenchData, overlay: StudioOverlay): OverlayAnnotationsResponse | undefined {
+  return currentResponse(data.overlays?.[overlay], data);
 }
 
 /** A view's Fabric data, only while it is current for the session, revision, policy and compile record (§4.3 rule 6). */

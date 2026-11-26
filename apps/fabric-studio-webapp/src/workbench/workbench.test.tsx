@@ -1,4 +1,4 @@
-import { studioApiExampleCompileRecord, type ContractDiffResponse, type VerifyContractResponse, type ViewProjectionResponse } from "@unfurl/fabric-validation-client";
+﻿import { studioApiExampleCompileRecord, type ContractDiffResponse, type VerifyContractResponse, type ViewProjectionResponse, type OverlayAnnotationsResponse } from "@unfurl/fabric-validation-client";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { renderToString } from "react-dom/server";
@@ -24,14 +24,17 @@ import {
   type StudioViewState
 } from "./viewState.js";
 import { NOT_YET_PROVIDED_BY_FABRIC, PROJECTION_LOADING, PROJECTION_UNAVAILABLE, VIEW_DATA_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
-import { badgesByElement, evaluateOverlays, overlayAvailability, OVERLAY_REGISTRY, TRUST_POLICY_PERMISSIVE } from "./overlays.js";
+import { badgesByElement, evaluateOverlays, NOTHING_IN_VIEW, overlayAvailability, OVERLAY_REGISTRY, TRUST_POLICY_PERMISSIVE, type OverlayResult } from "./overlays.js";
 import { projectCompiledContract, projectData, projectFlow, projectRuntime, projectTopology } from "./projectors.js";
 import { OwnershipMatrixRenderer, TableRenderer, TwoDRenderer, sceneModeFor, viewForSceneMode } from "./renderers.js";
 import {
   currentCompileRecord,
   currentResponse,
+  currentOverlay,
   currentView,
   failedProjectionLoad,
+  pinOverlay,
+  type InputsPinned,
   pinView,
   freshness,
   isCurrent,
@@ -47,9 +50,9 @@ import { ContractDiffResult, diffBaseRevisions, VerificationResult } from "./com
 import { RETIRED_ROUTES, retiredRouteTarget } from "../StudioRoutes.js";
 
 /**
- * Tests the Studio workbench (LLD-studio-viewpoints-and-perspectives §9): the view-state reducer, deep links and the
- * §5.4 migration; views and overlays with and without their data (the unavailable state always has a reason); Security &
- * Trust in both identity paths; out-of-date compile and resolution values (§4.3 rule 6); renderer parity; overlays that
+ * Tests the Studio workbench (LLD-studio-viewpoints-and-perspectives Â§9): the view-state reducer, deep links and the
+ * Â§5.4 migration; views and overlays with and without their data (the unavailable state always has a reason); Security &
+ * Trust in both identity paths; out-of-date compile and resolution values (Â§4.3 rule 6); renderer parity; overlays that
  * never add elements or change composition state; rule-2 regressions; and the retired-route redirects.
  */
 
@@ -103,6 +106,26 @@ const FLOW_VIEW: ViewProjectionResponse = { ...VIEW_BASE, view: "flow",
 const TOPOLOGY_VIEW: ViewProjectionResponse = { ...VIEW_BASE, view: "topology",
   transports: { ...section([{ childContractId: "urn:contract:flow", providerNodeId: "flow", kind: "IN_PROCESS", details: {}, source: "contract.child_contracts[0].transport" }]),
     provenance: { sourceRevision: 4, contractHash: "b".repeat(64), compiledAt: "2026-01-01T00:00:00Z" } } };
+
+const OVERLAY_BASE = { view: "flow" as const, tenantId: "tenant-a", assemblyId: "assembly-a", sessionId: "s1", revision: 4,
+  staleSources: [], diagnostics: [], diagnosticArtifacts: [] };
+const PERFORMANCE_OVERLAY: OverlayAnnotationsResponse = { ...OVERLAY_BASE, overlay: "performance", available: true, findings: [],
+  annotations: [{ elementId: "flow", elementKind: "NODE", kind: "TIMEOUT", severity: "INFO", label: "timeout 30000 ms",
+    detail: "workflow.execute is called with a 30000 ms timeout", source: "contract.child_contracts[0].expectations.timeout_ms",
+    sourceRevision: 4, contractHash: "b".repeat(64) }] };
+const COMPLIANCE_OVERLAY: OverlayAnnotationsResponse = { ...OVERLAY_BASE, overlay: "compliance", available: true, annotations: [],
+  findings: [{ label: "Trust policy", value: "none set: planned under the permissive policy", source: "session.trustPolicyId" }],
+  staleSources: [{ source: "contract.audit", reason: { code: "COMPILE_REQUIRED", message: "no compile is recorded" } }] };
+const SECURITY_OVERLAY: OverlayAnnotationsResponse = { ...OVERLAY_BASE, overlay: "security", available: true,
+  annotations: [{ elementId: "flow", elementKind: "NODE", kind: "AUTHENTICATION", severity: "INFO", label: "authentication enforced",
+    detail: "callers must authenticate (JWT)", source: "claim.integration_ports.authentication" }],
+  findings: [{ label: "Identity", value: "in the composition: a component provides identity-context", source: "claim.offers[].capability" }] };
+
+/** The pinned overlay answer, failing the test when Fabric's answer was refused. */
+function pinnedOverlay(result: ReturnType<typeof pinOverlay>): InputsPinned<OverlayAnnotationsResponse> {
+  if (result.status !== "PINNED") assert.fail(`refused: ${result.reason}`);
+  return result.pinned;
+}
 
 const POLICY = { preferredShapes: [], disallowedShapes: [], requireIsolationForCapabilityPatterns: [], runtime: {} };
 
@@ -164,7 +187,7 @@ describe("view state", () => {
     assert.equal(state.colourOverlay, undefined, "turning the colour owner off leaves no owner");
   });
 
-  it("maps every retired tab value (§5.4) and refuses an unknown one with a notice", () => {
+  it("maps every retired tab value (Â§5.4) and refuses an unknown one with a notice", () => {
     assert.deepEqual(migrateActiveView("Assembly"), { view: "FLOW", renderer: "THREE_D", layout: "ASSEMBLY", guidedFixExpanded: false });
     assert.deepEqual(migrateActiveView("Exploded"), { view: "FLOW", renderer: "THREE_D", layout: "EXPLODED", guidedFixExpanded: false });
     assert.deepEqual(migrateActiveView("Ports"), { view: "FLOW", renderer: "TWO_D", guidedFixExpanded: false });
@@ -232,7 +255,7 @@ describe("views and overlays", () => {
     assert.equal(flow.available, false);
   });
 
-  it("regression: a projection is read only for the scope, session and revision it was loaded for (§4.3 rule 6)", () => {
+  it("regression: a projection is read only for the scope, session and revision it was loaded for (Â§4.3 rule 6)", () => {
     const at4 = projectionInputsFor("tenant-a", "assembly-a", session());
     const at5 = projectionInputsFor("tenant-a", "assembly-a", session({ sceneRevision: 5 }));
     const loaded: ProjectionLoad = { status: "LOADED", inputs: at4, response: PROJECTION };
@@ -285,7 +308,7 @@ describe("views and overlays", () => {
       && fact.value.startsWith("trust-acme") && fact.value.includes("does not apply named trust policies")));
   });
 
-  it("reports an out-of-date compile and resolution instead of showing them as current (§4.3 rule 6)", () => {
+  it("reports an out-of-date compile and resolution instead of showing them as current (Â§4.3 rule 6)", () => {
     const stale = data({ compile: pin(session({ sceneRevision: 2 }), POLICY, COMPILED) });
     const security = evaluateOverlays(["SECURITY"], projectFlow(PROJECTION), stale)[0]!;
     assert.ok(security.available);
@@ -336,14 +359,97 @@ describe("views and overlays", () => {
     assert.equal(currentResponse(undefined, data()), undefined);
   });
 
-  it("lists the overlays Fabric does not yet supply as unavailable with their reason", () => {
+  it("lists Resilience as not yet supplied, and Performance and Compliance as loading until Fabric answers", () => {
     const model = projectFlow(PROJECTION);
-    for (const overlay of OVERLAY_REGISTRY.filter(definition => definition.id !== "SECURITY")) {
-      const availability = overlayAvailability(overlay.id, model, data());
-      assert.equal(availability.available, false, overlay.id);
-      assert.equal(!availability.available && availability.reasonCode, NOT_YET_PROVIDED_BY_FABRIC);
+    const resilience = overlayAvailability("RESILIENCE", model, data());
+    assert.equal(!resilience.available && resilience.reasonCode, NOT_YET_PROVIDED_BY_FABRIC);
+    for (const overlay of ["PERFORMANCE", "COMPLIANCE"] as const) {
+      const availability = overlayAvailability(overlay, model, data());
+      assert.equal(!availability.available && availability.reasonCode, "OVERLAY_LOADING", overlay);
     }
     assert.equal(overlayAvailability("SECURITY", model, data({ session: undefined })).available, false);
+  });
+
+  it("draws Fabric's Performance annotations and Compliance findings while current, and Fabric's reasons otherwise", () => {
+    const model = projectFlow(PROJECTION);
+    const compiled = session({ compileRecords: [{ ...studioApiExampleCompileRecord, revision: 4, contractHash: "b".repeat(64) }] });
+    const performance = evaluateOverlays(["PERFORMANCE"], model,
+      data({ session: compiled, overlays: { PERFORMANCE: pin(compiled, POLICY, PERFORMANCE_OVERLAY, "b".repeat(64)) } }))[0] as OverlayResult;
+    assert.ok(performance.available && performance.annotations.some(annotation => annotation.elementId === "flow" && annotation.label === "timeout 30000 ms"));
+    // Before any compile, Compliance still answers: the trust-policy finding, with the decision audit left out.
+    const compliance = evaluateOverlays(["COMPLIANCE"], model,
+      data({ overlays: { COMPLIANCE: pin(session(), POLICY, COMPLIANCE_OVERLAY, null) } }))[0] as OverlayResult;
+    assert.ok(compliance.available && compliance.section.facts.some(fact => fact.label === "Trust policy" && fact.value.startsWith("none set")));
+    assert.ok(compliance.available && compliance.section.facts.some(fact => fact.label === "Left out" && fact.value.includes("COMPILE_REQUIRED")));
+    // The same compile-less answer is not drawn once a compile is recorded: it no longer describes the current record.
+    const outdated = overlayAvailability("COMPLIANCE", model,
+      data({ session: compiled, overlays: { COMPLIANCE: pin(compiled, POLICY, COMPLIANCE_OVERLAY, null) } }));
+    assert.equal(!outdated.available && outdated.reasonCode, "OVERLAY_LOADING");
+    const absent = overlayAvailability("PERFORMANCE", model, data({ overlays: { PERFORMANCE: pin(session(), POLICY,
+      { ...PERFORMANCE_OVERLAY, available: false, annotations: [], absentReason: { code: "COMPILE_REQUIRED", message: "no compile is recorded" } }, null) } }));
+    assert.equal(!absent.available && absent.reasonCode, "COMPILE_REQUIRED");
+  });
+
+  it("adds Fabric's authentication annotations to Security & Trust in both identity paths (rule 6)", () => {
+    const model = projectFlow(PROJECTION);
+    for (const mode of ["enforced", "trusted network"]) {
+      const answer = { ...SECURITY_OVERLAY, annotations: SECURITY_OVERLAY.annotations.map(annotation => ({ ...annotation, label: `authentication ${mode}` })) };
+      const result = evaluateOverlays(["SECURITY"], model, data({ overlays: { SECURITY: pin(session(), POLICY, answer, null) } }))[0]!;
+      assert.ok(result.available && result.annotations.some(annotation => annotation.label === `authentication ${mode}`), mode);
+    }
+    const loading = evaluateOverlays(["SECURITY"], model, data())[0]!;
+    assert.ok(loading.available && loading.section.facts.some(fact => fact.label === "Authentication & authorization" && fact.value === "loading from Fabric"),
+      "P1's facts stand while Fabric's answer loads");
+  });
+
+  it("keeps Security & Trust's claim-only annotations current after a compile (they read no compile record)", () => {
+    const pinned = pinOverlay(session(), POLICY, "SECURITY", SECURITY_OVERLAY);
+    assert.ok(pinned.status === "PINNED" && !("compileRecord" in pinned.pinned), "security is never pinned to a compile");
+    const compiled = session({ compileRecords: [{ ...studioApiExampleCompileRecord, revision: 4, contractHash: "b".repeat(64) }] });
+    const result = evaluateOverlays(["SECURITY"], projectFlow(PROJECTION),
+      data({ session: compiled, overlays: { SECURITY: pinnedOverlay(pinned) } }))[0]!;
+    assert.ok(result.available && result.annotations.some(annotation => annotation.label === "authentication enforced"));
+    assert.ok(result.available && !result.section.facts.some(fact => fact.value === "loading from Fabric"));
+  });
+
+  it("pins a compile-reading overlay to the record Fabric names, even when nothing came of it", () => {
+    const model = projectFlow(PROJECTION);
+    const compiled = session({ compileRecords: [{ ...studioApiExampleCompileRecord, revision: 4, contractHash: "b".repeat(64) }] });
+    const noTimeouts: OverlayAnnotationsResponse = { ...PERFORMANCE_OVERLAY, available: false, annotations: [],
+      provenance: { sourceRevision: 4, contractHash: "b".repeat(64), compiledAt: "2026-11-26T00:00:00Z" },
+      absentReason: { code: "NO_TIMEOUTS_DECLARED", message: "no child contract of the current compile sets a timeout" } };
+    const pinned = pinOverlay(compiled, POLICY, "PERFORMANCE", noTimeouts);
+    assert.ok(pinned.status === "PINNED" && pinned.pinned.compileRecord === "b".repeat(64));
+    const shown = overlayAvailability("PERFORMANCE", model, data({ session: compiled,
+      overlays: { PERFORMANCE: pinnedOverlay(pinned) } }));
+    assert.equal(!shown.available && shown.reasonCode, "NO_TIMEOUTS_DECLARED", "Fabric's reason, not loading");
+    const recompiled = session({ compileRecords: [...compiled.compileRecords!, { ...studioApiExampleCompileRecord, revision: 4, contractHash: "c".repeat(64) }] });
+    const outdated = overlayAvailability("PERFORMANCE", model, data({ session: recompiled,
+      overlays: { PERFORMANCE: pinnedOverlay(pinned) } }));
+    assert.equal(!outdated.available && outdated.reasonCode, "OVERLAY_LOADING", "a later compile makes it out of date");
+    const beforeCompile = pinOverlay(session(), POLICY, "COMPLIANCE", COMPLIANCE_OVERLAY);
+    assert.ok(beforeCompile.status === "PINNED" && beforeCompile.pinned.compileRecord === null, "no record named: pinned to no compile");
+  });
+
+  it("offers no overlay whose annotations all fall outside the active view, and says why (rules 1 and 3)", () => {
+    const model = projectFlow(PROJECTION);
+    const elsewhere: OverlayAnnotationsResponse = { ...PERFORMANCE_OVERLAY,
+      annotations: PERFORMANCE_OVERLAY.annotations.map(annotation => ({ ...annotation, elementId: "not-in-this-view" })) };
+    const compiled = session({ compileRecords: [{ ...studioApiExampleCompileRecord, revision: 4, contractHash: "b".repeat(64) }] });
+    const current = data({ session: compiled, overlays: { PERFORMANCE: pin(compiled, POLICY, elsewhere, "b".repeat(64)) } });
+    const [result] = evaluateOverlays(["PERFORMANCE"], model, current);
+    assert.equal(!result!.available && result!.reasonCode, NOTHING_IN_VIEW);
+    const availability = overlayAvailability("PERFORMANCE", model, current);
+    assert.equal(!availability.available && availability.reasonCode, NOTHING_IN_VIEW);
+    assert.match(!availability.available ? availability.message : "", /its 1 annotation is on elements this view does not draw/);
+  });
+
+  it("refuses an overlay answer for another session and holds back one for a later revision", () => {
+    const other = pinOverlay(session(), POLICY, "COMPLIANCE", { ...COMPLIANCE_OVERLAY, sessionId: "s-other" });
+    assert.equal(other.status, "REFUSED");
+    const later = pinOverlay(session({ sceneRevision: 4 }), POLICY, "COMPLIANCE", { ...COMPLIANCE_OVERLAY, revision: 5 });
+    assert.ok(later.status === "PINNED" && later.newerRevision);
+    assert.equal(later.status === "PINNED" && currentOverlay(data({ overlays: { COMPLIANCE: later.pinned } }), "COMPLIANCE"), undefined);
   });
 
   it("never adds an element and never changes composition state", () => {
@@ -401,7 +507,7 @@ describe("compile records, contract diff and verification (P2a)", () => {
     assert.doesNotMatch(html, /Contract hash changed/);
   });
 
-  it("never shows an answer asked for another revision or policy as current (§4.3 rule 6)", () => {
+  it("never shows an answer asked for another revision or policy as current (Â§4.3 rule 6)", () => {
     const moved = renderToString(<ContractDiffResult data={data({ contractDiff: pin(session({ sceneRevision: 3 }), POLICY, DIFF) })} />);
     assert.match(moved, /Out of date: the contract diff; it was produced at revision 3; the draft is at revision 4/);
     assert.doesNotMatch(moved, /IN_PROCESS_LIBRARY/);

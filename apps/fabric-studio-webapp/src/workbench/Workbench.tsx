@@ -116,7 +116,8 @@ function ScopedWorkbench({ client, tenantId, assemblyId, initialBaseCatalogHash,
 
   const composition = useWorkbenchComposition({
     client, tenantId, assemblyId, ...(initialBaseCatalogHash ? { initialBaseCatalogHash } : {}),
-    ...(operatorId ? { operatorId } : {}), selection, onSelect: select, allShapesPolicy: allShapesPolicy === true
+    ...(operatorId ? { operatorId } : {}), selection, onSelect: select, allShapesPolicy: allShapesPolicy === true,
+    activeView: viewState.view
   });
 
   function select(next: ThreeAssemblySelection) {

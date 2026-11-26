@@ -388,6 +388,25 @@ describe("HTTP Studio Fabric client", () => {
     assert.equal(second.searchParams.has("deploymentPolicy"), false);
   });
 
+  it("asks Fabric for one overlay's annotations for a view, with the policy as JSON", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      defaultTenantId: "tenant-payments",
+      defaultAssemblyId: "assembly-checkout",
+      fetch: fakeFetch(calls, { overlay: "compliance", available: false, annotations: [], findings: [], staleSources: [], diagnostics: [], diagnosticArtifacts: [] })
+    });
+    const policy = { preferredShapes: [], disallowedShapes: [], requireIsolationForCapabilityPatterns: [], runtime: {} };
+
+    await client.loadOverlay?.({ sessionId: "s1", overlay: "compliance", view: "data", deploymentPolicy: policy });
+
+    const url = new URL(calls[0]!.input);
+    assert.equal(url.pathname, "/studio/tenants/tenant-payments/assemblies/assembly-checkout/overlays/compliance");
+    assert.equal(url.searchParams.get("view"), "data");
+    assert.equal(url.searchParams.get("sessionId"), "s1");
+    assert.deepEqual(JSON.parse(url.searchParams.get("deploymentPolicy")!), policy);
+  });
+
   it("asks Fabric for one view's typed data, with the session and the policy as JSON", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({
