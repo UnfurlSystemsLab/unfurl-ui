@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_STUDIO_REQUEST_TIMEOUT_MS, createHttpStudioFabricClient, type FetchLike } from "./index.js";
+import { DEFAULT_STUDIO_REQUEST_TIMEOUT_MS, StudioApiError, createHttpStudioFabricClient, createMockStudioApiFetch, type FetchLike } from "./index.js";
 
 describe("HTTP Studio Fabric client", () => {
   it("keeps the default timeout aligned with Foundry-backed authoring turns", () => {
@@ -386,6 +386,40 @@ describe("HTTP Studio Fabric client", () => {
     assert.equal(second.searchParams.get("baseRevision"), "0", "revision 0 is a revision, not an absent one");
     assert.equal(second.searchParams.has("revision"), false);
     assert.equal(second.searchParams.has("deploymentPolicy"), false);
+  });
+
+  it("asks Fabric for the emit plan of an environment and manages environments with revision checks", async () => {
+    const calls: FetchCall[] = [];
+    const client = createHttpStudioFabricClient({
+      baseUrl: "http://fabric.local",
+      defaultTenantId: "tenant-payments",
+      defaultAssemblyId: "assembly-checkout",
+      fetch: fakeFetch(calls, { environment: "local", available: false, artifacts: [], requiredSecrets: [], runtimeBindings: [], diagnosticArtifacts: [] })
+    });
+
+    await client.loadEmitPlan?.({ sessionId: "s1", environment: "local" });
+    const plan = new URL(calls[0]!.input);
+    assert.equal(plan.pathname, "/studio/tenants/tenant-payments/assemblies/assembly-checkout/sessions/s1/emit-plan");
+    assert.equal(plan.searchParams.get("environment"), "local");
+
+    await client.saveEnvironment?.({ name: "local", expectedRevision: 2, target: { kind: "local-compose", options: {}, credentialRefs: [] },
+      bindings: { serviceBaseUrls: {}, componentConfig: [], disabledBindings: [] } });
+    assert.equal(new URL(calls[1]!.input).pathname, "/studio/tenants/tenant-payments/deployment-environments/local");
+    assert.equal(calls[1]!.method, "PUT");
+    assert.equal(JSON.parse(String(calls[1]!.body)).expectedRevision, 2);
+  });
+
+  it("keeps Fabric's error body on a refusal and reads a 204 as no body", async () => {
+    const mock = createMockStudioApiFetch({ environments: [] });
+    const client = createHttpStudioFabricClient({ baseUrl: "http://fabric.local", fetch: mock });
+    const saved = await client.saveEnvironment!({ name: "local", expectedRevision: 0, target: { kind: "local-compose", options: {}, credentialRefs: [] },
+      bindings: { serviceBaseUrls: {}, componentConfig: [], disabledBindings: [] } });
+    assert.equal(saved.revision, 1);
+    await assert.rejects(client.saveEnvironment!({ name: "local", expectedRevision: 0, target: saved.target, bindings: saved.bindings }),
+      (error: unknown) => error instanceof StudioApiError && error.status === 409
+        && (error.body as { currentRevision: number }).currentRevision === 1);
+    assert.equal(await client.deleteEnvironment!({ name: "local", expectedRevision: 1 }), undefined);
+    assert.deepEqual(await client.listEnvironments!({}), []);
   });
 
   it("asks Fabric for one overlay's annotations for a view, with the policy as JSON", async () => {

@@ -30,7 +30,9 @@ import type {
   StudioViewId,
   ViewProjectionResponse,
   StudioOverlayId,
-  OverlayAnnotationsResponse
+  OverlayAnnotationsResponse,
+  StudioDeploymentEnvironment,
+  EmitPlanResponse
 } from "./index.js";
 import { DEFAULT_STUDIO_ASSEMBLY_ID, DEFAULT_STUDIO_TENANT_ID } from "./httpClient.js";
 
@@ -57,6 +59,10 @@ export type MockStudioApiFixtures = {
   readonly viewResponses?: Partial<Record<StudioViewId, ViewProjectionResponse>>;
   /** Fixture overlay answers by overlay id; an overlay without one answers unavailable with a fixture reason. */
   readonly overlayResponses?: Partial<Record<StudioOverlayId, OverlayAnnotationsResponse>>;
+  /** Fixture deployment environments; saves and deletes change the fixture's copy, revision-checked like Fabric. */
+  readonly environments?: readonly StudioDeploymentEnvironment[];
+  /** Fixture emit-plan answers by environment name; another environment answers ENVIRONMENT_UNKNOWN. */
+  readonly emitPlanResponses?: Readonly<Record<string, EmitPlanResponse>>;
   readonly asset?: StudioVisualAsset;
   readonly files?: readonly StudioFileRecord[];
   readonly sessionHistory?: readonly StudioSessionHistoryItem[];
@@ -388,6 +394,7 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
   let catalog = fixtures.catalog ?? studioApiExampleCatalog;
   let files = [...(fixtures.files ?? [catalogFile(session.tenantId, catalog, 1)])];
   let sessionHistory = [...(fixtures.sessionHistory ?? [sessionHistoryItem(session, files.length)])];
+  let environments = [...(fixtures.environments ?? [])];
   return async (input, init) => {
     const url = new URL(input);
     const method = init?.method ?? "GET";
@@ -689,6 +696,33 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     if (method === "POST" && path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/verify`)) {
       return ok(fixtures.verifyResponse ?? studioApiExampleVerifyResponse);
     }
+    const environmentsPath = `/studio/tenants/${encodeURIComponent(session.tenantId)}/deployment-environments`;
+    if (method === "GET" && path === environmentsPath) {
+      return ok(environments);
+    }
+    if (path.startsWith(`${environmentsPath}/`) && (method === "PUT" || method === "DELETE")) {
+      const name = decodeURIComponent(path.slice(environmentsPath.length + 1));
+      const stored = environments.find(environment => environment.name === name);
+      const body = method === "PUT" ? JSON.parse(String(init?.body ?? "{}")) as { expectedRevision: number; target: StudioDeploymentEnvironment["target"]; bindings: StudioDeploymentEnvironment["bindings"] } : undefined;
+      const expected = body ? body.expectedRevision : Number(url.searchParams.get("expectedRevision"));
+      if ((stored?.revision ?? 0) !== expected) {
+        return failed(409, { code: "ENVIRONMENT_REVISION_CONFLICT", error: `environment ${name} is at revision ${stored?.revision ?? 0}`, currentRevision: stored?.revision ?? 0 });
+      }
+      environments = environments.filter(environment => environment.name !== name);
+      if (!body) return { ok: true, status: 204, statusText: "No Content", json: async () => undefined };
+      const saved: StudioDeploymentEnvironment = { name, revision: expected + 1, updatedAt: "2026-11-26T00:00:00Z",
+        contentSha256: fixtureContentHash(JSON.stringify({ target: body.target, bindings: body.bindings })), target: body.target, bindings: body.bindings };
+      environments = [...environments, saved].sort((left, right) => left.name.localeCompare(right.name));
+      return ok(saved);
+    }
+    if (method === "GET" && path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/emit-plan`)) {
+      const environment = url.searchParams.get("environment") ?? "";
+      return ok(fixtures.emitPlanResponses?.[environment] ?? {
+        tenantId: session.tenantId, assemblyId: session.assemblyId, sessionId: session.sessionId, revision: session.sceneRevision,
+        environment, available: false, absentReason: { code: "ENVIRONMENT_UNKNOWN", message: `the tenant has no deployment environment named ${environment}` },
+        artifacts: [], requiredSecrets: [], runtimeBindings: [], diagnosticArtifacts: []
+      });
+    }
     const overlayPrefix = `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/overlays/`;
     if (method === "GET" && path.startsWith(overlayPrefix)) {
       const overlay = decodeURIComponent(path.slice(overlayPrefix.length)) as StudioOverlayId;
@@ -741,6 +775,28 @@ function emptyViewProjection(session: StudioDraftSession, view: StudioViewId): V
 
 function sessionPath(session: StudioDraftSession, suffix: string): string {
   return `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/sessions${suffix}`;
+}
+
+/**
+ * A fixture stand-in for Fabric's content hash: a deterministic 64-character hex digest of the content's JSON (FNV-1a
+ * repeated), so equal content gives an equal value and changed content another. Fabric computes the real SHA-256.
+ */
+function fixtureContentHash(content: string): string {
+  let digest = "";
+  for (let round = 0; round < 8; round++) {
+    let hash = 0x811c9dc5 ^ round;
+    for (let index = 0; index < content.length; index++) {
+      hash ^= content.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    digest += hash.toString(16).padStart(8, "0");
+  }
+  return digest;
+}
+
+/** A non-2xx fixture answer with Fabric's JSON error body. */
+function failed(status: number, body: unknown): FetchResponseLike {
+  return { ok: false, status, statusText: status === 409 ? "Conflict" : "Bad Request", json: async () => body };
 }
 
 function ok<T>(body: T): FetchResponseLike {

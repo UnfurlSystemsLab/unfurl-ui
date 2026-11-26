@@ -9,6 +9,11 @@ import type {
   ViewProjectionResponse,
   OverlayAnnotationsRequest,
   OverlayAnnotationsResponse,
+  StudioDeploymentEnvironment,
+  SaveDeploymentEnvironmentRequest,
+  DeleteDeploymentEnvironmentRequest,
+  EmitPlanRequest,
+  EmitPlanResponse,
   AuthoringConverseRequest,
   AuthoringConverseResponse,
   CreateDraftCompositionRequest,
@@ -437,6 +442,39 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         tenantHeaders(scope.tenantId, authContext)
       );
     },
+    listEnvironments: async (body: { readonly tenantId?: string }) => {
+      const tenantId = body.tenantId ?? defaultScope.tenantId;
+      return request<readonly StudioDeploymentEnvironment[]>(guardedFetch, baseUrl, "GET",
+        `/studio/tenants/${encodeURIComponent(tenantId)}/deployment-environments`, undefined, tenantHeaders(tenantId, authContext));
+    },
+    saveEnvironment: async (body: SaveDeploymentEnvironmentRequest) => {
+      const tenantId = body.tenantId ?? defaultScope.tenantId;
+      return request<StudioDeploymentEnvironment>(guardedFetch, baseUrl, "PUT",
+        `/studio/tenants/${encodeURIComponent(tenantId)}/deployment-environments/${encodeURIComponent(body.name)}`,
+        { expectedRevision: body.expectedRevision, target: body.target, bindings: body.bindings },
+        tenantHeaders(tenantId, authContext));
+    },
+    deleteEnvironment: async (body: DeleteDeploymentEnvironmentRequest) => {
+      const tenantId = body.tenantId ?? defaultScope.tenantId;
+      await request<undefined>(guardedFetch, baseUrl, "DELETE",
+        `/studio/tenants/${encodeURIComponent(tenantId)}/deployment-environments/${encodeURIComponent(body.name)}${queryString({ expectedRevision: String(body.expectedRevision) })}`,
+        undefined, tenantHeaders(tenantId, authContext));
+    },
+    loadEmitPlan: async (body: EmitPlanRequest) => {
+      const scope = resolveScope(defaultScope, body);
+      const query = queryString({
+        environment: body.environment,
+        deploymentPolicy: body.deploymentPolicy === undefined ? undefined : JSON.stringify(body.deploymentPolicy)
+      });
+      return request<EmitPlanResponse>(
+        guardedFetch,
+        baseUrl,
+        "GET",
+        `/studio/tenants/${encodeURIComponent(scope.tenantId)}/assemblies/${encodeURIComponent(scope.assemblyId)}/sessions/${encodeURIComponent(body.sessionId)}/emit-plan${query}`,
+        undefined,
+        tenantHeaders(scope.tenantId, authContext)
+      );
+    },
     loadOverlay: async (body: OverlayAnnotationsRequest) => {
       const scope = resolveScope(defaultScope, body);
       const query = queryString({
@@ -563,10 +601,30 @@ async function withTimeout<T>(
  * Transport helper: sends one JSON Studio API request and converts non-2xx responses into
  * route-scoped errors that panels can render without inspecting raw Response objects.
  */
+/**
+ * A Fabric Studio API answer that was not 2xx, with Fabric's JSON body when it sent one (for example a refused
+ * environment save's `problems`, or a revision conflict's `currentRevision`). The message keeps the established
+ * `Fabric Studio API failed: METHOD path HTTP status` form other callers read.
+ */
+export class StudioApiError extends Error {
+  /**
+   * @param status the HTTP status.
+   * @param body   Fabric's parsed JSON body, or undefined when there was none.
+   */
+  constructor(message: string, readonly status: number, readonly body: unknown) {
+    super(message);
+    this.name = "StudioApiError";
+  }
+}
+
+/**
+ * Transport: one JSON request to Fabric. A non-2xx answer throws {@link StudioApiError} with Fabric's body; a 204 answer
+ * has no body and resolves to undefined.
+ */
 async function request<T>(
   fetchImpl: FetchLike,
   baseUrl: string,
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   body?: unknown,
   headers?: Record<string, string>
@@ -585,8 +643,16 @@ async function request<T>(
 
   const response = await fetchImpl(`${baseUrl}${path}`, init);
   if (!response.ok) {
-    throw new Error(`Fabric Studio API failed: ${method} ${path} HTTP ${response.status} ${response.statusText}`);
+    let errorBody: unknown;
+    try {
+      errorBody = await response.json();
+    } catch {
+      errorBody = undefined; // Fabric sent no JSON body: the status alone describes the failure.
+    }
+    throw new StudioApiError(`Fabric Studio API failed: ${method} ${path} HTTP ${response.status} ${response.statusText}`,
+      response.status, errorBody);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 

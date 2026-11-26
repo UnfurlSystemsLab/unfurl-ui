@@ -3,8 +3,9 @@ import { signingHandoffFromCompile } from "../signingHandoff.js";
 import { overlayTitle } from "./viewState.js";
 import type { Fact, ViewModel } from "./projectors.js";
 import { NOT_YET_PROVIDED_BY_FABRIC, type Availability } from "./views.js";
-import type { OverlayAnnotationsResponse } from "@unfurl/fabric-validation-client";
-import { currentOverlay, isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
+import type { EmitPlanResponse, OverlayAnnotationsResponse } from "@unfurl/fabric-validation-client";
+import { runtimeBindingsByNode } from "./projectors.js";
+import { currentEmitPlan, currentOverlay, isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
 
 /** One annotation on an element the view already contains: a badge, styling hint and its source (LLD §4.3 rule 1). */
 export type OverlayAnnotation = {
@@ -16,9 +17,15 @@ export type OverlayAnnotation = {
 };
 
 /** The inspector section an overlay contributes. */
+/**
+ * The inspector section an overlay contributes. `facts` are what the overlay found; `notes` say why a source has nothing
+ * to add (for example "choose a deployment environment"). Notes are shown but never make an overlay available, so an
+ * overlay with notes alone is never drawn as a layer (§4.3 rule 3).
+ */
 export type OverlaySection = {
   readonly title: string;
   readonly facts: readonly Fact[];
+  readonly notes?: readonly Fact[];
 };
 
 export type OverlayResult =
@@ -80,7 +87,8 @@ const SECURITY: OverlayDefinition = {
       ...(permissive ? [{ label: "Warning", value: `${permissive.code}: ${permissive.message}`, source: "session.warnings[]" }] : []),
       signingFact(data),
       ...verificationFacts(data),
-      ...fabricSecurityFacts(data)
+      ...fabricSecurityFacts(data),
+      ...secretRequestFacts(data)
     ];
     // Fabric's authentication and authorization annotations (P2c), only while its answer is current.
     const fabric = currentOverlay(data, "SECURITY");
@@ -127,6 +135,72 @@ function verificationFacts(data: WorkbenchData): readonly Fact[] {
 }
 
 /**
+ * The emit plan the overlays' runtime facts read (P2d), or why there is none: no environment chosen, loading, failed,
+ * out of date, or Fabric's absent reason. Only a current, available plan is returned (§4.3 rule 6).
+ */
+export function emitPlanStatus(data: WorkbenchData): { readonly plan: EmitPlanResponse } | { readonly why: string } {
+  if (data.environment === undefined) return { why: "choose a deployment environment in Substrate & Topology" };
+  const plan = currentEmitPlan(data);
+  if (plan) {
+    return plan.available ? { plan } : { why: `${plan.absentReason?.code ?? "UNAVAILABLE"}: ${plan.absentReason?.message ?? ""}` };
+  }
+  if (data.emitPlanError) return { why: `the emit plan could not be loaded: ${data.emitPlanError}` };
+  if (data.emitPlan) return { why: staleMessage("the emit plan", data.emitPlan, data, "It is being asked for again.") };
+  return { why: `loading the emit plan for ${data.environment}` };
+}
+
+/**
+ * Security & Trust's secret requests from the current emit plan (P2d): each by name, bound component and store hint,
+ * never a value; or why they are not known.
+ */
+function secretRequestFacts(data: WorkbenchData): readonly Fact[] {
+  const status = emitPlanStatus(data);
+  if (!("plan" in status)) return [{ label: "Secret requests", value: status.why, source: "emit-plan requiredSecrets" }];
+  if (status.plan.requiredSecrets.length === 0) {
+    return [{ label: "Secret requests", value: `none: ${status.plan.environment} needs no secret`, source: "emit-plan requiredSecrets" }];
+  }
+  return status.plan.requiredSecrets.map(secret => ({
+    label: `Secret ${secret.name}`,
+    value: `bound to ${secret.boundComponentId}, store hint ${secret.targetStoreHint}`,
+    source: "emit-plan requiredSecrets[]"
+  }));
+}
+
+/**
+ * The runtime facts an overlay adds from the current emit plan's bindings (P2d), one annotation per binding on its
+ * provider node, with a status line saying why there are none when no current plan exists.
+ */
+type RuntimeFacts = { readonly annotations: readonly OverlayAnnotation[]; readonly status?: Fact };
+
+/** Performance & Load's runtime facts: the `runtime_policy.timeout_ms` each binding sets. */
+function runtimeTimeouts(data: WorkbenchData): RuntimeFacts {
+  const status = emitPlanStatus(data);
+  if (!("plan" in status)) return { annotations: [], status: { label: "Runtime timeouts", value: status.why, source: "emit-plan runtimeBindings" } };
+  const annotations: OverlayAnnotation[] = [];
+  runtimeBindingsByNode(data).forEach((bindings, nodeId) => bindings.forEach(binding => {
+    if (binding.timeoutMs === undefined) return;
+    annotations.push({ elementId: nodeId, label: `runtime timeout ${binding.timeoutMs} ms`, severity: "INFO",
+      detail: `${binding.capability} is bound with runtime_policy.timeout_ms ${binding.timeoutMs} in environment ${status.plan.environment}`,
+      source: "emit-plan runtimeBindings[].timeoutMs" });
+  }));
+  return { annotations };
+}
+
+/** Compliance & Governance's runtime facts: whether each binding enables audit (`runtime_policy.audit_enabled`). */
+function runtimeAudit(data: WorkbenchData): RuntimeFacts {
+  const status = emitPlanStatus(data);
+  if (!("plan" in status)) return { annotations: [], status: { label: "Runtime audit", value: status.why, source: "emit-plan runtimeBindings" } };
+  const annotations: OverlayAnnotation[] = [];
+  runtimeBindingsByNode(data).forEach((bindings, nodeId) => bindings.forEach(binding => annotations.push({
+    elementId: nodeId, label: binding.auditEnabled ? "audit enabled" : "audit disabled",
+    severity: binding.auditEnabled ? "INFO" : "WARNING",
+    detail: `${binding.capability} is bound with runtime_policy.audit_enabled ${binding.auditEnabled} in environment ${status.plan.environment}`,
+    source: "emit-plan runtimeBindings[].auditEnabled"
+  })));
+  return { annotations };
+}
+
+/**
  * The facts Security & Trust adds from Fabric's answer (P2c): its findings while current, Fabric's reason when it found
  * nothing, or that the answer is loading or failed. P1's facts stand either way.
  */
@@ -165,10 +239,11 @@ function findingFacts(fabric: OverlayAnnotationsResponse): readonly Fact[] {
 }
 
 /**
- * An overlay read entirely from Fabric's answer (P2c): its annotations and findings while the answer is current, and
- * otherwise unavailable with Fabric's reason, or loading, or the request's error (§4.3 rules 3 and 6).
+ * An overlay read from Fabric (P2c, P2d): Fabric's overlay answer while it is current, plus the runtime facts the current
+ * emit plan's bindings give it. With neither, it is unavailable with Fabric's reason, or loading, or the request's error
+ * (§4.3 rules 3 and 6); runtime facts alone make it available, with a line saying what Fabric's answer is.
  */
-function fromFabricOverlay(id: "PERFORMANCE" | "COMPLIANCE"): OverlayDefinition {
+function fromFabricOverlay(id: "PERFORMANCE" | "COMPLIANCE", runtimeFacts: (data: WorkbenchData) => RuntimeFacts): OverlayDefinition {
   return {
     id,
     title: overlayTitle(id),
@@ -177,18 +252,31 @@ function fromFabricOverlay(id: "PERFORMANCE" | "COMPLIANCE"): OverlayDefinition 
       if (!data.session) {
         return { overlay: id, available: false, reasonCode: "NO_DRAFT", message: `${overlayTitle(id)} reads the open draft session; start or open a draft.` };
       }
+      const runtime = runtimeFacts(data);
       const fabric = currentOverlay(data, id);
+      const section = (facts: readonly Fact[], notes: readonly Fact[]) => ({ title: overlayTitle(id), facts, notes });
       if (!fabric) {
         const error = data.overlayErrors?.[id];
-        return error
-          ? { overlay: id, available: false, reasonCode: "OVERLAY_DATA_UNAVAILABLE", message: `Fabric's ${overlayTitle(id)} answer could not be loaded: ${error}` }
-          : { overlay: id, available: false, reasonCode: "OVERLAY_LOADING", message: `Loading Fabric's ${overlayTitle(id)} answer for revision ${data.session.sceneRevision}.` };
+        const message = error
+          ? `Fabric's ${overlayTitle(id)} answer could not be loaded: ${error}`
+          : `Loading Fabric's ${overlayTitle(id)} answer for revision ${data.session.sceneRevision}.`;
+        if (runtime.annotations.length > 0) {
+          return { overlay: id, available: true, annotations: runtime.annotations,
+            section: section([], [{ label: overlayTitle(id), value: message, source: `overlays/${id.toLowerCase()}` }]) };
+        }
+        return { overlay: id, available: false, reasonCode: error ? "OVERLAY_DATA_UNAVAILABLE" : "OVERLAY_LOADING", message };
       }
       if (!fabric.available) {
+        if (runtime.annotations.length > 0) {
+          return { overlay: id, available: true, annotations: runtime.annotations, section: section([], [{
+            label: overlayTitle(id), value: `${fabric.absentReason?.code ?? "UNAVAILABLE"}: ${fabric.absentReason?.message ?? ""}`,
+            source: `overlays/${fabric.overlay} absentReason`
+          }]) };
+        }
         return { overlay: id, available: false, reasonCode: fabric.absentReason?.code ?? "UNAVAILABLE", message: fabric.absentReason?.message ?? "" };
       }
-      return { overlay: id, available: true, annotations: fabric.annotations.map(fromFabric),
-        section: { title: overlayTitle(id), facts: findingFacts(fabric) } };
+      return { overlay: id, available: true, annotations: [...fabric.annotations.map(fromFabric), ...runtime.annotations],
+        section: section(findingFacts(fabric), runtime.status ? [runtime.status] : []) };
     }
   };
 }
@@ -211,9 +299,9 @@ function waitsForFabric(id: StudioOverlay, what: string): OverlayDefinition {
 /** Registry: the four overlays (§4), in pill order. */
 export const OVERLAY_REGISTRY: readonly OverlayDefinition[] = [
   SECURITY,
-  fromFabricOverlay("PERFORMANCE"),
+  fromFabricOverlay("PERFORMANCE", runtimeTimeouts),
   waitsForFabric("RESILIENCE", "declared faults and their propagation"),
-  fromFabricOverlay("COMPLIANCE")
+  fromFabricOverlay("COMPLIANCE", runtimeAudit)
 ];
 
 /** The definition of an overlay. */

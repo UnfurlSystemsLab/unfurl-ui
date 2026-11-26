@@ -48,6 +48,11 @@ import {
 import { Workbench } from "./Workbench.js";
 import { ContractDiffResult, diffBaseRevisions, VerificationResult } from "./compileRecords.js";
 import { RETIRED_ROUTES, retiredRouteTarget } from "../StudioRoutes.js";
+import { StudioApiError, type EmitPlanResponse, type StudioDeploymentEnvironment } from "@unfurl/fabric-validation-client";
+import { currentEmitPlan, environmentKey, pinEmitPlan } from "./workbenchData.js";
+import { emitPlanStatus } from "./overlays.js";
+import { EmitPlanSection, EnvironmentFormFields } from "./environmentEditor.js";
+import { emptyEnvironmentForm, environmentOutcome, formFromEnvironment, problemsAt, requestFromForm } from "./environments.js";
 
 /**
  * Tests the Studio workbench (LLD-studio-viewpoints-and-perspectives Â§9): the view-state reducer, deep links and the
@@ -731,6 +736,119 @@ describe("workbench", () => {
     const html = renderToString(<Workbench client={client()} deepLink="view=topology&renderer=table&overlays=cost" />);
     assert.match(html, /aria-selected="true"[^>]*>Substrate &amp; Topology/);
     assert.match(html, /Ignored link overlay cost/);
+  });
+});
+
+describe("emit plan and environments (P2d)", () => {
+  const RECORD = { ...studioApiExampleCompileRecord, revision: 4, contractHash: "b".repeat(64) };
+  const LOCAL: StudioDeploymentEnvironment = { name: "local", revision: 2, updatedAt: "2026-11-26T00:00:00Z", contentSha256: "a".repeat(64),
+    target: { kind: "local-compose", environment: "local", options: { "image.flow": "unfurl-flow:e2e" }, credentialRefs: [] },
+    bindings: { serviceBaseUrls: { "urn:unfurl:flow:runtime": "http://flow:8080" }, timeoutMs: 45000, componentConfig: [], disabledBindings: [] } };
+  const PLAN: EmitPlanResponse = { tenantId: "tenant-a", assemblyId: "assembly-a", sessionId: "s1", revision: 4,
+    environment: "local", environmentRevision: 2, environmentSha256: "a".repeat(64), provenance: { sourceRevision: 4, contractHash: "b".repeat(64), compiledAt: "2026-11-26T00:00:00Z" },
+    available: true, targetKind: "local-compose",
+    artifacts: [{ path: "compose.yaml", kind: "COMPOSE", sha256: "c".repeat(64) }],
+    requiredSecrets: [{ name: "UNFURL_FOUNDRY_CREDENTIAL_KEY", boundComponentId: "foundry", targetStoreHint: "local-compose-env" }],
+    runtimeBindings: [
+      { bindingId: "urn:b:root", contractId: "urn:c:root", enabled: true, auditEnabled: true, secretRefNames: [], configRefNames: [] },
+      { bindingId: "urn:b:flow", contractId: "urn:c:flow", capability: "workflow.execute", providerComponent: "urn:unfurl:flow:runtime",
+        providerNodeId: "flow", deploymentKind: "CONTAINER", baseUrl: "http://flow:8080", enabled: true, timeoutMs: 45000,
+        auditEnabled: false, telemetryNamespace: "acme", secretRefNames: ["credentials"], configRefNames: [] }
+    ],
+    bindingsSha256: "d".repeat(64), emitManifestSha256: "e".repeat(64), diagnosticArtifacts: [] };
+  const compiled = () => session({ compileRecords: [RECORD] });
+  const withPlan = (overrides: Parameters<typeof data>[0] = {}) => {
+    const pinned = pinEmitPlan(compiled(), POLICY, "local", PLAN);
+    assert.equal(pinned.status, "PINNED");
+    return data({ session: compiled(), environments: [LOCAL], environment: "local",
+      emitPlan: pinned.status === "PINNED" ? pinned.pinned : undefined, ...overrides });
+  };
+
+  it("refuses an answer for another environment or session, and pins it to the environment's name and settings", () => {
+    assert.equal(pinEmitPlan(compiled(), POLICY, "staging", PLAN).status, "REFUSED");
+    assert.equal(pinEmitPlan(compiled(), POLICY, "local", { ...PLAN, sessionId: "s-other" }).status, "REFUSED");
+    const pinned = pinEmitPlan(compiled(), POLICY, "local", PLAN);
+    assert.ok(pinned.status === "PINNED" && pinned.pinned.environment === environmentKey("local", "a".repeat(64)) && pinned.pinned.compileRecord === "b".repeat(64));
+    assert.equal(currentEmitPlan(withPlan()), PLAN);
+  });
+
+  it("is out of date after choosing another environment, after a settings change, and after a new compile record (rule 6)", () => {
+    assert.equal(currentEmitPlan(withPlan({ environment: "staging", environments: [LOCAL, { ...LOCAL, name: "staging" }] })), undefined);
+    assert.equal(currentEmitPlan(withPlan({ environments: [{ ...LOCAL, revision: 3, contentSha256: "9".repeat(64) }] })), undefined, "changed settings");
+    assert.equal(currentEmitPlan(withPlan({ environments: [{ ...LOCAL, revision: 2, contentSha256: "9".repeat(64) }] })), undefined,
+      "deleted and re-created at the same revision with other settings");
+    assert.equal(currentEmitPlan(withPlan({ environments: [{ ...LOCAL, revision: 3 }] })), PLAN, "a save that kept the settings keeps it current");
+    assert.equal(currentEmitPlan(withPlan({ session: session({ compileRecords: [RECORD, { ...RECORD, contractHash: "f".repeat(64) }] }) })), undefined);
+    const stale = withPlan({ environments: [{ ...LOCAL, contentSha256: "9".repeat(64) }] });
+    assert.match(freshness(stale.emitPlan!, stale).current ? "" : (freshness(stale.emitPlan!, stale) as { reason: string }).reason, /has changed since/);
+  });
+
+  it("puts each binding on its provider node in Substrate & Topology only while the plan is current", () => {
+    const facts = projectTopology(PROJECTION, withPlan()).nodes.find(node => node.id === "flow")!.facts;
+    assert.ok(facts.some(fact => fact.label === "Runtime binding (workflow.execute)" && fact.value === "CONTAINER at http://flow:8080"));
+    const stale = projectTopology(PROJECTION, withPlan({ environments: [{ ...LOCAL, contentSha256: "9".repeat(64) }] })).nodes.find(node => node.id === "flow")!.facts;
+    assert.ok(!stale.some(fact => fact.label.startsWith("Runtime binding")));
+  });
+
+  it("adds runtime timeouts, audit flags and secret-request names to the overlays while the plan is current", () => {
+    const model = projectTopology(PROJECTION, withPlan());
+    const current = withPlan();
+    const [performance, compliance, security] = evaluateOverlays(["PERFORMANCE", "COMPLIANCE", "SECURITY"], model, current) as [OverlayResult, OverlayResult, OverlayResult];
+    assert.ok(performance.available && performance.annotations.some(a => a.elementId === "flow" && a.label === "runtime timeout 45000 ms"),
+      "runtime timeouts alone make Performance available, with Fabric's answer still loading as a note");
+    assert.ok(compliance.available && compliance.annotations.some(a => a.elementId === "flow" && a.label === "audit disabled" && a.severity === "WARNING"));
+    assert.ok(security.available && security.section.facts.some(f => f.label === "Secret UNFURL_FOUNDRY_CREDENTIAL_KEY"
+      && f.value === "bound to foundry, store hint local-compose-env"));
+    const none = evaluateOverlays(["PERFORMANCE"], model, data({ session: compiled() }))[0]!;
+    assert.equal(!none.available && none.reasonCode, "OVERLAY_LOADING", "with no environment chosen, nothing is added");
+    const status = emitPlanStatus(data());
+    assert.equal("why" in status ? status.why : "", "choose a deployment environment in Substrate & Topology");
+  });
+
+  it("shows the plan with preview hashes and secret names only, Fabric's reason, or that no environment is chosen", () => {
+    const html = renderToString(<EmitPlanSection data={withPlan()} />);
+    assert.match(html, /compose.yaml/);
+    assert.match(html, /preview hash cccccccccccc/);
+    assert.match(html, /UNFURL_FOUNDRY_CREDENTIAL_KEY/);
+    assert.match(html, /bound to foundry, store hint local-compose-env/);
+    const refused = pinEmitPlan(compiled(), POLICY, "local", { ...PLAN, available: false, artifacts: [], requiredSecrets: [], runtimeBindings: [],
+      absentReason: { code: "SERVICE_BASE_URL_MISSING", message: "urn:unfurl:foundry is served over HTTP but has no base URL" } });
+    const unavailable = renderToString(<EmitPlanSection data={withPlan({ emitPlan: refused.status === "PINNED" ? refused.pinned : undefined })} />);
+    assert.match(unavailable, /SERVICE_BASE_URL_MISSING: urn:unfurl:foundry is served over HTTP/);
+    assert.match(renderToString(<EmitPlanSection data={data()} />), /choose a deployment environment/);
+  });
+
+  it("converts between the form and Fabric's environment, sending identity only when it is on (rule 6)", () => {
+    const form = formFromEnvironment(LOCAL);
+    const request = requestFromForm(form, LOCAL.revision);
+    assert.deepEqual(request.target, LOCAL.target);
+    assert.deepEqual(request.bindings, LOCAL.bindings);
+    assert.equal(request.expectedRevision, 2);
+    const withIdentity = requestFromForm({ ...form, identityOn: true, issuer: " https://idp.example ", clientCredentialsRef: "secret://idp/client",
+      audiences: [{ key: "urn:unfurl:foundry", value: "foundry" }, { key: " ", value: "ignored" }] }, 2);
+    assert.equal(withIdentity.bindings.identity?.issuer, "https://idp.example");
+    assert.deepEqual(withIdentity.bindings.identity?.audiences, { "urn:unfurl:foundry": "foundry" });
+    assert.equal(requestFromForm({ ...form, issuer: "https://idp.example" }, 2).bindings.identity, undefined, "identity off sends none");
+    assert.equal(requestFromForm(emptyEnvironmentForm(), 0).target.kind, undefined, "Studio sends what was typed and checks nothing");
+  });
+
+  it("reads Fabric's refusals: problems by field path, a revision conflict, or a failure", () => {
+    const problems = [{ path: "target.kind", message: "'nomad' is not an installed emitter" },
+      { path: "target.options.runtimeBindingPath", message: "is generated by the emit-plan preview" },
+      { path: "bindings.identity.clientCredentialsRef", message: "must be a secret:// or config:// reference" }];
+    const invalid = environmentOutcome(new StudioApiError("Fabric Studio API failed: PUT x HTTP 400", 400, { code: "ENVIRONMENT_INVALID", problems }));
+    assert.ok(invalid.status === "INVALID" && invalid.problems.length === 3);
+    assert.deepEqual(problemsAt(problems, "bindings.identity").map(problem => problem.path), ["bindings.identity.clientCredentialsRef"]);
+    const conflict = environmentOutcome(new StudioApiError("x", 409, { code: "ENVIRONMENT_REVISION_CONFLICT", error: "at revision 3", currentRevision: 3 }));
+    assert.ok(conflict.status === "CONFLICT" && conflict.currentRevision === 3);
+    assert.equal(environmentOutcome(new Error("network down")).status, "FAILED");
+    const html = renderToString(<EnvironmentFormFields form={{ ...formFromEnvironment(LOCAL), identityOn: true }} creating={false}
+      problems={[...problems, { path: "bindings.catalog", message: "unplaced" }]} onChange={() => undefined} onSave={() => undefined}
+      onCancel={() => undefined} saving={false} />);
+    assert.match(html, /target.kind: &#x27;nomad&#x27; is not an installed emitter/);
+    assert.match(html, /bindings.identity.clientCredentialsRef: must be a secret/);
+    assert.match(html, /target.options.runtimeBindingPath: is generated by the emit-plan preview/, "shown at the Options table");
+    assert.match(html, /bindings.catalog: unplaced/, "a problem no field names is listed under the form");
   });
 });
 

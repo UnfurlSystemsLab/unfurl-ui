@@ -2,7 +2,9 @@ import type {
   CompileDraftCandidateResponse,
   ContractDiffResponse,
   DeploymentPolicyDraft,
+  EmitPlanResponse,
   OverlayAnnotationsResponse,
+  StudioDeploymentEnvironment,
   StudioOverlay,
   StudioOverlayId,
   StudioViewId,
@@ -65,6 +67,19 @@ export type WorkbenchData = {
   readonly overlays?: Partial<Record<StudioOverlay, InputsPinned<OverlayAnnotationsResponse>>>;
   /** Why an overlay's answer could not be loaded for the current inputs. */
   readonly overlayErrors?: Partial<Record<StudioOverlay, string>>;
+  /** The tenant's deployment environments, as Fabric last listed them (LLD-fabric-studio-api, Deployment Environments). */
+  readonly environments?: readonly StudioDeploymentEnvironment[];
+  /** Why the environments could not be listed. */
+  readonly environmentsError?: string;
+  /** The environment the operator chose for the emit plan; none until they choose one (§5.5). */
+  readonly environment?: string;
+  /**
+   * Fabric's emit-plan answer for the chosen environment (StudioEmitPlanPreview), pinned to what it describes, the
+   * environment's name and revision included. Read only through {@link currentEmitPlan}.
+   */
+  readonly emitPlan?: InputsPinned<EmitPlanResponse>;
+  /** Why the emit plan could not be loaded for the current inputs. */
+  readonly emitPlanError?: string;
   /** The last deployment resolution and the inputs it resolved. */
   readonly deployment?: InputsPinned<ResolveDeploymentResponse>;
   /** Why the deployment could not be resolved. */
@@ -85,14 +100,64 @@ export type WorkbenchData = {
  * `compileRecord` is the record's `contractHash`, `null` when the session had no record, and absent for a value that
  * does not come from a compile (the deployment resolution). Every compile has its own contract hash, because its audit
  * carries its own `compiledAt`, so a recompile at the same revision, signed or not, is a different record.
+ *
+ * `environment` is the deployment environment an emit-plan answer describes, as {@link environmentKey} writes it (name
+ * and Fabric's content hash); absent for every other value.
  */
 export type InputsPinned<T> = {
   readonly sessionId: string;
   readonly revision: number;
   readonly policyKey: string;
   readonly compileRecord?: string | null;
+  readonly environment?: string;
   readonly response: T;
 };
+
+/**
+ * Comparison key of a deployment environment's settings: its name and Fabric's `contentSha256`. An answer for `local`
+ * is not current once `local`'s settings change, also when it was deleted and re-created at the same revision, or once
+ * another environment is chosen. The revision is not part of it: revisions are for concurrent editing and are reused.
+ */
+export function environmentKey(name: string, contentSha256: string | undefined): string {
+  return `${name}@${contentSha256 ?? "unknown"}`;
+}
+
+/** The chosen environment's current key, from the environments Fabric last listed; undefined when none is chosen. */
+export function chosenEnvironmentKey(data: WorkbenchData): string | undefined {
+  if (data.environment === undefined) return undefined;
+  return environmentKey(data.environment, data.environments?.find(environment => environment.name === data.environment)?.contentSha256);
+}
+
+/**
+ * Pins an emit-plan answer to what it describes (§4.3 rule 6), as {@link pinView} does for views: its scope and
+ * revision, the policy Studio sent, the compile record Fabric names in `provenance` (`null` when none), and the
+ * environment's name and content hash. An answer for another tenant, assembly, session or environment is refused.
+ */
+export function pinEmitPlan(requested: StudioDraftSession, policy: DeploymentPolicyDraft, environment: string,
+  response: EmitPlanResponse): { readonly status: "PINNED"; readonly pinned: InputsPinned<EmitPlanResponse>; readonly newerRevision: boolean }
+  | { readonly status: "REFUSED"; readonly reason: string } {
+  if (response.tenantId !== requested.tenantId || response.assemblyId !== requested.assemblyId
+    || response.sessionId !== requested.sessionId) {
+    return { status: "REFUSED", reason: `Fabric answered for session ${response.sessionId} of ${response.tenantId}/${response.assemblyId};`
+      + ` session ${requested.sessionId} of ${requested.tenantId}/${requested.assemblyId} was asked` };
+  }
+  if (response.environment !== environment) {
+    return { status: "REFUSED", reason: `Fabric answered the emit plan for environment ${response.environment}; ${environment} was asked` };
+  }
+  if (!Number.isSafeInteger(response.revision)) return { status: "REFUSED", reason: "Fabric's answer names no revision" };
+  return {
+    status: "PINNED",
+    pinned: { sessionId: response.sessionId, revision: response.revision, policyKey: policyKey(policy),
+      compileRecord: response.provenance?.contractHash ?? null,
+      environment: environmentKey(response.environment, response.environmentSha256), response },
+    newerRevision: response.revision > requested.sceneRevision
+  };
+}
+
+/** The emit-plan answer, only while it is current for the inputs and the chosen environment (§4.3 rule 6). */
+export function currentEmitPlan(data: WorkbenchData): EmitPlanResponse | undefined {
+  return currentResponse(data.emitPlan, data);
+}
 
 /** Whether a pinned value is current, or why not. */
 export type Freshness =
@@ -246,6 +311,15 @@ export function freshness(pinned: InputsPinned<unknown>, data: WorkbenchData): F
   }
   if (pinned.policyKey !== policyKey(data.deploymentPolicy)) {
     return { current: false, reason: "it was produced with a different deployment policy" };
+  }
+  // An emit-plan answer is about one environment's settings: choosing another, or a change to them, moves it on.
+  if (pinned.environment !== undefined && pinned.environment !== chosenEnvironmentKey(data)) {
+    const [name] = pinned.environment.split("@");
+    return { current: false, reason: data.environment === undefined
+      ? `it was produced for environment ${name}, and no environment is chosen`
+      : data.environment !== name
+        ? `it was produced for environment ${name}; ${data.environment} is chosen`
+        : `it was produced for ${name}'s earlier settings; ${name} has changed since` };
   }
   // A compile-derived answer is about one compile record. A later compile, at the same revision too (signed or not,
   // by this operator or arriving through polling), is a new record, and the answer no longer describes the current one.

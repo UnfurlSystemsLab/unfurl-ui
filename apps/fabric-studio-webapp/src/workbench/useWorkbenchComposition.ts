@@ -6,6 +6,9 @@ import {
   type CompileDraftCandidateResponse,
   type ContractDiffResponse,
   type OverlayAnnotationsResponse,
+  type EmitPlanResponse,
+  type SaveDeploymentEnvironmentRequest,
+  type StudioDeploymentEnvironment,
   type StudioOverlay,
   type StudioViewpoint,
   type VerifyContractResponse,
@@ -60,11 +63,14 @@ import {
   type DraftComponentItem,
   type ReplacementCandidate
 } from "./draftInventory.js";
+import { environmentOutcome, type EnvironmentOutcome } from "./environments.js";
 import {
+  chosenEnvironmentKey,
   currentCompileRecord,
   failedProjectionLoad,
   OVERLAY_ROUTE_IDS,
   pin,
+  pinEmitPlan,
   pinOverlay,
   pinView,
   policyKey,
@@ -84,6 +90,7 @@ export type WorkbenchClient = Pick<
   | "listStudioFiles" | "listSessionHistory" | "createDraftComposition" | "applyIntent" | "getDraftSession"
   | "compileCandidate" | "resolveDeployment" | "converseAuthoring" | "heartbeatCollaborator" | "sessionEventsUrl"
   | "listAssemblies" | "loadContractDiff" | "verifyContract" | "loadView" | "loadOverlay"
+  | "listEnvironments" | "saveEnvironment" | "deleteEnvironment" | "loadEmitPlan"
 >;
 
 /** The hover preview of a catalog entry: what it could connect to or replace, from Fabric. */
@@ -152,6 +159,12 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
   const [viewErrors, setViewErrors] = useState<Partial<Record<StudioViewpoint, string>>>({});
   const [overlays, setOverlays] = useState<Partial<Record<StudioOverlay, InputsPinned<OverlayAnnotationsResponse>>>>({});
   const [overlayErrors, setOverlayErrors] = useState<Partial<Record<StudioOverlay, string>>>({});
+  const [environments, setEnvironments] = useState<readonly StudioDeploymentEnvironment[] | undefined>();
+  const [environmentsError, setEnvironmentsError] = useState<string | undefined>();
+  const [environmentsRequest, setEnvironmentsRequest] = useState(0);
+  const [environment, setEnvironment] = useState<string | undefined>();
+  const [emitPlan, setEmitPlan] = useState<InputsPinned<EmitPlanResponse> | undefined>();
+  const [emitPlanError, setEmitPlanError] = useState<string | undefined>();
   const [sign, setSign] = useState(false);
   const [assembly, setAssembly] = useState<StudioAssemblySummary | undefined>();
   const [syncError, setSyncError] = useState<string | undefined>();
@@ -210,6 +223,58 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
     // The keys name exactly the inputs a view depends on; the objects themselves change identity on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, viewSessionKey, viewRecordKey, viewPolicyKey]);
+
+  // Deployment environments: the tenant's, as Fabric lists them (LLD-fabric-studio-api, Deployment Environments). A
+  // chosen environment that no longer exists is no longer chosen.
+  useEffect(() => {
+    if (!client.listEnvironments) return;
+    let cancelled = false;
+    void client.listEnvironments({ tenantId })
+      .then(listed => {
+        if (cancelled) return;
+        setEnvironments(listed);
+        setEnvironmentsError(undefined);
+        setEnvironment(current => current !== undefined && listed.some(candidate => candidate.name === current) ? current : undefined);
+      })
+      .catch(error => { if (!cancelled) setEnvironmentsError(message(error)); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, tenantId, environmentsRequest]);
+
+  // Emit plan: Fabric's preview of the current compile for the chosen environment (StudioEmitPlanPreview), asked again
+  // after a new compile record, a policy change or an environment save, and pinned to what it describes (§4.3 rule 6).
+  const environmentKey = chosenEnvironmentKey({ deploymentPolicy, signingRequested: false,
+    ...(environments ? { environments } : {}), ...(environment !== undefined ? { environment } : {}) });
+  useEffect(() => {
+    const session = readySession;
+    if (!session || !client.loadEmitPlan || environment === undefined) return;
+    let cancelled = false;
+    const policy = deploymentPolicy;
+    const asked = environment;
+    void client.loadEmitPlan({ tenantId: session.tenantId, assemblyId: session.assemblyId, sessionId: session.sessionId,
+      environment: asked, deploymentPolicy: policy })
+      .then(response => {
+        if (cancelled) return;
+        const result = pinEmitPlan(session, policy, asked, response);
+        if (result.status === "REFUSED") {
+          setEmitPlanError(result.reason);
+          return;
+        }
+        setEmitPlan(result.pinned);
+        setEmitPlanError(undefined);
+        if (result.newerRevision) {
+          void client.getDraftSession({ tenantId: session.tenantId, assemblyId: session.assemblyId, sessionId: session.sessionId })
+            .then(next => {
+              if (!cancelled) setState(current => current?.status === "READY" ? { ...current, session: reconcileSession(current.session, next) } : current);
+            })
+            .catch(() => { /* the session watcher keeps refreshing; the held answer stays undrawn until it matches */ });
+        }
+      })
+      .catch(error => { if (!cancelled) setEmitPlanError(message(error)); });
+    return () => { cancelled = true; };
+    // The keys name exactly the inputs the emit plan depends on; the objects themselves change identity on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, viewSessionKey, viewRecordKey, viewPolicyKey, environmentKey]);
 
   // Overlays: Fabric's Security, Performance and Compliance answers for the active view and the current inputs
   // (LLD-fabric-studio-api, StudioOverlayAnnotations), pinned to what each answer describes (§4.3 rule 6), like views.
@@ -385,6 +450,8 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
     setViewErrors({});
     setOverlays({});
     setOverlayErrors({});
+    setEmitPlan(undefined);
+    setEmitPlanError(undefined);
     setCompileResult(undefined);
     setContractDiff(undefined);
     setVerification(undefined);
@@ -657,6 +724,39 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
       setDraftComponents(current => replayDraftInventoryIntents(current ?? [], proposal.intents.slice(0, appliedIntentCount)));
     },
 
+    /** Chooses the deployment environment the emit plan is previewed for; undefined chooses none (§5.5). */
+    chooseEnvironment: (name: string | undefined) => setEnvironment(name),
+
+    /**
+     * Saves an environment through Fabric, which checks it, and lists the tenant's environments again. Returns what the
+     * save came to: saved, Fabric's problems by field path, a revision conflict, or a failure.
+     */
+    saveEnvironment: async (request: SaveDeploymentEnvironmentRequest): Promise<EnvironmentOutcome> => {
+      if (!client.saveEnvironment) return { status: "FAILED", message: "this Studio client cannot save deployment environments" };
+      try {
+        const saved = await client.saveEnvironment({ ...request, tenantId });
+        setEnvironmentsRequest(current => current + 1);
+        return { status: "SAVED", environment: saved };
+      } catch (error) {
+        return environmentOutcome(error);
+      }
+    },
+
+    /** Deletes an environment through Fabric at the revision the editor holds, and lists the environments again. */
+    deleteEnvironment: async (name: string, expectedRevision: number): Promise<EnvironmentOutcome> => {
+      if (!client.deleteEnvironment) return { status: "FAILED", message: "this Studio client cannot delete deployment environments" };
+      try {
+        await client.deleteEnvironment({ tenantId, name, expectedRevision });
+        setEnvironmentsRequest(current => current + 1);
+        return { status: "SAVED" };
+      } catch (error) {
+        return environmentOutcome(error);
+      }
+    },
+
+    /** Lists the tenant's environments again, for example after a conflict. */
+    reloadEnvironments: () => setEnvironmentsRequest(current => current + 1),
+
     /** Seeds the authoring panel with one action context; the panel asks before proposing intents. */
     ask: (seed: Omit<AuthoringPromptSeed, "id">) => {
       seedCounter.current += 1;
@@ -676,6 +776,11 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
     viewErrors,
     overlays,
     overlayErrors,
+    ...(environments ? { environments } : {}),
+    ...(environmentsError ? { environmentsError } : {}),
+    ...(environment !== undefined ? { environment } : {}),
+    ...(emitPlan ? { emitPlan } : {}),
+    ...(emitPlanError ? { emitPlanError } : {}),
     ...(deployment ? { deployment } : {}),
     ...(deploymentError ? { deploymentError } : {}),
     deploymentPolicy,

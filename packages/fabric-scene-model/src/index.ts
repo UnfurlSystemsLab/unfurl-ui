@@ -61,10 +61,8 @@ export type StudioCompileRecord = {
   readonly contractHash: string;
   readonly compiledEnvelopeSha256: string;
   readonly substrateProfileSha256: string;
-  /** Present only when the compile was signed. */
+  /** Present only when the compile was signed. Runtime bindings belong to an environment, not to a record (P2d). */
   readonly signedEnvelopeSha256?: string;
-  /** Present once runtime bindings are generated from the contract (P2b). */
-  readonly bindingsHash?: string;
   readonly compiledAt: string;
 };
 

@@ -101,11 +101,12 @@ the DCP schema carries them (DCP HLD-C2 §I.1).
 | Substrate base plate, required and available substrate ports (VC §9) | `/dynamic-dcp` `substratePorts`; compile `requiredSubstratePorts` | P1 |
 | Deployment shapes, selected and rejected shapes with reasons, required ports, isolation matches | `POST /studio/deployment/resolve` (`StudioDeploymentResolveResponse`) | P1 |
 | Supported shapes per component | `componentShapeProfile` on catalog entries | P1 |
-| Deployment target (for example `local` → `local-compose`, `k8s-dev` → `k8s`) | deployment policy; emit target | P1 for the chosen target, P2 for the emitted plan |
-| Emit plan preview: emitted artifacts, and **secret requests by name, bound component and store hint only, never a value** (for example `UNFURL_FOUNDRY_CREDENTIAL_KEY`, bound to `foundry`, store hint `local-compose-env`) | `EmitManifest` and `SecretRequest` (HLD-E §3, §5.3) | P2 |
+| Deployment target (for example `local` → `local-compose`, `k8s-dev` → `k8s`) | deployment policy; emit target | P1 for the chosen target |
+| Deployment environment: the tenant's environments, one chosen for the emit plan, and their editor (§5.5) | `GET/PUT/DELETE .../deployment-environments` (LLD-fabric-studio-api, *Deployment Environments*) | P2d |
+| Emit plan preview: target kind, emitted artifacts with their **preview hashes**, and **secret requests by name, bound component and store hint only, never a value** (for example `UNFURL_FOUNDRY_CREDENTIAL_KEY`, bound to `foundry`, store hint `local-compose-env`), or Fabric's absent reason | `GET .../sessions/{id}/emit-plan?environment` (`StudioEmitPlanPreview`), from `EmitManifest` and `SecretRequest` (HLD-E §3, §5.3) | P2d |
 | Named volumes, published ports, `substrateProfileMode` (`STRICT` vs `LEGACY_OPEN_WORLD`) | emit plan preview, once `EmitManifest` declares them (HLD-E §3 gap) | P2, after that emitter change |
 | Contract transport kind (`in_process`, `http_json`, `grpc`) | DCP HLD-C2 §B `transport`, from the current compile record through `views/topology`, as a fact on the provider | P2b |
-| Runtime bindings (target environment, deployment kind) | DCP HLD-C2 §C, generated with the emit plan | P2d |
+| Runtime bindings as facts on each provider node: capability, deployment kind, base URL, enabled or disabled | the emit plan's `runtimeBindings[]` (DCP HLD-C2 §C), generated for the chosen environment | P2d |
 | Concurrency semantics (single instance vs horizontally scalable, ordering, delivery) as badges on components | not yet in DCP | P3 |
 | Resource budgets (memory, CPU, worker pools) for embedded and high-load targets | not yet in DCP (quantities and units) | P3 |
 
@@ -160,14 +161,14 @@ an assembly. It is tenant-level curation:
 | | | the verification result while current (§4.3 rule 6) | P2a |
 | | | Fabric's `overlays/security`: each node's `integration_ports.authentication` and `authorization` (DCP HLD-C2 A.9), labelled "enforced" when a node in the composition provides `identity-context` and "trusted network" otherwise, with the decision owner and permission prefixes; Fabric's "Identity" finding | P2c |
 | | | structured trust rejections (empty in session mode until named trust policies are applied: LLD-fabric-studio-api, *Gap: a session's trust policy is not applied*) | after that gap |
-| | | whether the needs *require* `identity-context` (the needs are not typed in Studio; an unmet identity need already appears as a guided fix); secret-request names from the emit plan | P2d |
+| | | Fabric's "Identity in the needs" finding (whether the session's need requires `identity-context`); the emit plan's secret requests by name, bound component and store hint | P2d |
 | **Performance & Load** | Performance & Scalability | Fabric's `overlays/performance`: each child contract's `expectations.timeout_ms` on its provider node, from the current compile only (DCP HLD-C2 §B) | P2c |
-| | | the `runtime_policy.timeout_ms` override (DCP HLD-C2 §C), which lives in the runtime bindings | P2d |
+| | | "runtime timeout N ms" on each provider node, the `runtime_policy.timeout_ms` the emit plan's bindings set (DCP HLD-C2 §C) | P2d |
 | | | throughput, latency and resource envelopes | P3 |
 | | | bottleneck evidence from a test deployment | Later |
 | **Resilience & Faults** | Availability & Resilience | declared faults: `code`, `category`, `severity`, `affects`, `propagation.parent_impact`, `propagates_when`, `remediation.allowed_actions` (DCP HLD-C2 A.10), drawn as propagation paths up the `CONTAINS` tree | P2e, and needs the DCP fault-schema reconciliation (DCP HLD-C2 §I.1) |
 | **Compliance & Governance** | Regulation + Location | Fabric's `overlays/compliance`: the trust-policy provenance finding (always present, never shown as applied while the gap stands); the current compile's decision audit (selection mode, alternatives considered, selection reasons, score breakdown, planning warnings) with its record, or "Left out" with Fabric's reason; one annotation per node whose telemetry declares `audit_events` | P2c |
-| | | runtime `audit_enabled`, which lives in the runtime bindings | P2d |
+| | | "audit enabled" or "audit disabled" on each provider node, the bindings' `runtime_policy.audit_enabled` | P2d |
 | | | data residency and region constraints | P3 (no DCP field) |
 
 ### 4.1 Overlay applicability
@@ -213,7 +214,9 @@ domain overlay (§4.4).
 3. An overlay with no data for the active view is listed as unavailable with its reason (for example "no selected
    component declares faults"). It is never shown as an empty layer. Availability is decided after the rule-1 guard
    drops annotations on elements the view does not draw: an overlay left with no annotation and no inspector fact is
-   unavailable with `NOTHING_IN_VIEW`.
+   unavailable with `NOTHING_IN_VIEW`. A note saying why a source has nothing to add (for example "Runtime timeouts:
+   choose a deployment environment") is shown in the inspector but is not a fact, so notes alone never make an overlay
+   available.
 4. **Overlays never gate.** `substrateProfileMode`, trust policy, refusal alignment, substrate derivation and every
    VC §16 rule run in Fabric whatever the overlays show. No overlay, preset or customer segment selects them.
 5. The always-on **guided-fix layer** is not an overlay. It renders `NoMatchExplanation` reasons, candidate conflicts
@@ -261,6 +264,12 @@ domain overlay (§4.4).
      claims only and is never pinned to a compile, so a compile leaves its answer current. An answer for another
      overlay or scope is refused and named as the overlay's error; while an overlay's answer is loading or failed, the
      overlay reads so, and P1's Security facts stand.
+   - An emit-plan answer is pinned like a compile-derived answer: to its tenant, assembly, session and revision, the
+     policy Studio sent, and the compile record Fabric names in its `provenance` (none before a compile). It is also
+     pinned to the environment it describes, by name and Fabric's `contentSha256` of its settings, never by revision:
+     a deleted and re-created environment starts at revision 1 again. Choosing another environment, or a change to the
+     chosen one's settings, makes it out of date. An answer for another environment or scope is refused. The
+     runtime-binding facts in Substrate & Topology and the overlays read only the current answer.
    - A historical result (`historical: true`) appears only in the compile and history panels, labelled with its
      revision and hash.
 
@@ -348,6 +357,31 @@ view and uses that view's first supported renderer, and says so in the same noti
 | `Ports` | Flow & Composition, 2D |
 | `Substrate` | Substrate & Topology, 3D |
 | `Validation` | Flow & Composition, 3D, guided-fix strip expanded |
+
+### 5.5 Deployment environments
+
+Substrate & Topology's inspector has a **Deployment Environment** card: the tenant's environments, the one chosen for
+the emit plan (none until the operator chooses one; the choice is not persisted), and a **Manage environments** action
+that opens the editor. The editor lists the environments, creates, edits and deletes them, and holds a structured form:
+- **Target:** kind, environment, region, endpoint, an options table and credential references. The options are the
+  target file's: images, and the operator's deployment inputs on the Studio server (for example `flowWorkflowsPath`,
+  `foundryDeploymentRootPath`, `serviceConfigPath.<name>`), which the emit plan never invents. The inputs the emit plan
+  generates itself (the contract, profile, runtime bindings, runtime bundle, hosted jars and trust keys) are reserved,
+  and Fabric refuses an environment that names them;
+- **Runtime bindings:** service base URLs by provider claim URI, runtime timeout, telemetry namespace;
+- **Identity:** off by default; when on, issuer, audiences by service, the tenant, roles and permissions claims, and the
+  token endpoint, verification keys, client credentials and per-service credentials references;
+- **Hosted components:** configuration entries; **Documentation:** default visibility, the visibility file's text and
+  the observation intervals; **Disabled bindings.**
+
+The form holds references only. Studio checks nothing itself: Fabric checks each save, and its problems are shown next
+to the field their path names. A save against an older revision is Fabric's `409 ENVIRONMENT_REVISION_CONFLICT`, shown
+as a conflict with the current revision and a reload action, never retried. A delete names the revision it expects in the
+same way.
+
+The **Emit Plan** card shows the current answer for the chosen environment: target kind, artifacts with "preview hash",
+the secret requests by name, bound component and store hint, and the bindings' count, or Fabric's code and message.
+With no environment chosen it says so. An out-of-date answer names why (§4.3 rule 6) and shows no values.
 
 ## 6. View state
 
@@ -459,6 +493,17 @@ The redesign removes current behaviour that breaks engineering rule 2:
    - an overlay whose annotations all fall outside the active view is unavailable with `NOTHING_IN_VIEW`;
    - an answer for another session is refused, and one for a later revision is held back until the session reaches it;
    - Security & Trust adds Fabric's port annotations in both identity paths, and keeps P1's facts while loading.
+11. Emit plan and environments (P2d):
+   - the emit-plan answer is refused for another environment or scope, and is out of date after choosing another
+     environment, after the chosen one's settings change (also when it is deleted and re-created at the same revision),
+     and after a new compile record;
+   - the Emit Plan card shows the plan, Fabric's reason, or that no environment is chosen, and a secret request never
+     shows a value;
+   - runtime-binding facts, runtime timeouts, audit flags and secret-request names appear only while the answer is
+     current;
+   - the editor converts between the form and Fabric's environment, shows Fabric's problems by field path, and shows a
+     revision conflict as a conflict;
+   - the client keeps Fabric's error body (problems, current revision) and reads a 204 as no body.
 
 ## 10. Phasing
 
@@ -510,8 +555,13 @@ The redesign removes current behaviour that breaks engineering rule 2:
     - Performance & Load shows the contract timeouts; Compliance & Governance the trust-policy provenance, the
       decision audit and the audit-event emitters. Both are unavailable with Fabric's reason when they have no data.
     - The runtime `timeout_ms` override and `audit_enabled` moved to P2d with the runtime bindings.
-  - **P2d:** the emit plan preview in Substrate & Topology, its runtime bindings, and the overlays' runtime-binding
-    facts (the `timeout_ms` override, `audit_enabled`, secret-request names).
+  - **P2d, implemented: deployment environments and the emit plan.**
+    - The tenant's deployment environments are Fabric's, edited in Substrate & Topology (§5.5). Studio checks nothing:
+      Fabric checks each save and names every problem by field path.
+    - For the chosen environment Studio loads the emit plan of the current compile and pins it (§4.3 rule 6). The Emit
+      Plan card shows it, and the bindings it generated become facts on their provider nodes.
+    - Performance & Load adds each binding's runtime timeout; Compliance & Governance its audit flag; Security & Trust
+      the secret requests and Fabric's "Identity in the needs" finding.
   - **P2e:** Resilience & Faults (also needs the DCP fault reconciliation).
 - **P3: after DCP schema work.**
   - Concurrency semantics, resource budgets and load envelopes.
