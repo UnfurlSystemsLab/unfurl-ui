@@ -54,8 +54,16 @@ export function TwoDRenderer({ model, badges, selectedId, onSelect }: RendererPr
           const from = position.get(edge.from);
           const to = position.get(edge.to);
           if (!from || !to) return null;
-          return <line key={edge.id} data-element-id={edge.id} x1={from.x + 60} y1={from.y + 30} x2={to.x + 60} y2={to.y + 30}
-            className={`workbench-edge ${edge.status === "BLOCKED" ? "blocked" : ""}`} />;
+          // An annotated edge is drawn as a path, styled by its most severe annotation (LLD §4.3 rule 1), for example
+          // Resilience & Faults' propagation up the CONTAINS tree; its title lists every annotation.
+          const annotations = badges.get(edge.id) ?? [];
+          const severity = mostSevere(annotations);
+          return (
+            <line key={edge.id} data-element-id={edge.id} x1={from.x + 60} y1={from.y + 30} x2={to.x + 60} y2={to.y + 30}
+              className={`workbench-edge ${edge.status === "BLOCKED" ? "blocked" : ""} ${severity ? `annotated ${severity.toLowerCase()}` : ""}`}>
+              {annotations.length > 0 && <title>{annotations.map(annotation => `${annotation.label}: ${annotation.detail}`).join("\n")}</title>}
+            </line>
+          );
         })}
       </svg>
       <ul className="workbench-2d-nodes">
@@ -160,6 +168,12 @@ export function OwnershipMatrixRenderer({ model, badges, selectedId, onSelect }:
       </table>
     </div>
   );
+}
+
+/** The most severe of an element's annotations, or undefined when it has none. */
+function mostSevere(annotations: readonly OverlayAnnotation[]): OverlayAnnotation["severity"] | undefined {
+  const order: readonly OverlayAnnotation["severity"][] = ["ERROR", "WARNING", "INFO"];
+  return order.find(severity => annotations.some(annotation => annotation.severity === severity));
 }
 
 /** Overlay badges on one element. */

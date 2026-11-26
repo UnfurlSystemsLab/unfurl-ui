@@ -245,7 +245,7 @@ function answeredCompileRecord(view: StudioViewpoint, response: ViewProjectionRe
 
 /** Fabric's route id of each overlay Fabric annotates; Resilience & Faults arrives in P2e. */
 export const OVERLAY_ROUTE_IDS: Readonly<Partial<Record<StudioOverlay, StudioOverlayId>>> = {
-  SECURITY: "security", PERFORMANCE: "performance", COMPLIANCE: "compliance"
+  SECURITY: "security", PERFORMANCE: "performance", RESILIENCE: "resilience", COMPLIANCE: "compliance"
 };
 
 /**

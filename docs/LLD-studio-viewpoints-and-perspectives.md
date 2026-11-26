@@ -166,7 +166,7 @@ an assembly. It is tenant-level curation:
 | | | "runtime timeout N ms" on each provider node, the `runtime_policy.timeout_ms` the emit plan's bindings set (DCP HLD-C2 §C) | P2d |
 | | | throughput, latency and resource envelopes | P3 |
 | | | bottleneck evidence from a test deployment | Later |
-| **Resilience & Faults** | Availability & Resilience | declared faults: `code`, `category`, `severity`, `affects`, `propagation.parent_impact`, `propagates_when`, `remediation.allowed_actions` (DCP HLD-C2 A.10), drawn as propagation paths up the `CONTAINS` tree | P2e, and needs the DCP fault-schema reconciliation (DCP HLD-C2 §I.1) |
+| **Resilience & Faults** | Availability & Resilience | declared faults: `code`, `category`, `severity`, `affects`, `propagation.parent_impact`, `propagates_when`, `remediation.allowed_actions` (DCP HLD-C2 A.10), drawn as propagation paths up the `CONTAINS` tree: Fabric's `overlays/resilience` puts each fault on its component, and a fault whose `parent_impact` is `DEGRADED` or `BLOCKED` on the `CONTAINS` edge to its parent and on the parent, with `propagates_when`. Only the immediate parent is drawn: further escalation is the parent's own policy, known at runtime | P2e (the DCP fault-schema reconciliation, HLD-C2 §I.1 divergence #5, is resolved) |
 | **Compliance & Governance** | Regulation + Location | Fabric's `overlays/compliance`: the trust-policy provenance finding (always present, never shown as applied while the gap stands); the current compile's decision audit (selection mode, alternatives considered, selection reasons, score breakdown, planning warnings) with its record, or "Left out" with Fabric's reason; one annotation per node whose telemetry declares `audit_events` | P2c |
 | | | "audit enabled" or "audit disabled" on each provider node, the bindings' `runtime_policy.audit_enabled` | P2d |
 | | | data residency and region constraints | P3 (no DCP field) |
@@ -208,7 +208,10 @@ domain overlay (§4.4).
 ### 4.3 Overlay rendering rules
 
 1. An overlay only annotates elements of the active view: badges, edge styling, inspector sections and table columns.
-   It never adds or removes a component, port, connection or substrate port.
+   It never adds or removes a component, port, connection or substrate port. An annotation names a node, or an edge by
+   its id `RELATIONSHIP:from->to`. The 2D renderer draws an annotated edge as a path, styled by its most severe
+   annotation with a title listing them (Resilience & Faults' propagation paths), and the Table renderer lists edge
+   badges in its connections table. An edge the active view does not draw keeps none of its annotations.
 2. At most one overlay at a time owns the colour channel. Other active overlays use badges. Turning on a second
    colour overlay moves the first one to badges.
 3. An overlay with no data for the active view is listed as unavailable with its reason (for example "no selected
@@ -485,7 +488,7 @@ The redesign removes current behaviour that breaks engineering rule 2:
    - the client sends the policy as JSON for Fabric to hash.
 10. Overlays (P2c):
    - Performance & Load and Compliance & Governance read "loading" until Fabric answers, Fabric's reason when it has no
-     data, and Fabric's annotations and findings only while current; Resilience & Faults stays not yet provided;
+     data, and Fabric's annotations and findings only while current;
    - a Compliance answer that names no compile is not drawn once a compile is recorded;
    - a compile leaves Security & Trust's claim-only annotations current;
    - a compile-reading overlay is pinned to the record Fabric names even when nothing came of it
@@ -504,6 +507,12 @@ The redesign removes current behaviour that breaks engineering rule 2:
    - the editor converts between the form and Fabric's environment, shows Fabric's problems by field path, and shows a
      revision conflict as a conflict;
    - the client keeps Fabric's error body (problems, current revision) and reads a 204 as no body.
+12. Resilience & Faults (P2e):
+   - it reads "loading" until Fabric answers, Fabric's reason (`NO_FAULTS_DECLARED`) without faults, and Fabric's
+     annotations and findings while current; a compile never makes it out of date;
+   - a fault on a node and its propagation on the `CONTAINS` edge survive the guard in Flow & Composition, and an
+     edge annotation is dropped in a view that does not draw that edge;
+   - the 2D renderer draws the annotated edge as a path, styled by its most severe annotation, with a title.
 
 ## 10. Phasing
 
@@ -562,7 +571,13 @@ The redesign removes current behaviour that breaks engineering rule 2:
       Plan card shows it, and the bindings it generated become facts on their provider nodes.
     - Performance & Load adds each binding's runtime timeout; Compliance & Governance its audit flag; Security & Trust
       the secret requests and Fabric's "Identity in the needs" finding.
-  - **P2e:** Resilience & Faults (also needs the DCP fault reconciliation).
+  - **P2e, implemented: Resilience & Faults (`overlays/resilience`).**
+    - DCP divergence #5 is resolved: the `dcp` fault schema, spec and examples follow HLD-C2 A.10, which the Java
+      model and every product claim already did.
+    - Studio loads Resilience & Faults like the other Fabric overlays. It reads claims only, so it is never pinned to a
+      compile. Each declared fault is a badge on its component, and a propagating fault's path is drawn on the
+      `CONTAINS` edge to its parent and on the parent. Without declared faults it is unavailable with Fabric's
+      `NO_FAULTS_DECLARED`.
 - **P3: after DCP schema work.**
   - Concurrency semantics, resource budgets and load envelopes.
   - Residency.
