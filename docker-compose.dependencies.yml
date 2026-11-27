@@ -24,6 +24,9 @@ services:
       JAVA_OPTS: ${UNFURL_FOUNDRY_JAVA_OPTS:-}
       UNFURL_FOUNDRY_PORT: "7979"
       UNFURL_FOUNDRY_DEPLOYMENT_ROOT: /opt/unfurl/foundry
+      # This Lab stack has no identity provider, so Foundry runs its development profile (authentication disabled,
+      # trusted network; root CLAUDE.md rule 6). The image defaults to the secured profile, which needs JWT keys.
+      UNFURL_FOUNDRY_PROFILE: profiles/foundry-runtime-profile.yaml
       UNFURL_FOUNDRY_MODEL_PROVIDER: ${UNFURL_FOUNDRY_MODEL_PROVIDER:-spring-ai-google-genai}
       UNFURL_FOUNDRY_MODEL_REF: ${UNFURL_FOUNDRY_MODEL_REF:-customer-configured}
       UNFURL_FOUNDRY_MODEL_NAME: ${UNFURL_FOUNDRY_MODEL_NAME:-gemini-3.1-flash-lite}
@@ -31,8 +34,20 @@ services:
       UNFURL_FOUNDRY_CREDENTIAL_KEY: ${UNFURL_FOUNDRY_CREDENTIAL_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    # Foundry's mount contract (unfurl-foundry/Dockerfile): each deployment concern read-only, and the selected profile's
+    # state folder writable. The development profile keeps its state in .foundry/. Never the whole root read-only, or
+    # the profile has no writable state.
     volumes:
-      - ./.startup/foundry-deployment:/opt/unfurl/foundry:ro
+      - ./.startup/foundry-deployment/profiles:/opt/unfurl/foundry/profiles:ro
+      - ./.startup/foundry-deployment/agents:/opt/unfurl/foundry/agents:ro
+      - ./.startup/foundry-deployment/compositions:/opt/unfurl/foundry/compositions:ro
+      - ./.startup/foundry-deployment/prompts:/opt/unfurl/foundry/prompts:ro
+      - ./.startup/foundry-deployment/registries:/opt/unfurl/foundry/registries:ro
+      - ./.startup/foundry-deployment/tools:/opt/unfurl/foundry/tools:ro
+      - ./.startup/foundry-deployment/providers:/opt/unfurl/foundry/providers:ro
+      - ./.startup/foundry-deployment/identity:/opt/unfurl/foundry/identity:ro
+      - ./.startup/foundry-deployment/secrets:/opt/unfurl/foundry/secrets:ro
+      - unfurl-foundry-state:/opt/unfurl/foundry/.foundry
     networks:
       - unfurl-lab
 
@@ -53,3 +68,4 @@ networks:
 
 volumes:
   unfurl-fabric-state:
+  unfurl-foundry-state:

@@ -262,8 +262,11 @@ Its preflight task only verifies that `Startup.ps1` already made
 `http://127.0.0.1:8080/health`, and the Studio UI route on `:5173` reachable.
 If any check fails, restart with `.\Startup.ps1` before debugging.
 
-Use `-RemoveVolumes` only when you want to delete the local Studio state volume
-created by Docker Compose:
+Use `-RemoveVolumes` only when you want to delete the local state volumes created by
+Docker Compose: Fabric Studio's (`unfurl-fabric-state`) and Foundry's (`unfurl-foundry-state`, its agent, composition
+and run state). Foundry runs its development profile (`profiles/foundry-runtime-profile.yaml`, authentication
+disabled), because this stack has no identity provider; its deployment is mounted read-only one concern at a time, as
+its image requires, and only that profile's `.foundry/` state folder is writable.
 
 ```powershell
 .\Stop.ps1 -RemoveVolumes
