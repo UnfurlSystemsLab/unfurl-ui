@@ -997,13 +997,14 @@ export type EmitPlanResponse = {
   readonly diagnosticArtifacts: readonly StudioExportArtifact[];
 };
 
-/** An overlay's id on Fabric's route (LLD-fabric-studio-api, StudioOverlayAnnotations); resilience arrives in P2e. */
-export type StudioOverlayId = "security" | "performance" | "compliance";
+/** An overlay's id on Fabric's route (LLD-fabric-studio-api, StudioOverlayAnnotations). */
+export type StudioOverlayId = "security" | "performance" | "resilience" | "compliance";
 
 /** An overlay annotation on one `/dynamic-dcp` node; provenance is present exactly on compile-derived ones. */
 export type StudioOverlayAnnotation = {
   readonly elementId: string;
-  readonly elementKind: "NODE";
+  /** A `/dynamic-dcp` node, or an edge by its id `RELATIONSHIP:from->to` (P2e, Resilience & Faults' propagation paths). */
+  readonly elementKind: "NODE" | "EDGE";
   readonly kind: string;
   readonly severity: "INFO" | "WARNING" | "ERROR";
   readonly label: string;

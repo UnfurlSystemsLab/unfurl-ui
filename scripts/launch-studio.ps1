@@ -1,3 +1,25 @@
+<#
+.SYNOPSIS
+Launches Unfurl Studio's UI (fixture, dev or preview mode), optionally starting the Lab service containers first.
+
+.DESCRIPTION
+By default only the UI starts: fixture mode needs no backend, and dev/preview modes expect the services already running
+(Startup.ps1). The service switches start them first, through scripts/Start-DependentServices.ps1 (shared with
+Startup.ps1), in dev and preview modes only:
+- -LocalImages: build the service images from the local checkouts (offline Maven from ~/.m2, each module cleaned) as
+  unfurl-<name>:local and run them, never pulling, so stale registry images are never used. -SkipImageBuild reuses the
+  local images built earlier.
+- -NoPull: run the registry images already on this machine and never pull; a missing image fails instead of being
+  fetched.
+- -WithServices: start the services from the registry images, pulling them first.
+
+.EXAMPLE
+.\scripts\launch-studio.ps1 -Mode dev -LocalImages
+.EXAMPLE
+.\scripts\launch-studio.ps1 -Mode dev -LocalImages -SkipImageBuild
+.EXAMPLE
+.\scripts\launch-studio.ps1 -Mode dev -NoPull
+#>
 param(
     [ValidateSet('fixture', 'dev', 'preview')]
     [string]$Mode = 'fixture',
@@ -6,10 +28,30 @@ param(
 
     [switch]$NoBuild,
 
-    [switch]$NoOpen
+    [switch]$NoOpen,
+
+    # Start the Lab service containers before the UI (dev and preview modes).
+    [switch]$WithServices,
+
+    # Build the service images from the local checkouts and run them, never pulling; implies -WithServices.
+    [switch]$LocalImages,
+
+    # Run the service images already on this machine and never pull; implies -WithServices.
+    [switch]$NoPull,
+
+    # With -LocalImages: reuse the unfurl-<name>:local images built earlier instead of rebuilding them.
+    [switch]$SkipImageBuild
 )
 
 $ErrorActionPreference = 'Stop'
+
+$startServices = $WithServices -or $LocalImages -or $NoPull
+if ($SkipImageBuild -and -not $LocalImages) {
+    throw '-SkipImageBuild applies to -LocalImages only'
+}
+if ($startServices -and $Mode -eq 'fixture') {
+    throw 'Fixture mode uses fixture data and no Lab services; use -Mode dev or -Mode preview with -WithServices, -LocalImages or -NoPull.'
+}
 
 function Resolve-Npm {
     $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
@@ -90,6 +132,17 @@ function Wait-Http {
 }
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
+
+if ($startServices) {
+    $services = @{}
+    if ($NoPull) { $services.NoPull = $true }
+    if ($LocalImages) {
+        $services.LocalImages = $true
+        if ($SkipImageBuild) { $services.SkipImageBuild = $true }
+    }
+    & (Join-Path $PSScriptRoot 'Start-DependentServices.ps1') @services
+}
+
 $npm = Resolve-Npm
 $stdout = New-LogPath -Name "studio-$Mode-out"
 $stderr = New-LogPath -Name "studio-$Mode-err"

@@ -23,7 +23,7 @@ import {
   viewStateReducer,
   type StudioViewState
 } from "./viewState.js";
-import { NOT_YET_PROVIDED_BY_FABRIC, PROJECTION_LOADING, PROJECTION_UNAVAILABLE, VIEW_DATA_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
+import { PROJECTION_LOADING, PROJECTION_UNAVAILABLE, VIEW_DATA_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
 import { badgesByElement, evaluateOverlays, NOTHING_IN_VIEW, overlayAvailability, OVERLAY_REGISTRY, TRUST_POLICY_PERMISSIVE, type OverlayResult } from "./overlays.js";
 import { projectCompiledContract, projectData, projectFlow, projectRuntime, projectTopology } from "./projectors.js";
 import { OwnershipMatrixRenderer, TableRenderer, TwoDRenderer, sceneModeFor, viewForSceneMode } from "./renderers.js";
@@ -364,11 +364,9 @@ describe("views and overlays", () => {
     assert.equal(currentResponse(undefined, data()), undefined);
   });
 
-  it("lists Resilience as not yet supplied, and Performance and Compliance as loading until Fabric answers", () => {
+  it("lists Performance, Resilience and Compliance as loading until Fabric answers", () => {
     const model = projectFlow(PROJECTION);
-    const resilience = overlayAvailability("RESILIENCE", model, data());
-    assert.equal(!resilience.available && resilience.reasonCode, NOT_YET_PROVIDED_BY_FABRIC);
-    for (const overlay of ["PERFORMANCE", "COMPLIANCE"] as const) {
+    for (const overlay of ["PERFORMANCE", "RESILIENCE", "COMPLIANCE"] as const) {
       const availability = overlayAvailability(overlay, model, data());
       assert.equal(!availability.available && availability.reasonCode, "OVERLAY_LOADING", overlay);
     }
@@ -736,6 +734,51 @@ describe("workbench", () => {
     const html = renderToString(<Workbench client={client()} deepLink="view=topology&renderer=table&overlays=cost" />);
     assert.match(html, /aria-selected="true"[^>]*>Substrate &amp; Topology/);
     assert.match(html, /Ignored link overlay cost/);
+  });
+});
+
+describe("resilience and faults (P2e)", () => {
+  const RESILIENCE_OVERLAY: OverlayAnnotationsResponse = { ...OVERLAY_BASE, overlay: "resilience", available: true,
+    annotations: [
+      { elementId: "flow", elementKind: "NODE", kind: "FAULT", severity: "ERROR", label: "fault workflow.execute.failed",
+        detail: "RUNTIME, BLOCKING: Workflow execution failed", source: "claim.faults.emitted[workflow.execute.failed]" },
+      { elementId: "CONTAINS:assembly->flow", elementKind: "EDGE", kind: "FAULT_PROPAGATION", severity: "ERROR",
+        label: "blocked by workflow.execute.failed", detail: "Flow's fault leaves Checkout blocked when the parent depends on it",
+        source: "claim.faults.emitted[workflow.execute.failed].propagation" },
+      { elementId: "assembly", elementKind: "NODE", kind: "FAULT_PROPAGATION", severity: "ERROR",
+        label: "blocked by workflow.execute.failed", detail: "Flow's fault leaves Checkout blocked when the parent depends on it",
+        source: "claim.faults.emitted[workflow.execute.failed].propagation" }
+    ],
+    findings: [{ label: "Declared faults", value: "1 declared, 1 propagating to a parent", source: "claim.faults.emitted" }] };
+  const pinned = () => pinnedOverlay(pinOverlay(session(), POLICY, "RESILIENCE", RESILIENCE_OVERLAY));
+
+  it("draws each fault on its component and its propagation on the CONTAINS edge and the parent", () => {
+    const result = evaluateOverlays(["RESILIENCE"], projectFlow(PROJECTION), data({ overlays: { RESILIENCE: pinned() } }))[0]!;
+    assert.ok(result.available);
+    assert.deepEqual(result.annotations.map(annotation => annotation.elementId), ["flow", "CONTAINS:assembly->flow", "assembly"]);
+    assert.ok(result.section.facts.some(fact => fact.label === "Declared faults" && fact.value.startsWith("1 declared")));
+  });
+
+  it("drops the edge where the view does not draw it, and stays current after a compile (claims only)", () => {
+    const topology = evaluateOverlays(["RESILIENCE"], projectTopology(PROJECTION, data()), data({ overlays: { RESILIENCE: pinned() } }))[0]!;
+    assert.ok(topology.available && !topology.annotations.some(annotation => annotation.elementId.startsWith("CONTAINS:")));
+    const held = pinned();
+    assert.equal(held.compileRecord, undefined, "never pinned to a compile");
+    const compiled = session({ compileRecords: [{ ...studioApiExampleCompileRecord, revision: 4, contractHash: "b".repeat(64) }] });
+    assert.equal(currentOverlay(data({ session: compiled, overlays: { RESILIENCE: held } }), "RESILIENCE"), RESILIENCE_OVERLAY);
+    const none = overlayAvailability("RESILIENCE", projectFlow(PROJECTION), data({ overlays: { RESILIENCE: pinnedOverlay(pinOverlay(session(), POLICY,
+      "RESILIENCE", { ...RESILIENCE_OVERLAY, available: false, annotations: [], findings: [],
+        absentReason: { code: "NO_FAULTS_DECLARED", message: "no selected component declares a fault" } })) } }));
+    assert.equal(!none.available && none.reasonCode, "NO_FAULTS_DECLARED");
+  });
+
+  it("draws the annotated CONTAINS edge in 2D as a path styled by its most severe annotation", () => {
+    const model = projectFlow(PROJECTION);
+    const results = evaluateOverlays(["RESILIENCE"], model, data({ overlays: { RESILIENCE: pinned() } }));
+    const html = renderToString(<TwoDRenderer model={model} badges={badgesByElement(results)} onSelect={() => undefined} />);
+    assert.match(html, /data-element-id="CONTAINS:assembly-&gt;flow"[^>]*class="workbench-edge  annotated error"/);
+    assert.match(html, /<title>blocked by workflow.execute.failed: Flow&#x27;s fault leaves Checkout blocked/);
+    assert.match(html, /data-element-id="CONTAINS:assembly-&gt;idp"[^>]*class="workbench-edge  "/, "an unannotated edge is not styled");
   });
 });
 

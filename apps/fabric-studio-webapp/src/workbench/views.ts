@@ -21,9 +21,6 @@ export type ViewDefinition = {
   readonly availability: (data: WorkbenchData) => Availability;
 };
 
-/** The reason a view or overlay waits for Fabric's typed view and overlay endpoints (LLD §10, P2). */
-export const NOT_YET_PROVIDED_BY_FABRIC = "NOT_YET_PROVIDED_BY_FABRIC";
-
 /** Reason code of a projection request that failed for the current inputs; the stage offers Retry for it. */
 export const PROJECTION_UNAVAILABLE = "PROJECTION_UNAVAILABLE";
 /** Reason code while the projection for the current inputs is being loaded. */

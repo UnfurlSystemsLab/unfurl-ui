@@ -2,7 +2,7 @@ import type { StudioOverlay, StudioViewpoint } from "@unfurl/fabric-validation-c
 import { signingHandoffFromCompile } from "../signingHandoff.js";
 import { overlayTitle } from "./viewState.js";
 import type { Fact, ViewModel } from "./projectors.js";
-import { NOT_YET_PROVIDED_BY_FABRIC, type Availability } from "./views.js";
+import type { Availability } from "./views.js";
 import type { EmitPlanResponse, OverlayAnnotationsResponse } from "@unfurl/fabric-validation-client";
 import { runtimeBindingsByNode } from "./projectors.js";
 import { currentEmitPlan, currentOverlay, isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
@@ -243,7 +243,7 @@ function findingFacts(fabric: OverlayAnnotationsResponse): readonly Fact[] {
  * emit plan's bindings give it. With neither, it is unavailable with Fabric's reason, or loading, or the request's error
  * (§4.3 rules 3 and 6); runtime facts alone make it available, with a line saying what Fabric's answer is.
  */
-function fromFabricOverlay(id: "PERFORMANCE" | "COMPLIANCE", runtimeFacts: (data: WorkbenchData) => RuntimeFacts): OverlayDefinition {
+function fromFabricOverlay(id: "PERFORMANCE" | "RESILIENCE" | "COMPLIANCE", runtimeFacts: (data: WorkbenchData) => RuntimeFacts): OverlayDefinition {
   return {
     id,
     title: overlayTitle(id),
@@ -281,26 +281,19 @@ function fromFabricOverlay(id: "PERFORMANCE" | "COMPLIANCE", runtimeFacts: (data
   };
 }
 
-/** An overlay whose data needs Fabric's P2 overlay endpoint: listed with its reason, never shown as an empty layer. */
-function waitsForFabric(id: StudioOverlay, what: string): OverlayDefinition {
-  return {
-    id,
-    title: overlayTitle(id),
-    appliesTo: ALL_VIEWS,
-    evaluate: () => ({
-      overlay: id,
-      available: false,
-      reasonCode: NOT_YET_PROVIDED_BY_FABRIC,
-      message: `Fabric does not provide ${what} yet; it arrives with Fabric's overlay endpoint (LLD-fabric-studio-api, Views and Overlays).`
-    })
-  };
+/**
+ * Resilience & Faults' runtime facts: none. Declared faults and their propagation are claims-only, so the overlay is
+ * Fabric's answer alone (P2e).
+ */
+function noRuntimeFacts(): RuntimeFacts {
+  return { annotations: [] };
 }
 
 /** Registry: the four overlays (§4), in pill order. */
 export const OVERLAY_REGISTRY: readonly OverlayDefinition[] = [
   SECURITY,
   fromFabricOverlay("PERFORMANCE", runtimeTimeouts),
-  waitsForFabric("RESILIENCE", "declared faults and their propagation"),
+  fromFabricOverlay("RESILIENCE", noRuntimeFacts),
   fromFabricOverlay("COMPLIANCE", runtimeAudit)
 ];
 

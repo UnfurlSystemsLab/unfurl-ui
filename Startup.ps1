@@ -1,3 +1,15 @@
+<#
+.SYNOPSIS
+Starts the Lab service containers (dev and preview modes) and then Unfurl Studio.
+
+.DESCRIPTION
+Service startup is scripts/Start-DependentServices.ps1, shared with scripts/launch-studio.ps1. Image source:
+- -LocalImages: build the images from the local checkouts (offline, clean) and run them, never pulling; use this instead
+  of registry images that may be stale. -SkipImageBuild reuses the unfurl-<name>:local images built earlier.
+- -NoPull: run the registry images already on this machine, never pulling (a missing image fails).
+- Default: pull the registry images, then run them.
+-PublishImages builds and pushes the registry images before starting.
+#>
 param(
     [ValidateSet('dev', 'fixture', 'preview')]
     [string]$Mode = 'dev',
@@ -9,6 +21,7 @@ param(
     [int]$Port = 5173,
     [switch]$NoOpen,
     [switch]$NoPull,
+    [switch]$LocalImages,
     [switch]$PublishImages,
     [switch]$SkipImageBuild,
     [switch]$NoUi
@@ -16,134 +29,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Guard: resolves required command-line tools before startup work starts.
-function Resolve-Tool {
-    param([Parameter(Mandatory=$true)][string]$Name)
-    $tool = Get-Command $Name -ErrorAction SilentlyContinue
-    if ($tool) { return $tool.Source }
-    throw "$Name was not found on PATH"
-}
-
-# Runner: invokes a native command and converts non-zero exits into clear script failures.
-function Invoke-Checked {
-    param(
-        [Parameter(Mandatory=$true)][string]$FilePath,
-        [Parameter(Mandatory=$true)][string[]]$Arguments,
-        [string]$WorkingDirectory = (Get-Location).Path
-    )
-    Write-Host ">> $FilePath $($Arguments -join ' ')" -ForegroundColor DarkCyan
-    Push-Location $WorkingDirectory
-    try {
-        & $FilePath @Arguments
-        if ($LASTEXITCODE -ne 0) {
-            throw "Command failed with exit code ${LASTEXITCODE}: $FilePath $($Arguments -join ' ')"
-        }
-    } finally {
-        Pop-Location
-    }
-}
-
-# Environment guard: verifies Docker Desktop or another Docker engine is reachable.
-function Assert-DockerEngine {
-    param([Parameter(Mandatory=$true)][string]$Docker)
-    $process = [System.Diagnostics.Process]::new()
-    $process.StartInfo.FileName = $Docker
-    $process.StartInfo.Arguments = 'info'
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-    $process.StartInfo.CreateNoWindow = $true
-    $null = $process.Start()
-    if (-not $process.WaitForExit(10000)) {
-        $process.Kill()
-        throw 'Docker is installed, but the Docker engine check timed out. Start Docker Desktop and wait for the Linux engine before starting Lab services.'
-    }
-    if ($process.ExitCode -ne 0) {
-        throw 'Docker is installed, but the Docker engine is not reachable. Start Docker Desktop and wait for the Linux engine before starting Lab services.'
-    }
-}
-
-# Configuration loader: imports local development env files without committing secrets.
-function Import-DotEnv {
-    param([Parameter(Mandatory=$true)][string]$Path)
-    if (-not (Test-Path $Path)) { return }
-    foreach ($rawLine in Get-Content $Path) {
-        $line = $rawLine.Trim()
-        if ($line.Length -eq 0 -or $line.StartsWith('#') -or -not $line.Contains('=')) { continue }
-        $parts = $line.Split('=', 2)
-        $name = $parts[0].Trim()
-        $value = $parts[1].Trim().Trim('"').Trim("'")
-        if ($name) {
-            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
-        }
-    }
-}
-
-# Adapter: normalizes Docker Compose v2 and legacy docker-compose invocation shapes.
-function Get-ComposeCommand {
-    $docker = Resolve-Tool -Name 'docker'
-    Assert-DockerEngine -Docker $docker
-    & $docker compose version *> $null
-    if ($LASTEXITCODE -eq 0) {
-        return [pscustomobject]@{ File = $docker; Prefix = @('compose') }
-    }
-    $legacy = Get-Command docker-compose -ErrorAction SilentlyContinue
-    if ($legacy) {
-        return [pscustomobject]@{ File = $legacy.Source; Prefix = @() }
-    }
-    throw 'Docker Compose was not found. Install Docker Desktop or docker-compose.'
-}
-
-# Projector: creates the container-facing Foundry deployment root and rewrites local tool URLs.
-function Initialize-FoundryDeploymentRoot {
-    param(
-        [Parameter(Mandatory=$true)][string]$SourceRoot,
-        [Parameter(Mandatory=$true)][string]$TargetRoot
-    )
-    if (-not (Test-Path $SourceRoot)) {
-        throw "Foundry deployment source is missing: $SourceRoot"
-    }
-    if (Test-Path $TargetRoot) {
-        Remove-Item -LiteralPath $TargetRoot -Recurse -Force
-    }
-    Copy-Item -LiteralPath $SourceRoot -Destination $TargetRoot -Recurse -Force
-    $toolsFile = Join-Path $TargetRoot 'registries/tools.yaml'
-    if (Test-Path $toolsFile) {
-        $content = Get-Content -Raw $toolsFile
-        $content = $content -replace 'http://127\.0\.0\.1:7878', 'http://unfurl-fabric:7878'
-        $content = $content -replace 'http://localhost:7878', 'http://unfurl-fabric:7878'
-        Set-Content -Path $toolsFile -Value $content -NoNewline
-    }
-}
-
-# Health gate: waits for one HTTP endpoint before moving to the next startup phase.
-function Wait-Http {
-    param(
-        [Parameter(Mandatory=$true)][string]$Url,
-        [int]$Attempts = 90
-    )
-    for ($i = 1; $i -le $Attempts; $i++) {
-        try {
-            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
-                return
-            }
-        } catch {
-            Start-Sleep -Seconds 1
-        }
-    }
-    throw "Timed out waiting for $Url"
+if ($LocalImages -and $PublishImages) {
+    throw '-LocalImages runs images built for this machine; it cannot be combined with -PublishImages'
 }
 
 $repoRoot = Resolve-Path $PSScriptRoot
-$workspaceRoot = Resolve-Path (Join-Path $repoRoot '..')
 
-Import-DotEnv -Path (Join-Path $workspaceRoot '.debug/foundry.env')
-Import-DotEnv -Path (Join-Path $repoRoot '.env')
-
-$env:UNFURL_FABRIC_IMAGE = ("{0}/{1}/unfurl-fabric-studio:{2}" -f $Registry, $Owner, $ImageTag).ToLowerInvariant()
-$env:UNFURL_FOUNDRY_IMAGE = ("{0}/{1}/unfurl-foundry:{2}" -f $Registry, $Owner, $ImageTag).ToLowerInvariant()
-$env:UNFURL_FLOW_IMAGE = ("{0}/{1}/unfurl-flow:{2}" -f $Registry, $Owner, $ImageTag).ToLowerInvariant()
+# The local environment files first, before anything reads them: publishing needs GHCR_USER and GHCR_TOKEN, and
+# services need the Foundry credentials.
+. (Join-Path $repoRoot 'scripts/Import-StudioEnvironment.ps1')
+Import-StudioEnvironment
 
 if ($PublishImages) {
     $publisher = Join-Path $repoRoot 'scripts/Publish-DependentImages.ps1'
@@ -156,25 +51,13 @@ if ($PublishImages) {
 }
 
 if ($Mode -ne 'fixture') {
-    if (-not $env:UNFURL_FOUNDRY_CREDENTIAL_KEY) {
-        throw 'UNFURL_FOUNDRY_CREDENTIAL_KEY is required for Foundry. Put it in ../.debug/foundry.env or set it in the shell.'
+    $services = @{ Registry = $Registry; Owner = $Owner; ImageTag = $ImageTag }
+    if ($NoPull) { $services.NoPull = $true }
+    if ($LocalImages) {
+        $services.LocalImages = $true
+        if ($SkipImageBuild) { $services.SkipImageBuild = $true }
     }
-    $startupRoot = Join-Path $repoRoot '.startup'
-    New-Item -ItemType Directory -Path $startupRoot -Force | Out-Null
-    Initialize-FoundryDeploymentRoot `
-        -SourceRoot (Join-Path $workspaceRoot 'unfurl-foundry/deployment') `
-        -TargetRoot (Join-Path $startupRoot 'foundry-deployment')
-
-    $compose = Get-ComposeCommand
-    $composeFile = Join-Path $repoRoot 'docker-compose.dependencies.yml'
-    if (-not $NoPull) {
-        Invoke-Checked -FilePath $compose.File -Arguments ($compose.Prefix + @('-f', $composeFile, 'pull')) -WorkingDirectory $repoRoot
-    }
-    Invoke-Checked -FilePath $compose.File -Arguments ($compose.Prefix + @('-f', $composeFile, 'up', '-d')) -WorkingDirectory $repoRoot
-
-    Wait-Http -Url 'http://127.0.0.1:7878/health'
-    Wait-Http -Url 'http://127.0.0.1:7979/health'
-    Wait-Http -Url 'http://127.0.0.1:8080/health'
+    & (Join-Path $repoRoot 'scripts/Start-DependentServices.ps1') @services
 }
 
 if (-not $NoUi) {

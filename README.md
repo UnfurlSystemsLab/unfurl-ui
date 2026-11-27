@@ -182,6 +182,27 @@ Useful options:
 .\scripts\launch-studio.ps1 -Mode preview -NoBuild
 ```
 
+In dev and preview modes the launcher can also start the Lab service containers first (the same startup
+`Startup.ps1` uses, `scripts/Start-DependentServices.ps1`), choosing where their images come from:
+
+```powershell
+# Build Fabric Studio, Foundry and Flow from the local checkouts and run them; never pulls.
+.\scripts\launch-studio.ps1 -Mode dev -LocalImages
+# Run the local images built last time, without rebuilding them.
+.\scripts\launch-studio.ps1 -Mode dev -LocalImages -SkipImageBuild
+# Run the registry images already on this machine; never pulls, and fails on a missing image.
+.\scripts\launch-studio.ps1 -Mode dev -NoPull
+# Pull the registry images, then run them.
+.\scripts\launch-studio.ps1 -Mode dev -WithServices
+```
+
+`-LocalImages` builds with `scripts/Publish-DependentImages.ps1 -Local`. It uses offline Maven against `~/.m2`, cleans
+each service module first so a shaded jar never keeps stale classes, and tags the images `unfurl-fabric-studio:local`,
+`unfurl-foundry:local` and `unfurl-flow:local`. Those names have no registry prefix, so they can never be confused with,
+or replaced by, a pulled image. The stack then starts with `docker compose up --pull never --force-recreate`, so the
+containers always run the image just built. Build the Maven prerequisites into `~/.m2` first (for example
+`mvn -o clean install` in `unfurl-dcp`), because offline builds resolve dependencies from there.
+
 ### Startup With Lab Services
 
 Use the root startup script when Studio should run against the real Lab service
@@ -214,7 +235,16 @@ Validate only the dependency pull/start/health path without launching the UI:
 Startup.bat -Mode dev -NoUi
 ```
 
-Skip the GHCR pull when testing freshly built local images:
+Build the images from the local checkouts and run them instead of the registry images, which may be stale. This
+never pulls:
+
+```powershell
+.\Startup.ps1 -Mode dev -LocalImages
+.\Startup.ps1 -Mode dev -LocalImages -SkipImageBuild   # reuse the :local images built last time
+```
+
+Run the registry-named images already on this machine without pulling. A missing image fails instead of being
+fetched:
 
 ```powershell
 .\Startup.ps1 -Mode dev -NoPull -NoUi
