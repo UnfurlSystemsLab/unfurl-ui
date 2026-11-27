@@ -335,10 +335,31 @@ th, td {
 }
 
 .catalog-admission-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid #d9dee7;
   border-radius: 6px;
   background: #f8fafc;
   padding: 6px 8px;
+}
+
+.catalog-admission-selection {
+  display: grid;
+  gap: 8px;
+}
+
+.catalog-admission-remove {
+  border: none;
+  background: transparent;
+  color: #475569;
+  padding: 0 4px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.catalog-admission-remove:hover {
+  color: #b91c1c;
 }
 
 .studio-error {
