@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   StudioClaimVerificationResult,
   StudioCatalogSnapshot,
@@ -7,6 +7,7 @@ import type {
   StudioFabricClient
 } from "@unfurl/fabric-validation-client";
 import { buildCatalogPalette, loadCatalogPalette, type CatalogPaletteState } from "./catalogPalette.js";
+import { appendArtifactDrafts, createBrowseSequencer, removeArtifactDrafts, SelectionRevision } from "./artifactSelection.js";
 import { DiagnosticArtifactsPanel } from "./DiagnosticArtifactsPanel.js";
 
 export type CatalogPalettePanelProps = {
@@ -39,12 +40,31 @@ export function CatalogPalettePanel({
   const [query, setQuery] = useState("");
   const [warningsOnly, setWarningsOnly] = useState(false);
   const [selectedArtifacts, setSelectedArtifacts] = useState<readonly StudioComponentArtifactDraft[]>([]);
+  const [checkedArtifacts, setCheckedArtifacts] = useState<ReadonlySet<string>>(new Set());
   const [admissionResults, setAdmissionResults] = useState<readonly StudioClaimVerificationResult[]>([]);
   const [claimBundleArtifact, setClaimBundleArtifact] = useState<StudioExportArtifact | undefined>(undefined);
   const [diagnosticArtifacts, setDiagnosticArtifacts] = useState<readonly StudioExportArtifact[]>([]);
   const [catalogActionMessage, setCatalogActionMessage] = useState("");
+  // What the Add Components panel needs to tell the operator: a file that could not be read, or a verification answered
+  // for a selection that has since changed. Shown in that panel, cleared by the next browse, removal or verification.
+  const [admissionMessage, setAdmissionMessage] = useState("");
   const [claimVerification, setClaimVerification] = useState<"IDLE" | "READY_TO_VERIFY" | "VERIFIED" | "REJECTED">("IDLE");
   const [state, setState] = useState<CatalogPaletteState>({ status: "FAILED", message: "catalog not loaded" });
+  // Browses whose files are still being read, and whether a verification is in flight: verifying waits for both (§3.5).
+  const [pendingReads, setPendingReads] = useState(0);
+  const [verifying, setVerifying] = useState(false);
+  // The selection's revision: every browse (when it is made) and every removal advances it, and a verification is shown
+  // only for the revision it was asked for (§3.5).
+  const selectionRevision = useRef(new SelectionRevision());
+  // Applies browses in browse order, whatever order their reads finish in (§3.5).
+  const browseSequencer = useRef(createBrowseSequencer<readonly StudioComponentArtifactDraft[]>(
+    drafts => {
+      selectionRevision.current.advance();
+      setSelectedArtifacts(current => appendArtifactDrafts(current, drafts));
+    },
+    () => setPendingReads(count => count - 1),
+    error => setAdmissionMessage(`A selected file could not be read: ${error instanceof Error ? error.message : String(error)}`)
+  ));
 
   useEffect(() => {
     let cancelled = false;
@@ -59,47 +79,80 @@ export function CatalogPalettePanel({
   }, [client, tenantId, assemblyId, query, warningsOnly]);
 
   /**
-   * Adapter: converts browser File objects into Studio admission drafts. YAML files carry
-   * their DCP claim content; archive uploads without readable claim YAML remain drafts and
-   * Fabric will return a structured diagnostic instead of silently verifying them.
+   * Adapter: converts browser File objects into Studio admission drafts and appends them to the selection (§3.5): a
+   * second browse adds to the first, and a jar whose file name is already selected replaces that entry. The previous
+   * verification no longer describes the selection, so it is cleared. Archive uploads without a readable claim stay
+   * drafts, and Fabric answers them with a structured diagnostic instead of verifying them silently.
    */
   function selectArtifacts(files: FileList | null) {
-    const selected = files ? Array.from(files) : [];
-    setAdmissionResults([]);
-    setClaimBundleArtifact(undefined);
-    setDiagnosticArtifacts([]);
-    setClaimVerification(selected.length === 0 ? "IDLE" : "READY_TO_VERIFY");
-    void Promise.all(selected.map(toAdmissionDraft)).then(setSelectedArtifacts);
+    const chosen = files ? Array.from(files) : [];
+    if (chosen.length === 0) return;
+    // The selection changes now, before the files are read, so a verification already in flight cannot be shown for it.
+    selectionRevision.current.advance();
+    clearVerification();
+    setAdmissionMessage("");
+    setClaimVerification("READY_TO_VERIFY");
+    setPendingReads(count => count + 1);
+    void browseSequencer.current(Promise.all(chosen.map(toAdmissionDraft)));
   }
 
   /**
-   * Command handler: submits selected artifacts for Fabric-side DCP validation and mirrors
-   * structured diagnostics into the admission panel.
+   * Command handler: removes jars from the selection (one by its ×, or the checked ones), and clears the previous
+   * verification, which described the selection before the change.
+   */
+  function removeArtifacts(fileNames: ReadonlySet<string>) {
+    selectionRevision.current.advance();
+    const remaining = removeArtifactDrafts(selectedArtifacts, fileNames);
+    setSelectedArtifacts(remaining);
+    setCheckedArtifacts(current => new Set([...current].filter(name => !fileNames.has(name))));
+    clearVerification();
+    setAdmissionMessage("");
+    setClaimVerification(remaining.length === 0 ? "IDLE" : "READY_TO_VERIFY");
+  }
+
+  /** Forgets the last verification's results and artifacts. */
+  function clearVerification() {
+    setAdmissionResults([]);
+    setClaimBundleArtifact(undefined);
+    setDiagnosticArtifacts([]);
+  }
+
+  /**
+   * Command handler: submits the selection for Fabric-side DCP validation and mirrors structured diagnostics into the
+   * admission panel. It runs only when no browse is being read and no verification is in flight. The answer is shown
+   * only if the selection is still at the revision it was asked for (§3.5). A later answer still refreshes the catalog,
+   * because Fabric admitted what it was sent, but it never marks the changed selection verified.
    */
   async function verifyClaims() {
-    if (selectedArtifacts.length > 0) {
-      if (client.admitCatalogArtifacts) {
-        const response = await client.admitCatalogArtifacts({
+    if (selectedArtifacts.length === 0 || pendingReads > 0 || verifying) return;
+    if (!client.admitCatalogArtifacts) {
+      setClaimVerification("REJECTED");
+      setAdmissionMessage("Claim verification is unavailable. No artifacts were verified or admitted.");
+      return;
+    }
+    const askedRevision = selectionRevision.current.current;
+    setAdmissionMessage("");
+    setVerifying(true);
+    try {
+      const response = await client.admitCatalogArtifacts({ tenantId, assemblyId, artifacts: selectedArtifacts });
+      setState({
+        status: "READY",
+        palette: buildCatalogPalette(response.catalog.catalogHash, response.catalog.entries, {
           tenantId,
-          assemblyId,
-          artifacts: selectedArtifacts
-        });
-        setAdmissionResults(response.results);
-        setClaimBundleArtifact(response.claimBundleArtifact);
-        setDiagnosticArtifacts(response.diagnosticArtifacts ?? []);
-        setClaimVerification(response.status === "VERIFIED" ? "VERIFIED" : "REJECTED");
-        setState({
-          status: "READY",
-          palette: buildCatalogPalette(response.catalog.catalogHash, response.catalog.entries, {
-            tenantId,
-            query,
-            includeWarningsOnly: warningsOnly
-          })
-        });
-      } else {
-        setClaimVerification("REJECTED");
-        setCatalogActionMessage("Claim verification is unavailable. No artifacts were verified or admitted.");
+          query,
+          includeWarningsOnly: warningsOnly
+        })
+      });
+      if (!selectionRevision.current.isCurrent(askedRevision)) {
+        setAdmissionMessage("The selection changed while it was being verified; verify it again.");
+        return;
       }
+      setAdmissionResults(response.results);
+      setClaimBundleArtifact(response.claimBundleArtifact);
+      setDiagnosticArtifacts(response.diagnosticArtifacts ?? []);
+      setClaimVerification(response.status === "VERIFIED" ? "VERIFIED" : "REJECTED");
+    } finally {
+      setVerifying(false);
     }
   }
 
@@ -210,31 +263,40 @@ export function CatalogPalettePanel({
             Browse component artifacts, verify their DCP claims, and admit only verified entries into the tenant catalog.
           </p>
         </div>
-        <label>
-          Component artifacts
+        <label className="file-action-button">
+          Add component artifacts…
           <input
             type="file"
             multiple
             accept=".jar"
-            onChange={event => selectArtifacts(event.currentTarget.files)}
+            aria-label="Add component artifacts"
+            onChange={event => {
+              const input = event.currentTarget;
+              selectArtifacts(input.files);
+              // Cleared so the same jar can be chosen again (for example after rebuilding it).
+              input.value = "";
+            }}
           />
         </label>
         <div className="summary-row">
           <span>selected: {selectedArtifacts.length}</span>
-          <span>claim status: {claimVerificationText(claimVerification)}</span>
+          {pendingReads > 0 && <span>reading selected files…</span>}
+          <span>claim status: {verifying ? "verifying…" : claimVerificationText(claimVerification)}</span>
           <span>admission: {claimVerification === "VERIFIED" ? "ready for catalog" : "blocked until verified"}</span>
         </div>
-        {selectedArtifacts.length > 0 && (
-          <ul className="catalog-admission-list">
-            {selectedArtifacts.map(artifact => <li key={artifact.fileName}>{artifact.fileName}</li>)}
-          </ul>
-        )}
+        <SelectedArtifacts
+          artifacts={selectedArtifacts}
+          checked={checkedArtifacts}
+          onCheckedChange={setCheckedArtifacts}
+          onRemove={removeArtifacts}
+        />
+        {admissionMessage && <p className="studio-status" role="status">{admissionMessage}</p>}
         <AdmissionResults
           results={admissionResults}
           claimBundleArtifact={claimBundleArtifact}
           diagnosticArtifacts={diagnosticArtifacts}
         />
-        <button type="button" disabled={selectedArtifacts.length === 0} onClick={() => void verifyClaims()}>
+        <button type="button" disabled={selectedArtifacts.length === 0 || pendingReads > 0 || verifying} onClick={() => void verifyClaims()}>
           Verify Component Claims
         </button>
       </section>
@@ -351,6 +413,59 @@ export function AdmissionResults({ results, claimBundleArtifact, diagnosticArtif
         </article>
       ))}
       <DiagnosticArtifactsPanel artifacts={artifacts} />
+    </div>
+  );
+}
+
+export type SelectedArtifactsProps = {
+  readonly artifacts: readonly StudioComponentArtifactDraft[];
+  /** The file names whose checkbox is ticked. */
+  readonly checked: ReadonlySet<string>;
+  readonly onCheckedChange: (checked: ReadonlySet<string>) => void;
+  /** Removes these file names from the selection. */
+  readonly onRemove: (fileNames: ReadonlySet<string>) => void;
+};
+
+/**
+ * Presenter: the jars selected for admission (§3.5), each with a checkbox and a remove (×) action, under a "Select all"
+ * checkbox and a "Remove selected" action. Renders nothing when nothing is selected. Exported so it can be rendered
+ * without the panel's state.
+ */
+export function SelectedArtifacts({ artifacts, checked, onCheckedChange, onRemove }: SelectedArtifactsProps) {
+  if (artifacts.length === 0) return null;
+  const checkedCount = artifacts.filter(artifact => checked.has(artifact.fileName)).length;
+  const allChecked = checkedCount === artifacts.length;
+  const toggle = (fileName: string) => {
+    const next = new Set(checked);
+    if (next.has(fileName)) next.delete(fileName); else next.add(fileName);
+    onCheckedChange(next);
+  };
+  return (
+    <div className="catalog-admission-selection">
+      <div className="button-row">
+        <label className="studio-checkbox">
+          <input type="checkbox" checked={allChecked}
+            ref={input => { if (input) input.indeterminate = checkedCount > 0 && !allChecked; }}
+            onChange={() => onCheckedChange(allChecked ? new Set() : new Set(artifacts.map(artifact => artifact.fileName)))} />
+          Select all
+        </label>
+        <button type="button" className="secondary" disabled={checkedCount === 0}
+          onClick={() => onRemove(new Set(artifacts.filter(artifact => checked.has(artifact.fileName)).map(artifact => artifact.fileName)))}>
+          Remove selected ({checkedCount})
+        </button>
+      </div>
+      <ul className="catalog-admission-list" aria-label="Selected component artifacts">
+        {artifacts.map(artifact => (
+          <li key={artifact.fileName}>
+            <label className="studio-checkbox">
+              <input type="checkbox" checked={checked.has(artifact.fileName)} onChange={() => toggle(artifact.fileName)} />
+              {artifact.fileName}
+            </label>
+            <button type="button" className="catalog-admission-remove" aria-label={`Remove ${artifact.fileName}`}
+              title={`Remove ${artifact.fileName}`} onClick={() => onRemove(new Set([artifact.fileName]))}>×</button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
