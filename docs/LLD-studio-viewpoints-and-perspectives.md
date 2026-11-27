@@ -152,6 +152,22 @@ an assembly. It is tenant-level curation:
 
 - **Browsing** happens in the workbench palette.
 - **Admission and removal** stay on the tenant-scoped Catalog screen, `/components/fabric-studio/catalog`.
+- **Selecting artifacts to admit** (Add Components) builds one selection across browses:
+  - Each browse appends its jars to the selection. A jar with the same file name as one already selected replaces
+    it, because Fabric admits a jar as `uploaded:<fileName>`.
+  - Every selected jar has a remove (×) action. A "Select all" checkbox and "Remove selected" remove several at once.
+  - Any change to the selection clears the previous verification result, because that result described another
+    selection. Verifying sends the whole selection.
+  - Browses are applied in the order they were made, whatever order their file reads finish in, so a later browse of
+    the same file name always wins. A read that fails is reported as soon as it fails, even while an earlier browse is
+    still being read, and that browse applies nothing. Verifying is unavailable while a browse is being read or a verification is in
+    flight.
+  - The selection has a revision, which every browse (at the moment it is made, before its files are read) and every
+    removal advances. A verification is shown only if the selection is still at the revision it was asked for. A
+    later answer still refreshes the catalog from Fabric, because Fabric admitted what it was sent. It never marks
+    the changed selection verified, and the screen asks to verify again.
+  - The browse control is an "Add component artifacts…" action over the listed selection, not the browser's file-name
+    text, which shows only the last browse.
 
 ## 4. The four perspective overlays
 
