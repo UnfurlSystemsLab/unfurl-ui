@@ -1,4 +1,4 @@
-﻿import { studioApiExampleCompileRecord, type ContractDiffResponse, type VerifyContractResponse, type ViewProjectionResponse, type OverlayAnnotationsResponse } from "@unfurl/fabric-validation-client";
+﻿import { studioApiExampleCompileRecord, studioErrorMessage, type ContractDiffResponse, type VerifyContractResponse, type ViewProjectionResponse, type OverlayAnnotationsResponse } from "@unfurl/fabric-validation-client";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { renderToString } from "react-dom/server";
@@ -26,6 +26,7 @@ import {
 import { PROJECTION_LOADING, PROJECTION_UNAVAILABLE, VIEW_DATA_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
 import { badgesByElement, evaluateOverlays, NOTHING_IN_VIEW, overlayAvailability, OVERLAY_REGISTRY, TRUST_POLICY_PERMISSIVE, type OverlayResult } from "./overlays.js";
 import { projectCompiledContract, projectData, projectFlow, projectRuntime, projectTopology } from "./projectors.js";
+import { keyedDraftComponents } from "./draftInventory.js";
 import { OwnershipMatrixRenderer, TableRenderer, TwoDRenderer, sceneModeFor, viewForSceneMode } from "./renderers.js";
 import {
   currentCompileRecord,
@@ -134,8 +135,9 @@ function pinnedOverlay(result: ReturnType<typeof pinOverlay>): InputsPinned<Over
 
 const POLICY = { preferredShapes: [], disallowedShapes: [], requireIsolationForCapabilityPatterns: [], runtime: {} };
 
-const RESOLVED = { status: "RESOLVED" as const, candidateId: "c", selections: [{ componentId: "com.unfurl:flow:0.1.0", artifactCoordinates: "x",
-  capability: "workflow.execute", deploymentShape: "CONTAINERIZED_SERVICE" as const, requiredPorts: [] }], warnings: [] };
+const RESOLVED = { status: "RESOLVED" as const, candidateId: "c", selections: [{ componentId: "com.unfurl:flow-artifact:1.0.0",
+  artifactCoordinates: "com.unfurl:flow-artifact:1.0.0", capability: "workflow.execute", deploymentShape: "CONTAINERIZED_SERVICE" as const,
+  requiredPorts: [], catalogEntryId: "com.unfurl:flow:0.1.0" }], warnings: [] };
 
 function session(overrides: Partial<StudioDraftSession> = {}): StudioDraftSession {
   return { tenantId: "tenant-a", assemblyId: "assembly-a", sessionId: "s1", baseCatalogHash: "h", sceneRevision: 4, warnings: [], ...overrides };
@@ -324,7 +326,10 @@ describe("views and overlays", () => {
 
     const topology = projectTopology(PROJECTION, data({ deployment: pin(session({ sceneRevision: 1 }), POLICY, RESOLVED) }));
     assert.match(topology.notes[0] ?? "", /Out of date.*Resolve again/);
-    assert.ok(!topology.nodes.some(node => node.facts.some(fact => fact.label === "Deployment shape")));
+    // The row keeps its Deployment shape fact, reading why it has no value; the out-of-date shape is never shown.
+    assert.ok(!topology.nodes.some(node => node.facts.some(fact => fact.value === "CONTAINERIZED_SERVICE")));
+    assert.equal(topology.nodes.find(node => node.id === "flow")!.facts.find(fact => fact.label === "Deployment shape")!.value,
+      "not resolved: the resolution is out of date");
     const resolved = projectTopology(PROJECTION, data({ deployment: pin(session(), POLICY, RESOLVED) }));
     assert.ok(resolved.nodes.some(node => node.facts.some(fact => fact.label === "Deployment shape" && fact.value === "CONTAINERIZED_SERVICE")));
   });
@@ -337,7 +342,7 @@ describe("views and overlays", () => {
     const security = evaluateOverlays(["SECURITY"], projectFlow(PROJECTION), data({ compile: other }))[0]!;
     assert.ok(security.available && /Out of date/.test(security.section.facts.find(fact => fact.label === "Signing")!.value));
     const topology = projectTopology(PROJECTION, data({ deployment: pin(session({ sessionId: "s-imported" }), POLICY, RESOLVED) }));
-    assert.ok(!topology.nodes.some(node => node.facts.some(fact => fact.label === "Deployment shape")));
+    assert.ok(!topology.nodes.some(node => node.facts.some(fact => fact.value === "CONTAINERIZED_SERVICE")));
   });
 
   it("regression: changing the deployment policy makes earlier compile and resolution results out of date", () => {
@@ -616,7 +621,9 @@ describe("typed views (P2b)", () => {
     const stale = projectTopology(PROJECTION, data(), { ...TOPOLOGY_VIEW, transports: { available: false, items: [],
       absentReason: { code: "COMPILE_STALE", message: "compiled at revision 3; the draft is at revision 4" } } });
     assert.match(stale.notes.join(" "), /Transports: COMPILE_STALE/);
-    assert.ok(!stale.nodes.some(node => node.facts.some(fact => fact.label === "Transport")));
+    // Each row reads Fabric's reason in its Transport column, never a transport from the stale compile.
+    assert.ok(!stale.nodes.some(node => node.facts.some(fact => fact.label === "Transport" && fact.value.startsWith("IN_PROCESS"))));
+    assert.equal(stale.nodes.find(node => node.id === "flow")!.facts.find(fact => fact.label === "Transport")!.value, "COMPILE_STALE");
   });
 
   it("regression: an answer for a later revision than held is not drawn until the session reaches it", () => {
@@ -678,6 +685,64 @@ describe("projectors and renderers", () => {
     for (const node of [...flow.nodes, ...topology.nodes]) {
       for (const fact of node.facts) assert.ok(fact.source.length > 0, `${node.id} ${fact.label} has a source`);
     }
+  });
+
+  it("gives Topology rows this view's facts, each with its reason, and keeps identity for the Selection card (§3.3)", () => {
+    const unresolved = projectTopology(PROJECTION, data());
+    const flow = unresolved.nodes.find(node => node.id === "flow")!;
+    assert.deepEqual(flow.facts.map(fact => [fact.label, fact.value]), [
+      ["Deployment shape", "not resolved: resolve the deployment"],
+      ["Required ports", "not resolved: resolve the deployment"],
+      ["Transport", "loading"],
+      ["Runtime binding", "no environment chosen"]
+    ]);
+    assert.ok(!flow.facts.some(fact => ["DCP type", "Catalog entry", "Capabilities", "Replacement", "Level"].includes(fact.label)),
+      "identity is not this view's subject");
+    assert.ok(flow.details!.some(fact => fact.label === "Catalog entry" && fact.value === "com.unfurl:flow:0.1.0"));
+    assert.deepEqual(unresolved.nodes.find(node => node.id === "assembly")!.facts, [], "no catalog entry, no deployment facts");
+
+    // Fabric's INVALID reason is each row's reason.
+    const invalid = projectTopology(PROJECTION, data({ deployment: pin(session(), POLICY, { status: "INVALID" as const, reason: "CATALOG_ENTRY_NOT_ADMITTED",
+      details: "com.unfurl:storage-s3:1.2.0 is display-only", rejectedShapes: [], reasons: [], trustRejections: [] }) }));
+    assert.equal(invalid.nodes.find(node => node.id === "flow")!.facts[0]!.value, "not resolved: CATALOG_ENTRY_NOT_ADMITTED");
+
+    // A shape is placed by the catalog entry Fabric attributes it to, never by the resolver's coordinates.
+    const resolved = projectTopology(PROJECTION, data({ deployment: pin(session(), POLICY, RESOLVED) }));
+    assert.equal(resolved.nodes.find(node => node.id === "flow")!.facts[0]!.value, "CONTAINERIZED_SERVICE");
+    assert.equal(resolved.nodes.find(node => node.id === "idp")!.facts[0]!.value, "not resolved: Fabric selected no shape for this component");
+    const unattributed = { ...RESOLVED, selections: RESOLVED.selections.map(({ catalogEntryId: _ignored, ...selection }) => selection) };
+    const regression = projectTopology(PROJECTION, data({ deployment: pin(session(), POLICY, unattributed) }));
+    assert.ok(!regression.nodes.some(node => node.facts.some(fact => fact.value === "CONTAINERIZED_SERVICE")),
+      "a selection without a catalog entry is not guessed onto a node");
+  });
+
+  it("labels a CONTAINS edge Fabric derived from bindings, and leaves declared ones unlabelled", () => {
+    const derived = { ...PROJECTION, edges: [{ fromNodeId: "assembly", toNodeId: "flow", relationship: "CONTAINS" },
+      { fromNodeId: "flow", toNodeId: "idp", relationship: "CONTAINS", derivation: "DERIVED_FROM_BINDINGS" as const }] };
+    const model = projectFlow(derived);
+    assert.equal(model.edges.find(edge => edge.id === "CONTAINS:flow->idp")?.label, "derived from bindings");
+    assert.equal(model.edges.find(edge => edge.id === "CONTAINS:assembly->flow")?.label, undefined);
+    assert.match(renderToString(<TableRenderer model={model} badges={new Map()} onSelect={() => undefined} />), /CONTAINS \(derived from bindings\)/);
+  });
+
+  it("draws a resolved deployment shape in the 2D box as in the Table row", () => {
+    const model = projectTopology(PROJECTION, data({ deployment: pin(session(), POLICY, RESOLVED) }));
+    const props = { model, badges: new Map(), onSelect: () => undefined };
+    assert.match(renderToString(<TwoDRenderer {...props} />), /Deployment shape<\/span> CONTAINERIZED_SERVICE/);
+    assert.match(renderToString(<TableRenderer {...props} />), /Deployment shape(<!-- -->)?: (<!-- -->)?CONTAINERIZED_SERVICE/);
+  });
+
+  it("keys inventory rows by entry and occurrence, so a twice-added jar renders twice without a key clash (§5.7 rule 3)", () => {
+    const keyed = keyedDraftComponents([{ catalogEntryId: "uploaded:events.jar" }, { catalogEntryId: "uploaded:flow.jar" }, { catalogEntryId: "uploaded:events.jar" }]);
+    assert.deepEqual(keyed.map(row => row.key), ["uploaded:events.jar", "uploaded:flow.jar", "uploaded:events.jar#2"]);
+  });
+
+  it("shows Fabric's reason after the request line when a call fails", () => {
+    const refused = new StudioApiError("Fabric Studio API failed: POST /studio/deployment/resolve HTTP 400 Bad Request", 400,
+      { error: "DEPLOYMENT_RESOLVE_INPUTS_INVALID: deployment resolve requires ...; missing: tenantId, assemblyId" });
+    assert.match(studioErrorMessage(refused), /HTTP 400 Bad Request: DEPLOYMENT_RESOLVE_INPUTS_INVALID.*missing: tenantId, assemblyId/);
+    assert.equal(studioErrorMessage(new StudioApiError("HTTP 500", 500, undefined)), "HTTP 500");
+    assert.equal(studioErrorMessage(new Error("offline")), "offline");
   });
 
   it("draws the same elements in 2D and Table (renderer parity)", () => {
@@ -830,7 +895,8 @@ describe("emit plan and environments (P2d)", () => {
     const facts = projectTopology(PROJECTION, withPlan()).nodes.find(node => node.id === "flow")!.facts;
     assert.ok(facts.some(fact => fact.label === "Runtime binding (workflow.execute)" && fact.value === "CONTAINER at http://flow:8080"));
     const stale = projectTopology(PROJECTION, withPlan({ environments: [{ ...LOCAL, contentSha256: "9".repeat(64) }] })).nodes.find(node => node.id === "flow")!.facts;
-    assert.ok(!stale.some(fact => fact.label.startsWith("Runtime binding")));
+    assert.ok(!stale.some(fact => fact.label.startsWith("Runtime binding (")), "no binding from an out-of-date plan");
+    assert.equal(stale.find(fact => fact.label === "Runtime binding")!.value, "the emit plan is out of date");
   });
 
   it("adds runtime timeouts, audit flags and secret-request names to the overlays while the plan is current", () => {

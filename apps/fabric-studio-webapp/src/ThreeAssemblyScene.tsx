@@ -704,6 +704,9 @@ export function ThreeAssemblyScene({
       window.removeEventListener("keydown", handleKeyDown);
       hostElement.removeChild(renderer.domElement);
       renderer.dispose();
+      // dispose() frees GPU resources but keeps the WebGL context, and the browser allows only a few; releasing it here
+      // means switching views and renderers never exhausts that limit (LLD-studio-viewpoints-and-perspectives §5.7 rule 4).
+      renderer.forceContextLoss();
       disposeObject(scene);
     };
     // Mount-once. semanticProjection updates flow in via semanticProjectionRef

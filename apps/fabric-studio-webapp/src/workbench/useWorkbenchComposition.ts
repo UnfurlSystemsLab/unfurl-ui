@@ -20,7 +20,8 @@ import {
   type StudioAssemblySummary,
   type StudioFabricClient,
   type StudioFileRecord,
-  type StudioReplacementCandidate
+  type StudioReplacementCandidate,
+  studioErrorMessage
 } from "@unfurl/fabric-validation-client";
 import type { VisualCatalogEntry } from "@unfurl/visual-manifest";
 import type { AuthoringPromptSeed } from "../AuthoringConversationPanel.js";
@@ -803,6 +804,7 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
 /** The type the workbench regions read. */
 export type WorkbenchComposition = ReturnType<typeof useWorkbenchComposition>;
 
+/** A failed call's words for the workbench: Fabric's reason when it gave one ({@link studioErrorMessage}). */
 function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return studioErrorMessage(error);
 }

@@ -112,6 +112,24 @@ the DCP schema carries them (DCP HLD-C2 §I.1).
 
 This view replaces today's Substrate tab and the separate Deployment route.
 
+**What a component row shows.** This view answers where and how each component runs, so a component's row in the 2D
+and Table renderers carries this view's own facts, never Flow & Composition's:
+
+| Fact | Value | When it has no value |
+|---|---|---|
+| Deployment shape | the current resolution's `selections[].deploymentShape` for the component | "not resolved:" and why: no resolution yet (resolve the deployment), Fabric's `INVALID` reason and details, the request's failure, or the out-of-date reason (§4.3 rule 6) |
+| Required ports | the same selection's `requiredPorts`, or "none" | the same reason as the shape |
+| Transport | `views/topology` `transports` for the provider | Fabric's absent reason (for example `COMPILE_REQUIRED`); "none: provides no child contract" when the section is available and names no transport for it |
+| Runtime binding | the current emit plan's `runtimeBindings[]` for the provider | "no environment chosen", Fabric's emit-plan reason, the out-of-date reason, or "none in the emit plan" |
+
+- A component that Fabric resolves no selection for, while the resolution is current, reads "not resolved: Fabric
+  selected no shape for this component".
+- A node with no catalog entry (the parent and the assembly) has no deployment facts. It carries the depth roll-up
+  (§5.6) instead.
+- The component's identity facts are shown in the inspector's **Selection** card when it is selected, not in its row:
+  DCP type, level, catalog entry, capabilities, replacement.
+- Substrate ports keep their capability, provider and status.
+
 Concurrency is merged here rather than given its own view. Instance counts, scaling and worker pools are placement
 decisions, so an architect reads them against the topology they apply to. Until DCP declares concurrency semantics,
 nothing about concurrency is drawn.
@@ -313,7 +331,7 @@ One workbench replaces today's separate Studio routes.
 | Top bar | Tenant, assembly, session, compile and sign actions |
 | Subbar | **View switcher** (Flow & Composition and Substrate & Topology always present; others appear when available), **"More views"** (unavailable views with their reason), **overlay pills**, **renderer toggle** (3D / 2D / Table) |
 | Palette | Catalog browsing for adding components (Flow & Composition only) |
-| Stage | The active renderer for the active view, with `SemanticZoomNavigator` drill-down in every view |
+| Stage | The active renderer for the active view, with `SemanticZoomNavigator` drill-down in every view. The navigator's focus scopes what the 2D and Table renderers draw (§5.6). |
 | Inspector | Sections contributed by the active view and by each active overlay, for the current selection |
 | Guided-fix strip | Always-on guided-fix cards |
 | Status bar | Counts and revision |
@@ -401,6 +419,77 @@ same way.
 The **Emit Plan** card shows the current answer for the chosen environment: target kind, artifacts with "preview hash",
 the secret requests by name, bound component and store hint, and the bindings' count, or Fabric's code and message.
 With no environment chosen it says so. An out-of-date answer names why (§4.3 rule 6) and shows no values.
+
+### 5.6 Depth in the 2D and Table renderers
+
+The `SemanticZoomNavigator` holds a focus path down the projection's `CONTAINS` tree, starting at its root (depth 1).
+That tree is Fabric's.
+- It includes containment Fabric derives from the composition's matched bindings: a component nested under the
+  component that uses it (LLD-fabric-studio-api, *Containment derived from bindings*).
+- Studio draws the tree as Fabric sends it and derives nothing itself.
+- Flow & Composition labels a derived `CONTAINS` edge "derived from bindings", so it is never read as declared
+  containment.
+The 2D and Table renderers draw the active view's model **scoped to the focus**. The 3D scene keeps its own semantic
+zoom (`semanticZoomLevel`).
+
+1. **What is drawn.** The focus node and its direct `CONTAINS` children.
+   - A deeper node is not drawn. It is represented by the focus child it sits under.
+   - A node outside the focus subtree is not drawn: the focus's ancestors, which are in the breadcrumb, and their other
+     branches.
+2. **Roll-up.** A drawn node with hidden descendants carries a **Contains** fact: "N components below; drill in to see
+   them", from the `CONTAINS` edges.
+   - Owned state and decisions follow their owner: one whose owner is hidden is counted in the representative's
+     **Owned below** fact instead of being drawn.
+   - A view that draws only some components (Data & State draws owners, Runtime & Telemetry draws monitored
+     components) may not include a representative. That representative is then drawn from the projection, with its
+     roll-up facts only. It is drawn whenever it stands for hidden elements or an edge reaches it, so nothing below it
+     disappears without a trace.
+3. **Boundary elements.** Substrate ports and owners outside the catalog are drawn when a scoped edge reaches them. They
+   are what the focus subtree uses across its boundary.
+4. **Edges.**
+   - An edge whose two ends are both drawn keeps its id, so overlay annotations on it still line up.
+   - An edge with a hidden end is **lifted** to that end's representative. Lifted edges with the same kind and ends are
+     merged into one, `LIFTED:<kind>:<from>-><to>`.
+     - Its label is the original edge's label when it stands for one edge, and "N connections" when it stands for more.
+     - It is blocked when any of them is.
+   - An edge that lands inside one representative is internal to it and is not drawn.
+   - An edge with an end outside the focus subtree is not drawn.
+5. **Overlays.**
+   - They are evaluated on the unscoped model, so drilling never makes an overlay unavailable.
+   - A hidden element's annotations roll up to the element that represents it: its representative node, or the lifted
+     edge.
+   - Each drawn element with rolled-up annotations gets one summary badge, "N below", with the most severe severity and
+     a title listing them.
+6. **Focus state.** The focus path is view state only (VC §24). It is not persisted, and it returns to the root when
+   the projection's root changes. Otherwise it always follows the current `CONTAINS` tree. A component can move when
+   Fabric's containment changes, for example an adapter derived under the engine that uses it.
+   - **The focus moved.** The path is rebuilt as the focus's current chain of ancestors from the root, so the
+     breadcrumb, the depth and Zoom Out follow the node to where it now sits.
+   - **The focus no longer exists.** The deepest segment that still exists is focused, rebuilt the same way.
+   - **No segment reaches the root** through `CONTAINS` edges, or none exists. The focus returns to the root.
+
+Renderer parity (§9 test 2) holds at every depth: both renderers draw the same scoped model.
+
+### 5.7 Rendering rules
+
+1. **2D: one coordinate system.**
+   - The edges' SVG and the node boxes are laid out in the same pixel space. The SVG is sized to the layout, never
+     stretched to the stage, so an edge always ends on its nodes' boxes.
+   - The stage scrolls the whole layout instead of scaling one layer.
+   - A node box is never wider than its grid column. A longer label wraps, and its full text is the box's title.
+   - A node box shows the element's facts under its label and badges, the same facts as its Table row: for example a
+     Topology row's shape, ports, transport and binding (§3.3), and the depth roll-up (§5.6).
+     - Each fact takes one line. A line too long for the box ends with an ellipsis, and its full text and source are the
+       line's title.
+     - Boxes have one fixed height, so rows never overlap. When a box holds more facts than fit, its fact list
+       scrolls.
+2. **Ownership matrix: facts too.** The ownership matrix (Data & State's 2D renderer) shows each component's and each
+   owned item's facts under its name. That includes a representative's **Contains** and **Owned below** facts at a
+   collapsed depth, so nothing hidden there goes unmentioned.
+3. **Draft inventory rows** are keyed by catalog entry and occurrence. Fabric's intent log may add one entry more than
+   once, and the inventory mirrors that log, so two rows for one entry are two distinct rows.
+4. **3D scene.** When the scene unmounts it releases its WebGL context (`forceContextLoss` after `dispose`), so
+   switching views and renderers never exhausts the browser's context limit.
 
 ## 6. View state
 
@@ -529,6 +618,22 @@ The redesign removes current behaviour that breaks engineering rule 2:
    - a fault on a node and its propagation on the `CONTAINS` edge survive the guard in Flow & Composition, and an
      edge annotation is dropped in a view that does not draw that edge;
    - the 2D renderer draws the annotated edge as a path, styled by its most severe annotation, with a title.
+13. Depth, Topology rows and rendering (§3.3, §5.6, §5.7):
+   - at the root the scoped model has the focus and its direct children only, a child with hidden descendants carries
+     the Contains fact, and drilling in shows that child's children;
+   - edges between drawn nodes keep their ids, edges to hidden nodes are lifted and merged with a count, internal ones
+     are dropped, and boundary substrate ports reached by a lifted edge are drawn;
+   - a hidden element's overlay annotations become one "N below" badge on its representative;
+   - Substrate & Topology rows carry the shape, required ports, transport and runtime binding, or each one's reason, and
+     no identity facts, which are in the Selection card;
+   - in the 2D renderer each edge's ends lie inside its two nodes' boxes, and no boxes overlap, in a row or between
+     rows;
+   - the 2D renderer and the ownership matrix render every element's facts as its Table row does: the Topology facts, a
+     resolved shape, and at a collapsed depth the Contains and Owned below roll-ups;
+   - in a real browser (`scripts/verify-host-runtime.mjs`), Topology's 2D boxes lay their fact lines out one below
+     another inside the box, and no two boxes overlap;
+   - two inventory rows for one catalog entry render without a key clash;
+   - the deployment resolution request carries the tenant, the assembly and the session.
 
 ## 10. Phasing
 

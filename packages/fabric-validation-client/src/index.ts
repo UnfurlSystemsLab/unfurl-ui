@@ -394,10 +394,16 @@ export type DynamicDcpNode = {
   readonly replacementAllowed: boolean;
 };
 
+/**
+ * One relationship of Fabric's dynamic DCP projection. A `CONTAINS` edge says where it came from
+ * (LLD-fabric-studio-api, Containment derived from bindings): `DECLARED` by the claims, or `DERIVED_FROM_BINDINGS` when
+ * Fabric nested a component under the component that uses it. Absent from an older Fabric, it reads as declared.
+ */
 export type DynamicDcpEdge = {
   readonly fromNodeId: string;
   readonly toNodeId: string;
-  readonly relationship: "CONTAINS" | "REQUIRES" | "BINDS" | "REPLACES" | string;
+  readonly relationship: "CONTAINS" | "BINDS" | "REPLACES" | string;
+  readonly derivation?: "DECLARED" | "DERIVED_FROM_BINDINGS";
 };
 
 export type StudioSubstratePort = {
@@ -660,12 +666,18 @@ export type ResolveDeploymentRequest = {
   readonly deploymentPolicy?: DeploymentPolicyDraft;
 };
 
+/**
+ * One component's selected shape. `componentId` is the artifact coordinates the resolver names it by; in session mode
+ * `catalogEntryId` is the draft's catalog entry it was resolved for, the key the draft projection's nodes carry
+ * (LLD-fabric-studio-api, Deployment Resolution). It is empty in filesystem mode.
+ */
 export type DeploymentShapeSelection = {
   readonly componentId: string;
   readonly artifactCoordinates: string;
   readonly capability: string;
   readonly deploymentShape: DeploymentShape;
   readonly requiredPorts: readonly string[];
+  readonly catalogEntryId?: string;
 };
 
 export type ResolveDeploymentResponse =

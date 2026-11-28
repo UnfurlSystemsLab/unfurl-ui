@@ -27,7 +27,8 @@ try {
       }));
     }
   });
-  await page.route("**/studio/**", route => route.fulfill({ json: route.request().url().includes("/files") ? []
+  // Fabric's list answers are arrays: the tenant's files and its deployment environments (P2d), none here.
+  await page.route("**/studio/**", route => route.fulfill({ json: /\/files|\/deployment-environments/.test(route.request().url()) ? []
     : route.request().url().includes("/catalog") ? { catalogHash: "hash", entries: [] } : { nodes: [], edges: [], warnings: [] } }));
   await page.goto(`${base}/components/fabric-studio/workspace?tenantId=tenant-a&assemblyId=assembly-one`);
   await page.getByRole("button", { name: "Apply workspace scope" }).waitFor();
@@ -43,7 +44,9 @@ try {
   assert.deepEqual(studioLinks, ["workspace", "catalog", "help"]);
   // Views the composition has no data for are listed with their reason, never shown empty (Studio LLD §5.1).
   await page.getByText("More views", { exact: true }).click();
-  await page.getByText("Fabric does not provide owned state", { exact: false }).waitFor();
+  // With no draft open, Data & State says it reads the open draft session (Studio LLD §3.2, P2b typed views).
+  await page.locator(".workbench-subbar li", { hasText: "Data & State" })
+    .getByText("reads the open draft session; start or open a draft.", { exact: false }).waitFor();
   // Each retired route lands on the workbench with its mapped view state and keeps its own parameters (LLD §5.3).
   for (const [route, expected] of [
     ["graph", { view: "flow", renderer: "2d" }],
@@ -100,7 +103,7 @@ try {
   await snapshotPage.getByRole("button", { name: "Retry", exact: true }).click();
   await snapshotPage.waitForFunction(() => !document.querySelector(".workbench-stage-empty"));
   await snapshotPage.getByRole("button", { name: "Compile & Validate" }).click();
-  await snapshotPage.getByText("7 of session studio-session-123", { exact: false }).waitFor();
+  await snapshotPage.getByText("7 of session studio-session-123", { exact: true }).waitFor();
   // Regression (§4.3 rule 6): after a policy change, a failed compile must not re-pin the earlier result to the new policy.
   await snapshotPage.getByRole("tab", { name: "Substrate & Topology" }).click();
   await snapshotPage.getByRole("button", { name: "Remote microservice", exact: true }).click();
@@ -108,13 +111,13 @@ try {
   failCompile = true;
   await snapshotPage.getByRole("button", { name: "Compile & Validate" }).click();
   await snapshotPage.getByText("FABRIC_REQUEST_FAILED", { exact: true }).waitFor();
-  assert.equal(await snapshotPage.getByText("7 of session studio-session-123", { exact: false }).count(), 0,
+  assert.equal(await snapshotPage.getByText("7 of session studio-session-123", { exact: true }).count(), 0,
     "a failed compile does not make the earlier result current");
   assert.ok(await snapshotPage.getByText("Out of date: the compiled contract", { exact: false }).count() > 0);
   assert.equal(await snapshotPage.getByText("COMPILE_READY", { exact: true }).count(), 0, "no compile card from an out-of-date result");
   failCompile = false;
   await snapshotPage.getByRole("button", { name: "Compile & Validate" }).click();
-  await snapshotPage.getByText("7 of session studio-session-123", { exact: false }).waitFor();
+  await snapshotPage.getByText("7 of session studio-session-123", { exact: true }).waitFor();
   assert.equal(await snapshotPage.getByText("FABRIC_REQUEST_FAILED", { exact: true }).count(), 0, "the next success clears the failure");
   await snapshotPage.getByRole("tab", { name: "Flow & Composition" }).click();
   const imported = {
@@ -153,6 +156,48 @@ try {
   await snapshotPage.waitForFunction(() =>
     JSON.parse(localStorage.getItem("unfurl-studio-draft-inventory:tenant-local:assembly-demo") ?? "{}").components?.length === 0);
 
+  // Regression (Studio LLD §5.7 rule 1): a 2D node box lays its fact lines out one below another inside the box. Only the
+  // boxes are placed absolutely; a rule that also placed the nested fact lines stacked them all at one position.
+  const layoutPage = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+  const layoutFetch = createMockStudioApiFetch();
+  await layoutPage.route("**/studio/**", async route => {
+    const request = route.request();
+    const response = await layoutFetch(request.url(), { method: request.method(), body: request.postData() ?? undefined });
+    return route.fulfill({ status: response.status, json: response.ok ? await response.json() : { error: response.statusText } });
+  });
+  await layoutPage.goto(`${base}/components/fabric-studio/workspace?tenantId=tenant-local&assemblyId=assembly-demo&view=topology&renderer=2d`);
+  await layoutPage.locator(".workbench-2d-nodes > li").first().waitFor();
+  // Drill into the assembly so its components, each with Topology's four facts, are drawn.
+  await layoutPage.locator(".zoom-tile").first().click();
+  await layoutPage.waitForFunction(() => [...document.querySelectorAll(".workbench-2d-nodes > li")]
+    .some(box => box.querySelectorAll(".node-facts > li").length >= 4));
+  const boxes = await layoutPage.locator(".workbench-2d-nodes > li").evaluateAll(items => items.map(box => {
+    const outer = box.getBoundingClientRect();
+    const lines = [...box.querySelectorAll(".node-facts > li")].map(line => {
+      const rect = line.getBoundingClientRect();
+      return { text: line.textContent, top: rect.top, bottom: rect.bottom, position: getComputedStyle(line).position };
+    });
+    return { id: box.querySelector("[data-element-id]")?.getAttribute("data-element-id"), top: outer.top, bottom: outer.bottom,
+      left: outer.left, right: outer.right, lines };
+  }));
+  const withFacts = boxes.filter(box => box.lines.length >= 2);
+  assert.ok(withFacts.length > 0, "the drilled-in Topology view draws boxes with several facts");
+  for (const box of withFacts) {
+    for (const line of box.lines) assert.equal(line.position, "static", `${box.id}: a fact line flows inside its box`);
+    for (let i = 1; i < box.lines.length; i++) {
+      assert.ok(box.lines[i].top >= box.lines[i - 1].bottom - 0.5,
+        `${box.id}: "${box.lines[i].text}" starts below "${box.lines[i - 1].text}"`);
+    }
+    assert.ok(box.lines[0].top >= box.top, `${box.id}: the facts start inside the box`);
+  }
+  for (const [i, a] of boxes.entries()) {
+    for (const b of boxes.slice(i + 1)) {
+      const overlap = a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      assert.ok(!overlap, `${a.id} and ${b.id} do not overlap`);
+    }
+  }
+  await layoutPage.close();
+
   const hosted = await browser.newPage();
   await hosted.addInitScript(origin => {
     const compatibility = { hostShell: ">=1.0.0 <2.0.0", hostShellApi: ">=1.0.0 <2.0.0", microAppProps: ">=1.0.0 <2.0.0",
@@ -187,7 +232,7 @@ try {
   await hosted.waitForFunction(() => document.body.innerText.includes("catalog loaded") || document.querySelector(".studio-page"));
   await new Promise(done => setTimeout(done, 300));
   assert.ok(tokens.length > 0); assert.ok(tokens.every(token => token === "Bearer test-only-token"));
-  console.log("Browser gate passed: isolated workspace caches, Studio's three entries, retired-route redirects, view reasons, failed-refresh projection freshness, failed-compile freshness, snapshot replacement (with and without a session), independent lifecycle mount/unmount, host theme and bearer authentication.");
+  console.log("Browser gate passed: isolated workspace caches, Studio's three entries, retired-route redirects, view reasons, failed-refresh projection freshness, failed-compile freshness, snapshot replacement (with and without a session), 2D fact-line layout, independent lifecycle mount/unmount, host theme and bearer authentication.");
 } finally {
   await browser?.close(); server.kill();
 }
