@@ -138,6 +138,22 @@ export function draftComponentsFromSession(session: StudioAssemblySnapshot["sess
   return components;
 }
 
+/**
+ * The inventory's rows with a stable key each (LLD §5.7 rule 3): the catalog entry and its occurrence. Fabric's intent
+ * log may add one entry more than once and the inventory mirrors that log, so a repeated entry is a second row, keyed
+ * `<catalogEntryId>#2`, never a clash with the first.
+ */
+export function keyedDraftComponents<T extends Pick<DraftComponentItem, "catalogEntryId">>(
+  components: readonly T[]
+): readonly { readonly key: string; readonly component: T }[] {
+  const seen = new Map<string, number>();
+  return components.map(component => {
+    const occurrence = (seen.get(component.catalogEntryId) ?? 0) + 1;
+    seen.set(component.catalogEntryId, occurrence);
+    return { key: occurrence === 1 ? component.catalogEntryId : `${component.catalogEntryId}#${occurrence}`, component };
+  });
+}
+
 /** Appends an accepted component. */
 export function appendDraftComponentItem(components: readonly DraftComponentItem[], catalogEntryId: string): readonly DraftComponentItem[] {
   return [...components, { catalogEntryId, label: labelForCatalogEntry(catalogEntryId), status: "ADDED" }];

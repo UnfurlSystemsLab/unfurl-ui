@@ -780,10 +780,12 @@ describe("HTTP Studio Fabric client", () => {
     });
   });
 
-  it("resolves deployment through the deployment endpoint", async () => {
+  it("resolves deployment through the deployment endpoint, with the client's tenant and assembly", async () => {
     const calls: FetchCall[] = [];
     const client = createHttpStudioFabricClient({
       baseUrl: "http://fabric.local",
+      defaultTenantId: "tenant-a",
+      defaultAssemblyId: "assembly-a",
       fetch: fakeFetch(calls, {
         status: "RESOLVED",
         candidateId: "cand-abc123",
@@ -793,6 +795,7 @@ describe("HTTP Studio Fabric client", () => {
     });
 
     const response = await client.resolveDeployment?.({
+      sessionId: "session-1",
       baseCatalogHash: "sha256:catalog",
       deploymentPolicy: {
         preferredShapes: ["IN_PROCESS_LIBRARY"],
@@ -808,16 +811,31 @@ describe("HTTP Studio Fabric client", () => {
         input: "http://fabric.local/studio/deployment/resolve",
         method: "POST",
         body: JSON.stringify({
+          sessionId: "session-1",
           baseCatalogHash: "sha256:catalog",
           deploymentPolicy: {
             preferredShapes: ["IN_PROCESS_LIBRARY"],
             disallowedShapes: [],
             requireIsolationForCapabilityPatterns: [],
             runtime: {}
-          }
+          },
+          tenantId: "tenant-a",
+          assemblyId: "assembly-a"
         })
       }
     ]);
+  });
+
+  it("resolves a draft session against the fixture API, which refuses a request without its scope as Fabric does", async () => {
+    const fetch = createMockStudioApiFetch();
+    const client = createHttpStudioFabricClient({ baseUrl: "http://fixture.unfurl.local", fetch });
+    const resolved = await client.resolveDeployment!({ sessionId: "session-1" });
+    assert.ok(resolved.status, "the client's scope makes the session request complete");
+
+    const unscoped = await fetch("http://fixture.unfurl.local/studio/deployment/resolve",
+      { method: "POST", headers: {}, body: JSON.stringify({ sessionId: "session-1" }) });
+    assert.equal(unscoped.status, 400);
+    assert.match(String((await unscoped.json() as { error: string }).error), /DEPLOYMENT_RESOLVE_INPUTS_INVALID.*missing: tenantId, assemblyId/);
   });
 
   it("converses with the server-side authoring endpoint without provider fields", async () => {

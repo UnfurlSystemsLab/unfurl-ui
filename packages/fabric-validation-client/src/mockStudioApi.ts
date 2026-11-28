@@ -199,8 +199,7 @@ export const studioApiExampleDynamicDcpProjection: DynamicDcpProjectionResponse 
   edges: [
     { fromNodeId: "runtime:unfurl", toNodeId: "assembly:unfurl-flow", relationship: "CONTAINS" },
     { fromNodeId: "assembly:unfurl-flow", toNodeId: "component.flow-orchestrator", relationship: "CONTAINS" },
-    { fromNodeId: "assembly:unfurl-flow", toNodeId: "component.state-store", relationship: "CONTAINS" },
-    { fromNodeId: "component.flow-orchestrator", toNodeId: "component.state-store", relationship: "REQUIRES" }
+    { fromNodeId: "component.flow-orchestrator", toNodeId: "component.state-store", relationship: "CONTAINS", derivation: "DERIVED_FROM_BINDINGS" }
   ],
   substratePorts: [
     {
@@ -739,6 +738,13 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
       return ok(fixtures.viewResponses?.[view] ?? emptyViewProjection(session, view));
     }
     if (method === "POST" && path === "/studio/deployment/resolve") {
+      // Fabric's own input rule (LLD-fabric-studio-api, Deployment Resolution), so a client that drops its scope fails
+      // here as it does against Fabric.
+      const inputs = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      const missing = deploymentResolveMissingInputs(inputs);
+      if (missing !== undefined) {
+        return failed(400, { error: `DEPLOYMENT_RESOLVE_INPUTS_INVALID: deployment resolve requires catalogPath + needsPath or tenantId + assemblyId + sessionId; missing: ${missing}` });
+      }
       return ok(fixtures.resolveDeploymentResponse ?? studioApiExampleResolveDeploymentResponse);
     }
     if (method === "GET" && (path.startsWith("/studio/assets/") || path.startsWith(`/studio/tenants/${encodeURIComponent(session.tenantId)}/assets/`))) {
@@ -792,6 +798,17 @@ function fixtureContentHash(content: string): string {
     digest += hash.toString(16).padStart(8, "0");
   }
   return digest;
+}
+
+/**
+ * The session fields a deployment resolve request lacks when it has no complete input strategy, as Fabric reports them;
+ * `undefined` when the request is complete (filesystem paths, or tenant, assembly and session).
+ */
+function deploymentResolveMissingInputs(inputs: Record<string, unknown>): string | undefined {
+  const present = (key: string) => typeof inputs[key] === "string" && (inputs[key] as string).trim() !== "";
+  if (present("catalogPath") && present("needsPath")) return undefined;
+  const missing = ["tenantId", "assemblyId", "sessionId"].filter(key => !present(key));
+  return missing.length === 0 ? undefined : missing.join(", ");
 }
 
 /** A non-2xx fixture answer with Fabric's JSON error body. */

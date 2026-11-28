@@ -423,8 +423,13 @@ export function createHttpStudioFabricClient(options: HttpStudioFabricClientOpti
         tenantHeaders(scope.tenantId, authContext)
       );
     },
-    resolveDeployment: async (body: ResolveDeploymentRequest) =>
-      request<ResolveDeploymentResponse>(guardedFetch, baseUrl, "POST", "/studio/deployment/resolve", body),
+    resolveDeployment: async (body: ResolveDeploymentRequest) => {
+      // Fabric resolves a draft session only with its tenant and assembly (LLD-fabric-studio-api, Deployment
+      // Resolution), so the request carries this client's scope like every other session call.
+      const scope = resolveScope(defaultScope, body);
+      return request<ResolveDeploymentResponse>(guardedFetch, baseUrl, "POST", "/studio/deployment/resolve",
+        { ...body, ...scope }, tenantHeaders(scope.tenantId, authContext));
+    },
     loadContractDiff: async (body: ContractDiffRequest) => {
       const scope = resolveScope(defaultScope, body);
       // The policy travels as JSON for Fabric to parse and hash; Studio never hashes it (LLD-fabric-studio-api).
@@ -615,6 +620,19 @@ export class StudioApiError extends Error {
     super(message);
     this.name = "StudioApiError";
   }
+}
+
+/**
+ * The words to show for a failed Fabric call. Fabric names why it refused in its JSON body's `error`, for example
+ * `DEPLOYMENT_RESOLVE_INPUTS_INVALID: ...; missing: tenantId`, so that reason follows the request line. Any other error
+ * shows its own message.
+ */
+export function studioErrorMessage(error: unknown): string {
+  if (error instanceof StudioApiError && error.body !== null && typeof error.body === "object") {
+    const reason = (error.body as { readonly error?: unknown }).error;
+    if (typeof reason === "string" && reason.trim() !== "") return `${error.message}: ${reason}`;
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**

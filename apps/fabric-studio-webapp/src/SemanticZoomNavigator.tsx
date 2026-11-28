@@ -6,6 +6,13 @@ export type SemanticZoomNavigatorProps = {
   // Fired when the operator drills into or selects a node, so the rest of the
   // workbench (inspector / scene selection) can follow. Passes the real nodeId.
   readonly onSelectNode?: (nodeId: string) => void;
+  /**
+   * The focus path, when the caller owns it (the workbench scopes its 2D and Table renderers to the focus,
+   * LLD-studio-viewpoints-and-perspectives §5.6). Without it the navigator keeps its own path.
+   */
+  readonly path?: readonly string[];
+  /** Called with the new focus path on every drill, crumb, zoom-out and zoom-to-top; required with `path`. */
+  readonly onPathChange?: (path: readonly string[]) => void;
 };
 
 /**
@@ -16,15 +23,22 @@ export type SemanticZoomNavigatorProps = {
  * needed. It never fabricates nodes: a node with no contained children renders
  * an honest leaf state, and a missing projection renders an empty state.
  *
- * This is a separate DOM control; it does not drive the 3D ThreeAssemblyScene.
+ * This is a separate DOM control; it does not drive the 3D ThreeAssemblyScene. Its focus path is either the caller's
+ * (controlled, `path` + `onPathChange`) or its own (uncontrolled).
  */
-export function SemanticZoomNavigator({ projection, onSelectNode }: SemanticZoomNavigatorProps) {
-  const [path, setPath] = useState<readonly string[]>(() => (projection ? [projection.rootNodeId] : []));
+export function SemanticZoomNavigator({ projection, onSelectNode, path: controlledPath, onPathChange }: SemanticZoomNavigatorProps) {
+  const [ownPath, setOwnPath] = useState<readonly string[]>(() => (projection ? [projection.rootNodeId] : []));
+  const path = controlledPath ?? ownPath;
+  const setPath = (next: readonly string[]) => {
+    if (controlledPath === undefined) setOwnPath(next);
+    onPathChange?.(next);
+  };
 
-  // Resync the focus path when the projection root changes (effects don't run
-  // during SSR, so initial render derives from the lazy initializer above).
+  // Resync its own focus path when the projection root changes (effects don't run
+  // during SSR, so initial render derives from the lazy initializer above). A
+  // controlled path is resynced by its owner.
   useEffect(() => {
-    setPath(projection ? [projection.rootNodeId] : []);
+    if (controlledPath === undefined) setOwnPath(projection ? [projection.rootNodeId] : []);
   }, [projection?.rootNodeId]);
 
   const nodeById = useMemo(() => {

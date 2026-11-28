@@ -25,7 +25,13 @@ export type ModelNode = {
   readonly kind: ModelNodeKind;
   readonly level?: string;
   readonly parentId?: string;
+  /** The facts the view is about, drawn in the element's row and box. */
   readonly facts: readonly Fact[];
+  /**
+   * Facts shown only in the inspector's Selection card, after `facts`: what identifies the element but is not what this
+   * view is about (for example a component's identity in Substrate & Topology, §3.3).
+   */
+  readonly details?: readonly Fact[];
 };
 
 export type ModelEdge = {
@@ -75,7 +81,9 @@ export function projectFlow(projection: DynamicDcpProjectionResponse, flow?: Vie
       id: `${edge.relationship}:${edge.fromNodeId}->${edge.toNodeId}`,
       from: edge.fromNodeId,
       to: edge.toNodeId,
-      kind: edge.relationship
+      kind: edge.relationship,
+      // A parent Fabric derived from the bindings is never shown as declared containment (LLD §3.1).
+      ...(edge.derivation === "DERIVED_FROM_BINDINGS" ? { label: "derived from bindings" } : {})
     }));
   for (const connection of projection.connections ?? []) {
     if (!known.has(connection.sourceNodeId) || !known.has(connection.targetNodeId)) continue;
@@ -205,44 +213,37 @@ function absentNotes(sections: readonly (readonly [string, StudioViewSection<unk
 
 /**
  * Projector: Substrate & Topology (§3.3): the draft's components, the substrate ports its connections use, and the
- * component-to-substrate wiring. Deployment shapes come from the last resolution only while it is current (§4.3 rule 6);
- * an out-of-date or failed resolution is a note, never shown as the current shapes.
+ * component-to-substrate wiring. A component's row carries this view's facts (deployment shape, required ports,
+ * transport, runtime binding), each from Fabric while current or with why it has no value; its identity facts are
+ * inspector details. Deployment shapes come from the last resolution only while it is current (§4.3 rule 6); an
+ * out-of-date or failed resolution is a note, and each row says it is not resolved.
  */
 export function projectTopology(projection: DynamicDcpProjectionResponse, data: WorkbenchData, topology?: ViewProjectionResponse): ViewModel {
   const notes: string[] = [];
-  const shapes = shapesByComponent(data, notes);
+  const shapes = deploymentShapes(data, notes);
   // Transports come from the current compile record (LLD-fabric-studio-api, StudioViewProjection); an unavailable section
   // is a note with Fabric's reason, never a guessed transport.
   const transports = itemsByNode(topology?.transports, transport => transport.providerNodeId ?? "");
   if (topology?.transports && !topology.transports.available) notes.push(...absentNotes([["Transports", topology.transports]]));
+  const transportAbsent = sectionAbsence(topology?.transports, data.viewErrors?.TOPOLOGY);
   // Runtime bindings come from the current emit plan for the chosen environment (LLD-fabric-studio-api,
   // StudioEmitPlanPreview), each on its provider node; an out-of-date plan contributes nothing (§4.3 rule 6).
   const bindings = runtimeBindingsByNode(data);
-  const components: ModelNode[] = projection.nodes.map(node => {
-    const shape = node.catalogEntryId === undefined ? undefined : shapes.get(node.catalogEntryId);
-    return {
-      id: node.nodeId,
-      label: node.label,
-      kind: "COMPONENT",
-      level: node.level,
-      ...(node.parentNodeId === undefined ? {} : { parentId: node.parentNodeId }),
-      facts: [
-        ...componentFacts(node),
-        ...(shape === undefined ? [] : [
-          { label: "Deployment shape", value: shape.shape, source: "deployment/resolve selections[].deploymentShape" },
-          { label: "Required ports", value: shape.requiredPorts.join(", ") || "none", source: "deployment/resolve selections[].requiredPorts" }
-        ]),
-        ...(transports.get(node.nodeId) ?? []).map(transport => ({
-          label: "Transport", value: `${transport.kind} (${transport.childContractId})`, source: `views/topology ${transport.source}`
-        })),
-        ...(bindings.get(node.nodeId) ?? []).map(binding => ({
-          label: `Runtime binding (${binding.capability})`,
-          value: `${binding.deploymentKind ?? "deployment kind not given"}${binding.baseUrl ? ` at ${binding.baseUrl}` : ""}${binding.enabled ? "" : ", disabled"}`,
-          source: `emit-plan runtimeBindings[${binding.bindingId}]`
-        }))
-      ]
-    };
-  });
+  const bindingAbsent = emitPlanAbsence(data);
+  const components: ModelNode[] = projection.nodes.map(node => ({
+    id: node.nodeId,
+    label: node.label,
+    kind: "COMPONENT",
+    level: node.level,
+    ...(node.parentNodeId === undefined ? {} : { parentId: node.parentNodeId }),
+    // The parent and the assembly have no catalog entry and so no deployment facts; the depth roll-up describes them.
+    facts: node.catalogEntryId === undefined ? [] : [
+      ...shapeFacts(shapes, node.catalogEntryId),
+      ...transportFacts(transports.get(node.nodeId), transportAbsent),
+      ...bindingFacts(bindings.get(node.nodeId), bindingAbsent)
+    ],
+    details: componentFacts(node)
+  }));
   const ports: ModelNode[] = (projection.substratePorts ?? []).map(port => ({
     id: port.portId,
     label: port.label,
@@ -266,6 +267,105 @@ export function projectTopology(projection: DynamicDcpProjectionResponse, data: 
     }
   }
   return { view: "TOPOLOGY", nodes: [...components, ...ports], edges, notes };
+}
+
+/** A resolved component's shape: the shape and the union of its selections' required ports (one per capability). */
+type ResolvedShape = { readonly shape: string; readonly requiredPorts: readonly string[] };
+
+/** The current resolution's shapes by the draft catalog entry they were resolved for, or why there are none. */
+type DeploymentShapes =
+  | { readonly resolved: true; readonly byEntry: ReadonlyMap<string, ResolvedShape> }
+  | { readonly resolved: false; readonly reason: string };
+
+/**
+ * The current resolution's shapes, keyed by the catalog entry Fabric attributes each selection to (LLD-fabric-studio-api,
+ * Deployment Resolution), or the short reason every row reads when there is none. The full reason is a section note.
+ */
+function deploymentShapes(data: WorkbenchData, notes: string[]): DeploymentShapes {
+  const deployment = data.deployment;
+  if (!deployment) {
+    notes.push(data.deploymentError
+      ? `Deployment shapes are unavailable: ${data.deploymentError}`
+      : "Deployment shapes appear after Fabric resolves the deployment for this draft.");
+    return { resolved: false, reason: data.deploymentError ? "the resolution request failed" : "resolve the deployment" };
+  }
+  if (!isCurrent(deployment, data)) {
+    notes.push(staleMessage("the deployment resolution", deployment, data, "Resolve again."));
+    return { resolved: false, reason: "the resolution is out of date" };
+  }
+  const response: ResolveDeploymentResponse = deployment.response;
+  if (response.status === "INVALID") {
+    notes.push(`Deployment could not be resolved: ${response.reason}: ${response.details}`);
+    return { resolved: false, reason: response.reason };
+  }
+  const byEntry = new Map<string, { shape: string; requiredPorts: Set<string> }>();
+  for (const selection of response.selections) {
+    if (!selection.catalogEntryId) continue;
+    const shape = byEntry.get(selection.catalogEntryId) ?? { shape: selection.deploymentShape, requiredPorts: new Set<string>() };
+    selection.requiredPorts.forEach(port => shape.requiredPorts.add(port));
+    byEntry.set(selection.catalogEntryId, shape);
+  }
+  return { resolved: true, byEntry: new Map([...byEntry].map(([entry, shape]) =>
+    [entry, { shape: shape.shape, requiredPorts: [...shape.requiredPorts].sort() }])) };
+}
+
+/** A component's Deployment shape and Required ports facts, or each one's "not resolved" reason. */
+function shapeFacts(shapes: DeploymentShapes, catalogEntryId: string): readonly Fact[] {
+  const source = "deployment/resolve selections[]";
+  if (!shapes.resolved) {
+    const reason = `not resolved: ${shapes.reason}`;
+    return [{ label: "Deployment shape", value: reason, source }, { label: "Required ports", value: reason, source }];
+  }
+  const shape = shapes.byEntry.get(catalogEntryId);
+  if (!shape) {
+    const reason = "not resolved: Fabric selected no shape for this component";
+    return [{ label: "Deployment shape", value: reason, source }, { label: "Required ports", value: reason, source }];
+  }
+  return [
+    { label: "Deployment shape", value: shape.shape, source: "deployment/resolve selections[].deploymentShape" },
+    { label: "Required ports", value: shape.requiredPorts.join(", ") || "none", source: "deployment/resolve selections[].requiredPorts" }
+  ];
+}
+
+/** Why a view section has no value for a row: Fabric's absent reason, the load failure, or that it is still loading. */
+function sectionAbsence(section: StudioViewSection<unknown> | undefined, loadError: string | undefined): string | undefined {
+  if (section?.available) return undefined;
+  if (section) return section.absentReason?.code ?? "UNAVAILABLE";
+  return loadError ? `not available: ${loadError}` : "loading";
+}
+
+/** One topology transport, as `views/topology` lists it. */
+type TopologyTransport = NonNullable<ViewProjectionResponse["transports"]>["items"][number];
+
+/** A component's Transport facts, "none" when the section names none for it, or the section's absent reason. */
+function transportFacts(items: readonly TopologyTransport[] | undefined, absent: string | undefined): readonly Fact[] {
+  if (absent !== undefined) return [{ label: "Transport", value: absent, source: "views/topology transports" }];
+  if (!items || items.length === 0) {
+    return [{ label: "Transport", value: "none: provides no child contract", source: "views/topology transports" }];
+  }
+  return items.map(transport => ({
+    label: "Transport", value: `${transport.kind} (${transport.childContractId})`, source: `views/topology ${transport.source}`
+  }));
+}
+
+/** Why the emit plan gives no runtime binding: no environment chosen, Fabric's reason, out of date, failed or loading. */
+function emitPlanAbsence(data: WorkbenchData): string | undefined {
+  if (data.environment === undefined) return "no environment chosen";
+  const plan = currentEmitPlan(data);
+  if (plan) return plan.available ? undefined : plan.absentReason?.code ?? "UNAVAILABLE";
+  if (data.emitPlanError) return `not available: ${data.emitPlanError}`;
+  return data.emitPlan ? "the emit plan is out of date" : "loading";
+}
+
+/** A provider's Runtime binding facts, "none in the emit plan", or why the plan gives none. */
+function bindingFacts(items: readonly EmitPlanBinding[] | undefined, absent: string | undefined): readonly Fact[] {
+  if (absent !== undefined) return [{ label: "Runtime binding", value: absent, source: "emit-plan runtimeBindings[]" }];
+  if (!items || items.length === 0) return [{ label: "Runtime binding", value: "none in the emit plan", source: "emit-plan runtimeBindings[]" }];
+  return items.map(binding => ({
+    label: `Runtime binding (${binding.capability})`,
+    value: `${binding.deploymentKind ?? "deployment kind not given"}${binding.baseUrl ? ` at ${binding.baseUrl}` : ""}${binding.enabled ? "" : ", disabled"}`,
+    source: `emit-plan runtimeBindings[${binding.bindingId}]`
+  }));
 }
 
 /**
@@ -341,29 +441,4 @@ function connectionEdge(connection: NonNullable<DynamicDcpProjectionResponse["co
     status: connection.status,
     reason: connection.reason
   };
-}
-
-/** The current resolution's shapes by component id, or a note saying why there are none. */
-function shapesByComponent(data: WorkbenchData, notes: string[]): Map<string, { readonly shape: string; readonly requiredPorts: readonly string[] }> {
-  const shapes = new Map<string, { shape: string; requiredPorts: readonly string[] }>();
-  const deployment = data.deployment;
-  if (!deployment) {
-    notes.push(data.deploymentError
-      ? `Deployment shapes are unavailable: ${data.deploymentError}`
-      : "Deployment shapes appear after Fabric resolves the deployment for this draft.");
-    return shapes;
-  }
-  if (!isCurrent(deployment, data)) {
-    notes.push(staleMessage("the deployment resolution", deployment, data, "Resolve again."));
-    return shapes;
-  }
-  const response: ResolveDeploymentResponse = deployment.response;
-  if (response.status === "INVALID") {
-    notes.push(`Deployment could not be resolved: ${response.reason}: ${response.details}`);
-    return shapes;
-  }
-  for (const selection of response.selections) {
-    shapes.set(selection.componentId, { shape: selection.deploymentShape, requiredPorts: selection.requiredPorts });
-  }
-  return shapes;
 }

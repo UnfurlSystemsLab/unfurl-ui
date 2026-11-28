@@ -33,12 +33,14 @@ import {
   nodeLabel,
   paletteLabel,
   projectionNodeIdForCatalogEntry,
+  keyedDraftComponents,
   selectedCatalogFile,
   toSemanticSceneProjection,
   type DraftComponentItem
 } from "./draftInventory.js";
 import { readLocalViewState, writeLocalViewState } from "./layoutPersistence.js";
 import { badgesByElement, evaluateOverlays, OVERLAY_REGISTRY, overlayAvailability, type OverlayResult } from "./overlays.js";
+import { scopeBadges, scopeModelToFocus, validFocusPath, type FocusPath, type ScopedModel } from "./depthScope.js";
 import { projectCompiledContract, projectData, projectFlow, projectRuntime, projectTopology, type ModelNode, type ViewModel } from "./projectors.js";
 import { OwnershipMatrixRenderer, TableRenderer, ThreeDRenderer, TwoDRenderer, viewForSceneMode } from "./renderers.js";
 import { useWorkbenchComposition, type WorkbenchClient, type WorkbenchComposition } from "./useWorkbenchComposition.js";
@@ -111,6 +113,8 @@ function ScopedWorkbench({ client, tenantId, assemblyId, initialBaseCatalogHash,
   const [guidedFixExpanded, setGuidedFixExpanded] = useState(false);
   const [selection, setSelection] = useState<ThreeAssemblySelection>(SUBSTRATE_SELECTION);
   const [extractedPartId, setExtractedPartId] = useState<string | undefined>();
+  // The depth navigator's focus path (§5.6): view state only, never persisted.
+  const [focusPath, setFocusPath] = useState<FocusPath>([]);
   const [layoutRestored, setLayoutRestored] = useState(linked);
   // The per-user layout copy is keyed by the host identity; without one it is shared on this browser only.
   const userId = operatorId ?? "no-host-identity";
@@ -177,9 +181,21 @@ function ScopedWorkbench({ client, tenantId, assemblyId, initialBaseCatalogHash,
       default: return projectFlow(data.projection, currentView(data, "FLOW"));
     }
   }, [availability.available, data, viewState.view]);
+  // Overlays are evaluated on the whole model, so drilling in never makes one unavailable (§5.6 rule 5).
   const overlayResults: readonly OverlayResult[] = useMemo(
     () => model ? evaluateOverlays(viewState.overlays, model, data) : [], [model, viewState.overlays, data]);
   const badges = useMemo(() => badgesByElement(overlayResults), [overlayResults]);
+  // The focus returns to the root when the projection's root changes; a segment that no longer exists is dropped.
+  const rootNodeId = data.projection?.rootNodeId;
+  useEffect(() => { setFocusPath(rootNodeId === undefined ? [] : [rootNodeId]); }, [rootNodeId]);
+  const focus = useMemo(() => validFocusPath(focusPath, data.projection), [focusPath, data.projection]);
+  // The 2D and Table renderers draw the model scoped to the focus, with hidden elements' annotations rolled up (§5.6).
+  const scoped: ScopedModel | undefined = useMemo(() => {
+    const focusId = focus[focus.length - 1];
+    return model && data.projection && focusId !== undefined ? scopeModelToFocus(model, data.projection, focusId) : undefined;
+  }, [model, data.projection, focus]);
+  const scopedBadges = useMemo(() => scoped ? scopeBadges(badges, scoped, id => elementLabel(model, id)) : badges,
+    [badges, scoped, model]);
   const menu = viewMenu(data);
 
   return (
@@ -197,9 +213,9 @@ function ScopedWorkbench({ client, tenantId, assemblyId, initialBaseCatalogHash,
           active={viewState.view === "FLOW"} />
         <main className="workbench-stage" aria-label="Composition workbench">
           {composition.syncError && <p role="status">{composition.syncError}</p>}
-          <SemanticZoomNavigator projection={data.projection}
+          <SemanticZoomNavigator projection={data.projection} path={focus} onPathChange={setFocusPath}
             onSelectNode={nodeId => select({ id: `component:${nodeId}`, kind: "component", surface: nodeId, label: nodeLabel(data.projection, nodeId) })} />
-          <Stage viewState={viewState} dispatch={dispatch} model={model} badges={badges} composition={composition}
+          <Stage viewState={viewState} dispatch={dispatch} model={model} scoped={scoped?.model} badges={scopedBadges} composition={composition}
             selection={selection} onSelect={select} extractedPartId={extractedPartId}
             unavailable={availability.available ? undefined : availability.message}
             {...(!availability.available && availability.reasonCode === PROJECTION_UNAVAILABLE ? { onRetry: composition.commands.reloadProjection } : {})} />
@@ -219,7 +235,7 @@ function ScopedWorkbench({ client, tenantId, assemblyId, initialBaseCatalogHash,
             />
           </section>
         </main>
-        <Inspector viewState={viewState} model={model} overlayResults={overlayResults} composition={composition}
+        <Inspector viewState={viewState} model={model} scoped={scoped?.model} overlayResults={overlayResults} composition={composition}
           selection={selection} onSelect={select} extractedPartId={extractedPartId}
           onTakeOut={() => setExtractedPartId(current => current === selection.id ? undefined : selection.id)} />
       </div>
@@ -415,10 +431,12 @@ function CatalogRow({ entry, disabled, canAssist, hovered, onAdd, onAsk, onHover
  * Stage (LLD §5.1): the active renderer for the active view, or the view's reason when it has no data, with Retry when
  * the reason is a failed request that can be repeated (a projection load, §4.3 rule 6).
  */
-function Stage({ viewState, dispatch, model, badges, composition, selection, onSelect, extractedPartId, unavailable, onRetry }: {
+function Stage({ viewState, dispatch, model, scoped, badges, composition, selection, onSelect, extractedPartId, unavailable, onRetry }: {
   readonly viewState: StudioViewState;
   readonly dispatch: (action: Parameters<typeof viewStateReducer>[1]) => void;
   readonly model: ViewModel | undefined;
+  /** The model scoped to the depth navigator's focus (§5.6), which the 2D and Table renderers draw. */
+  readonly scoped: ViewModel | undefined;
   readonly badges: ReturnType<typeof badgesByElement>;
   readonly composition: WorkbenchComposition;
   readonly selection: ThreeAssemblySelection;
@@ -460,7 +478,7 @@ function Stage({ viewState, dispatch, model, badges, composition, selection, onS
       </div>
     );
   }
-  const props = { model, badges, selectedId: selection.surface, onSelect };
+  const props = { model: scoped ?? model, badges, selectedId: selection.surface, onSelect };
   return (
     <div className="composition-plane" aria-label={`${viewTitle(viewState.view)}, ${rendererTitle(viewState.renderer)}`}>
       {notes}
@@ -475,9 +493,11 @@ function Stage({ viewState, dispatch, model, badges, composition, selection, onS
  * Inspector (LLD §5.1, §8 fix 4): sections contributed by the selection, the active view and each active overlay. Every
  * value shown is one Fabric supplied; an absent one says so.
  */
-function Inspector({ viewState, model, overlayResults, composition, selection, onSelect, extractedPartId, onTakeOut }: {
+function Inspector({ viewState, model, scoped, overlayResults, composition, selection, onSelect, extractedPartId, onTakeOut }: {
   readonly viewState: StudioViewState;
   readonly model: ViewModel | undefined;
+  /** The scoped model (§5.6): a drawn node carries its roll-up facts there, and an aggregate exists only there. */
+  readonly scoped: ViewModel | undefined;
   readonly overlayResults: readonly OverlayResult[];
   readonly composition: WorkbenchComposition;
   readonly selection: ThreeAssemblySelection;
@@ -485,7 +505,8 @@ function Inspector({ viewState, model, overlayResults, composition, selection, o
   readonly extractedPartId: string | undefined;
   readonly onTakeOut: () => void;
 }) {
-  const node = model?.nodes.find(candidate => candidate.id === selection.surface);
+  const node = scoped?.nodes.find(candidate => candidate.id === selection.surface)
+    ?? model?.nodes.find(candidate => candidate.id === selection.surface);
   const ready = composition.state?.status === "READY";
   const draftItem = composition.draftComponents?.find(component =>
     selection.surface === `draft:${component.catalogEntryId}`
@@ -500,7 +521,7 @@ function Inspector({ viewState, model, overlayResults, composition, selection, o
         <section className="inspector-card" key={result.overlay} aria-label={result.section.title}>
           <h2>{result.section.title}</h2>
           <dl>{[...result.section.facts, ...(result.section.notes ?? [])].map(fact =>
-            <FactRow key={fact.label} label={fact.label} value={fact.value} source={fact.source} />)}</dl>
+            <FactRow key={`${fact.label}#${fact.source}`} label={fact.label} value={fact.value} source={fact.source} />)}</dl>
         </section>
       ) : (
         <section className="inspector-card" key={result.overlay}>
@@ -510,6 +531,11 @@ function Inspector({ viewState, model, overlayResults, composition, selection, o
       ))}
     </aside>
   );
+}
+
+/** An element's label in the whole model, for a rolled-up annotation's detail; its id when the model has no label. */
+function elementLabel(model: ViewModel | undefined, id: string): string {
+  return model?.nodes.find(node => node.id === id)?.label ?? id;
 }
 
 /** One inspector value and the Fabric field it came from. */
@@ -527,7 +553,8 @@ function SelectionSection({ selection, node, draftItem, composition, ready, rend
     <section className="inspector-card" aria-label="Selection">
       <h2>{node?.label ?? selection.label}</h2>
       {node ? (
-        <dl>{node.facts.map(fact => <FactRow key={fact.label} label={fact.label} value={fact.value} source={fact.source} />)}</dl>
+        <dl>{[...node.facts, ...(node.details ?? [])].map((fact, index) =>
+          <FactRow key={`${fact.label}#${index}`} label={fact.label} value={fact.value} source={fact.source} />)}</dl>
       ) : selection.surface.startsWith("draft:") ? (
         <p className="live-data-notice">This component is in the draft; Fabric has not projected it yet.</p>
       ) : (
@@ -608,8 +635,8 @@ function FlowSections({ composition, selection, node, ready, onSelect }: {
         <h2>Draft Inventory</h2>
         {composition.draftComponents === undefined || composition.draftComponents.length === 0
           ? <p className="live-data-notice">{ready ? "No components added yet." : "Start a New Draft to add components."}</p>
-          : <ul>{composition.draftComponents.map(component => (
-            <li key={component.catalogEntryId}>
+          : <ul>{keyedDraftComponents(composition.draftComponents).map(({ key, component }) => (
+            <li key={key}>
               <button type="button" className="link-button" onClick={() => {
                 const nodeId = projectionNodeIdForCatalogEntry(composition.data.projection, component.catalogEntryId);
                 const surface = nodeId ?? `draft:${component.catalogEntryId}`;
