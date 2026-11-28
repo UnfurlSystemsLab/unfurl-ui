@@ -27,17 +27,29 @@ try {
       }));
     }
   });
-  // Fabric's list answers are arrays: the tenant's files and its deployment environments (P2d), none here.
-  await page.route("**/studio/**", route => route.fulfill({ json: /\/files|\/deployment-environments/.test(route.request().url()) ? []
-    : route.request().url().includes("/catalog") ? { catalogHash: "hash", entries: [] } : { nodes: [], edges: [], warnings: [] } }));
+  // Fabric's list answers are arrays: the tenant's files and its deployment environments (P2d), none here. Each
+  // tenant's assembly list names no open draft (LLD-fabric-studio-api, The open draft).
+  await page.route("**/studio/**", route => {
+    const url = new URL(route.request().url());
+    if (/\/files|\/deployment-environments/.test(url.pathname)) return route.fulfill({ json: [] });
+    if (url.pathname.endsWith("/assemblies")) return route.fulfill({ json: { tenantId: url.pathname.split("/")[3], assemblies: [] } });
+    if (url.pathname.includes("/catalog")) return route.fulfill({ json: { catalogHash: "hash", entries: [] } });
+    return route.fulfill({ json: { nodes: [], edges: [], warnings: [] } });
+  });
+  // Each tenant's browser copy of the inventory is its own (Studio LLD §4.3 rule 6). With no open draft in Fabric,
+  // opening a tenant clears only that tenant's copy, and neither stale copy is ever shown: the inventory is Fabric's.
+  const cachedLabel = tenant => page.evaluate(key => JSON.parse(localStorage.getItem(key) ?? "{}").components?.[0]?.label ?? null,
+    `unfurl-studio-draft-inventory:${tenant}:assembly-one`);
   await page.goto(`${base}/components/fabric-studio/workspace?tenantId=tenant-a&assemblyId=assembly-one`);
   await page.getByRole("button", { name: "Apply workspace scope" }).waitFor();
-  assert.match(await page.locator("body").innerText(), /Private A/);
+  await page.getByText("Start a New Draft to add components.", { exact: false }).waitFor();
+  assert.equal(await cachedLabel("tenant-a"), null, "tenant-a's copy is cleared: it has no open draft");
+  assert.equal(await cachedLabel("tenant-b"), "Private B", "tenant-b's copy is untouched");
+  assert.doesNotMatch(await page.locator("body").innerText(), /Private A|Private B/);
   await page.getByLabel("Tenant", { exact: true }).fill("tenant-b");
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("unfurl-studio-draft-inventory:tenant-b:assembly-one")).components[0].label), "Private B");
   await page.getByRole("button", { name: "Apply workspace scope" }).click();
-  await page.waitForFunction(() => document.body.innerText.includes("Private B"));
-  assert.doesNotMatch(await page.locator("body").innerText(), /Private A/);
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("unfurl-studio-draft-inventory:tenant-b:assembly-one") ?? "{}").components?.length === 0);
+  assert.doesNotMatch(await page.locator("body").innerText(), /Private A|Private B/);
   // Studio's navigation is the workbench, catalog and help (HLD-D §6.2).
   const studioLinks = await page.locator("nav a[href^='/components/fabric-studio/']")
     .evaluateAll(links => links.map(link => new URL(link.href).pathname.split("/").pop()));
@@ -101,7 +113,10 @@ try {
   assert.equal(await snapshotPage.locator(".composition-plane").count(), 0, "the out-of-date projection is not drawn");
   failProjection = false;
   await snapshotPage.getByRole("button", { name: "Retry", exact: true }).click();
-  await snapshotPage.waitForFunction(() => !document.querySelector(".workbench-stage-empty"));
+  // The current projection loads: the new draft has no components yet, so the stage says so (Studio LLD 5.6) instead of
+  // naming a failure or drawing the parent and assembly frames.
+  await snapshotPage.waitForFunction(() => document.querySelector(".workbench-stage-empty")?.textContent?.includes("no components yet"));
+  assert.doesNotMatch(await snapshotPage.locator(".workbench-stage-empty").innerText(), /could not be loaded/);
   await snapshotPage.getByRole("button", { name: "Compile & Validate" }).click();
   await snapshotPage.getByText("7 of session studio-session-123", { exact: true }).waitFor();
   // Regression (§4.3 rule 6): after a policy change, a failed compile must not re-pin the earlier result to the new policy.
@@ -155,6 +170,82 @@ try {
   assert.equal(await snapshotPage.locator(".workbench-bottom div", { hasText: "Revision" }).locator("span").innerText(), "no draft");
   await snapshotPage.waitForFunction(() =>
     JSON.parse(localStorage.getItem("unfurl-studio-draft-inventory:tenant-local:assembly-demo") ?? "{}").components?.length === 0);
+
+  // Regression (Studio LLD §4.3 rule 6): loading the page reopens the assembly's open draft from Fabric before anything
+  // is drawn, so a refresh never loses the draft or shows the assembly-wide projection in its place. The inventory is
+  // rebuilt from the session's intent log, and the browser's copy is not used.
+  const { studioApiExampleSession } = await import(pathToFileURL(resolve("packages/fabric-validation-client/dist/index.js")).href);
+  const reopenFetch = createMockStudioApiFetch({
+    openDraftSessionId: studioApiExampleSession.sessionId,
+    session: { ...studioApiExampleSession, intentLog: [{ revision: 1, collaboratorId: "alice", type: "ADD_COMPONENT",
+      payload: { catalogEntryId: "com.unfurl:reopened-component:1.0" }, acceptedAt: "2026-11-28T00:00:00Z" }] }
+  });
+  const reopenPage = await browser.newPage();
+  const projectionRequests = [];
+  await reopenPage.addInitScript(() => {
+    // A stale browser copy that must not be shown: the draft's inventory comes from Fabric.
+    localStorage.setItem("unfurl-studio-draft-inventory:tenant-local:assembly-demo", JSON.stringify({
+      components: [{ catalogEntryId: "com.unfurl:stale-browser-copy:1.0", label: "Stale Browser Copy", status: "ADDED" }]
+    }));
+  });
+  await reopenPage.route("**/studio/**", async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/dynamic-dcp")) projectionRequests.push(url.searchParams.get("sessionId") ?? "");
+    const response = await reopenFetch(request.url(), { method: request.method(), body: request.postData() ?? undefined });
+    return route.fulfill({ status: response.status, json: response.ok ? await response.json() : { error: response.statusText } });
+  });
+  for (const visit of ["first load", "refresh"]) {
+    projectionRequests.length = 0;
+    if (visit === "first load") {
+      await reopenPage.goto(`${base}/components/fabric-studio/workspace?tenantId=tenant-local&assemblyId=assembly-demo`);
+    } else {
+      await reopenPage.reload();
+    }
+    await reopenPage.getByText("Reopened Component", { exact: false }).first().waitFor();
+    await reopenPage.waitForFunction(() => !document.body.innerText.includes("Reopening your draft"));
+    assert.ok(projectionRequests.length > 0, `${visit}: the draft's projection is requested`);
+    assert.ok(projectionRequests.every(sessionId => sessionId === studioApiExampleSession.sessionId),
+      `${visit}: every projection request names the reopened draft, never the assembly alone (${JSON.stringify(projectionRequests)})`);
+    assert.equal(await reopenPage.getByText("Stale Browser Copy", { exact: false }).count(), 0, `${visit}: the browser copy is not shown`);
+  }
+  await reopenPage.close();
+
+  // Studio LLD §5.8: several components are added at once, each through Fabric, in the order the palette lists them;
+  // nothing already in the draft is added again; a refusal stops the run and names the entry and Fabric's reason.
+  const { studioApiExampleCatalog } = await import(pathToFileURL(resolve("packages/fabric-validation-client/dist/index.js")).href);
+  const multiCatalog = { ...studioApiExampleCatalog,
+    entries: ["alpha", "beta", "gamma", "delta"].map(name => ({ ...studioApiExampleCatalog.entries[0], catalogEntryId: `com.unfurl:${name}:1.0` })) };
+  const multiFetch = createMockStudioApiFetch({ openDraftSessionId: studioApiExampleSession.sessionId, catalog: multiCatalog });
+  const multiPage = await browser.newPage();
+  const addIntents = [];
+  await multiPage.route("**/studio/**", async route => {
+    const request = route.request();
+    if (request.method() === "POST" && new URL(request.url()).pathname.endsWith("/intents")) {
+      const body = JSON.parse(request.postData() ?? "{}");
+      addIntents.push(body.payload?.catalogEntryId ?? body.catalogEntryId);
+      if ((body.payload?.catalogEntryId ?? body.catalogEntryId) === "com.unfurl:delta:1.0") {
+        return route.fulfill({ json: { status: "INVALID", reason: "CATALOG_ENTRY_NOT_ADMITTED", details: "delta carries no claim" } });
+      }
+    }
+    const response = await multiFetch(request.url(), { method: request.method(), body: request.postData() ?? undefined });
+    return route.fulfill({ status: response.status, json: response.ok ? await response.json() : { error: response.statusText } });
+  });
+  await multiPage.goto(`${base}/components/fabric-studio/workspace?tenantId=tenant-local&assemblyId=assembly-demo`);
+  await multiPage.getByLabel("Select gamma:1.0").waitFor();
+  await multiPage.waitForFunction(() => !document.body.innerText.includes("Reopening your draft"));
+  await multiPage.getByLabel("Select gamma:1.0").check();
+  await multiPage.getByLabel("Select beta:1.0").check();
+  await multiPage.getByRole("button", { name: "Add selected (2)" }).click();
+  await multiPage.getByText("Added 2 of 2 components.", { exact: true }).waitFor();
+  assert.deepEqual(addIntents, ["com.unfurl:beta:1.0", "com.unfurl:gamma:1.0"], "the checked entries, in the palette's order");
+  assert.equal(await multiPage.getByLabel("Select beta:1.0").isChecked(), false, "the checks are cleared");
+  // Add all adds only what the draft lacks, alpha then delta; Fabric refuses delta, which stops the run and names it.
+  await multiPage.getByRole("button", { name: "Add all (2)" }).click();
+  await multiPage.getByText("Added 1 of 2 components; stopped because Delta was refused (CATALOG_ENTRY_NOT_ADMITTED: delta carries no claim).", { exact: true }).waitFor();
+  assert.deepEqual(addIntents.slice(2), ["com.unfurl:alpha:1.0", "com.unfurl:delta:1.0"]);
+  assert.equal(await multiPage.getByRole("button", { name: "Add all (1)" }).isEnabled(), true, "only the refused entry is left to add");
+  await multiPage.close();
 
   // Regression (Studio LLD §5.7 rule 1): a 2D node box lays its fact lines out one below another inside the box. Only the
   // boxes are placed absolutely; a rule that also placed the nested fact lines stacked them all at one position.
@@ -232,7 +323,7 @@ try {
   await hosted.waitForFunction(() => document.body.innerText.includes("catalog loaded") || document.querySelector(".studio-page"));
   await new Promise(done => setTimeout(done, 300));
   assert.ok(tokens.length > 0); assert.ok(tokens.every(token => token === "Bearer test-only-token"));
-  console.log("Browser gate passed: isolated workspace caches, Studio's three entries, retired-route redirects, view reasons, failed-refresh projection freshness, failed-compile freshness, snapshot replacement (with and without a session), 2D fact-line layout, independent lifecycle mount/unmount, host theme and bearer authentication.");
+  console.log("Browser gate passed: isolated per-tenant inventory copies, Studio's three entries, retired-route redirects, view reasons, failed-refresh projection freshness, failed-compile freshness, snapshot replacement (with and without a session), open-draft reopening on load and refresh, adding selected and all components, 2D fact-line layout, independent lifecycle mount/unmount, host theme and bearer authentication.");
 } finally {
   await browser?.close(); server.kill();
 }

@@ -23,10 +23,10 @@ import {
   viewStateReducer,
   type StudioViewState
 } from "./viewState.js";
-import { PROJECTION_LOADING, PROJECTION_UNAVAILABLE, VIEW_DATA_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
+import { DRAFT_EMPTY, DRAFT_REOPEN_FAILED, DRAFT_REOPENING, PROJECTION_LOADING, PROJECTION_UNAVAILABLE, VIEW_DATA_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
 import { badgesByElement, evaluateOverlays, NOTHING_IN_VIEW, overlayAvailability, OVERLAY_REGISTRY, TRUST_POLICY_PERMISSIVE, type OverlayResult } from "./overlays.js";
 import { projectCompiledContract, projectData, projectFlow, projectRuntime, projectTopology } from "./projectors.js";
-import { keyedDraftComponents } from "./draftInventory.js";
+import { componentsToAdd, keyedDraftComponents } from "./draftInventory.js";
 import { OwnershipMatrixRenderer, TableRenderer, TwoDRenderer, sceneModeFor, viewForSceneMode } from "./renderers.js";
 import {
   currentCompileRecord,
@@ -725,11 +725,40 @@ describe("projectors and renderers", () => {
     assert.match(renderToString(<TableRenderer model={model} badges={new Map()} onSelect={() => undefined} />), /CONTAINS \(derived from bindings\)/);
   });
 
+  it("draws nothing while the open draft is reopened, and offers Retry when that failed (LLD 4.3 rule 6)", () => {
+    for (const view of ["FLOW", "TOPOLOGY", "DATA"] as const) {
+      const reopening = viewDefinition(view).availability(data({ reopen: { status: "REOPENING" } }));
+      assert.ok(!reopening.available && reopening.reasonCode === DRAFT_REOPENING, view + " waits for the draft");
+      const failed = viewDefinition(view).availability(data({ reopen: { status: "FAILED", error: "Fabric is unreachable." } }));
+      assert.ok(!failed.available && failed.reasonCode === DRAFT_REOPEN_FAILED && /could not be reopened: Fabric is unreachable\./.test(failed.message));
+    }
+    assert.equal(viewDefinition("FLOW").availability(data()).available, true, "once settled, the projection is drawn");
+  });
+
+  it("shows an empty stage for an open draft without components, and the frames once it has one (LLD 5.6)", () => {
+    const frames = { ...PROJECTION, nodes: PROJECTION.nodes.filter(node => node.level !== "CHILD"),
+      edges: PROJECTION.edges.filter(edge => edge.toNodeId === "assembly") };
+    for (const view of ["FLOW", "TOPOLOGY"] as const) {
+      const empty = viewDefinition(view).availability(data({ projection: frames }));
+      assert.ok(!empty.available && empty.reasonCode === DRAFT_EMPTY && /no components yet/.test(empty.message), view);
+      assert.equal(viewDefinition(view).availability(data()).available, true, "a component makes it drawable");
+      assert.equal(viewDefinition(view).availability(data({ projection: frames, session: undefined })).available, true,
+        "with no open draft, the assembly's own projection is drawn");
+    }
+  });
+
   it("draws a resolved deployment shape in the 2D box as in the Table row", () => {
     const model = projectTopology(PROJECTION, data({ deployment: pin(session(), POLICY, RESOLVED) }));
     const props = { model, badges: new Map(), onSelect: () => undefined };
     assert.match(renderToString(<TwoDRenderer {...props} />), /Deployment shape<\/span> CONTAINERIZED_SERVICE/);
     assert.match(renderToString(<TableRenderer {...props} />), /Deployment shape(<!-- -->)?: (<!-- -->)?CONTAINERIZED_SERVICE/);
+  });
+
+  it("adds each requested entry once, in order, skipping those already in the draft (LLD 5.8)", () => {
+    const inventory = [{ catalogEntryId: "com.unfurl:beta:1.0" }];
+    assert.deepEqual(componentsToAdd(["com.unfurl:alpha:1.0", "com.unfurl:beta:1.0", "com.unfurl:gamma:1.0", "com.unfurl:alpha:1.0"], inventory),
+      ["com.unfurl:alpha:1.0", "com.unfurl:gamma:1.0"]);
+    assert.deepEqual(componentsToAdd(["com.unfurl:beta:1.0"], inventory), [], "nothing is added twice");
   });
 
   it("keys inventory rows by entry and occurrence, so a twice-added jar renders twice without a key clash (§5.7 rule 3)", () => {
@@ -783,7 +812,9 @@ describe("workbench", () => {
     for (const overlay of ["Security &amp; Trust", "Performance &amp; Load", "Resilience &amp; Faults", "Compliance &amp; Governance"]) {
       assert.match(html, new RegExp(overlay));
     }
-    assert.match(html, /Loading Fabric&#x27;s projection for the assembly/);
+    // The first render reopens the assembly's open draft before any projection is requested (LLD 4.3 rule 6).
+    assert.match(html, /Reopening your draft from Fabric\./);
+    assert.doesNotMatch(html, /Loading Fabric&#x27;s projection for the assembly/);
   });
 
   it("shows only values Fabric supplies (rule-2 regressions)", () => {

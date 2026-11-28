@@ -154,6 +154,22 @@ export function keyedDraftComponents<T extends Pick<DraftComponentItem, "catalog
   });
 }
 
+/**
+ * The entries a multi-add adds (LLD §5.8): the requested ones in the order given, each once, skipping any already in
+ * the draft's inventory, so "Add selected" and "Add all" never add a component twice.
+ */
+export function componentsToAdd(requested: readonly string[], inventory: readonly Pick<DraftComponentItem, "catalogEntryId">[]): readonly string[] {
+  const present = new Set(inventory.map(component => component.catalogEntryId));
+  const result: string[] = [];
+  for (const entryId of requested) {
+    if (!present.has(entryId)) {
+      present.add(entryId);
+      result.push(entryId);
+    }
+  }
+  return result;
+}
+
 /** Appends an accepted component. */
 export function appendDraftComponentItem(components: readonly DraftComponentItem[], catalogEntryId: string): readonly DraftComponentItem[] {
   return [...components, { catalogEntryId, label: labelForCatalogEntry(catalogEntryId), status: "ADDED" }];

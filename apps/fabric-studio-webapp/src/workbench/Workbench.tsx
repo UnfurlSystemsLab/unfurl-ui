@@ -26,6 +26,7 @@ import { signingHandoffFromCompile } from "../signingHandoff.js";
 import type { ThreeAssemblySelection } from "../ThreeAssemblyScene.js";
 import {
   catalogFileOptionLabel,
+  componentsToAdd,
   draftDisplayName,
   entryCapabilities,
   friendlyStudioError,
@@ -57,7 +58,7 @@ import {
   type StudioViewState,
   type WorkbenchPanel
 } from "./viewState.js";
-import { PROJECTION_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
+import { DRAFT_REOPEN_FAILED, PROJECTION_UNAVAILABLE, viewDefinition, viewMenu } from "./views.js";
 import { CompileRecordsSection } from "./compileRecords.js";
 import { EmitPlanSection, EnvironmentSection } from "./environmentEditor.js";
 import { currentResponse, currentView, isCurrent, staleMessage, type WorkbenchData } from "./workbenchData.js";
@@ -213,12 +214,14 @@ function ScopedWorkbench({ client, tenantId, assemblyId, initialBaseCatalogHash,
           active={viewState.view === "FLOW"} />
         <main className="workbench-stage" aria-label="Composition workbench">
           {composition.syncError && <p role="status">{composition.syncError}</p>}
-          <SemanticZoomNavigator projection={data.projection} path={focus} onPathChange={setFocusPath}
-            onSelectNode={nodeId => select({ id: `component:${nodeId}`, kind: "component", surface: nodeId, label: nodeLabel(data.projection, nodeId) })} />
+          {/* The navigator walks what the stage draws; an unavailable view (an empty draft among them) has nothing. */}
+          {availability.available && <SemanticZoomNavigator projection={data.projection} path={focus} onPathChange={setFocusPath}
+            onSelectNode={nodeId => select({ id: `component:${nodeId}`, kind: "component", surface: nodeId, label: nodeLabel(data.projection, nodeId) })} />}
           <Stage viewState={viewState} dispatch={dispatch} model={model} scoped={scoped?.model} badges={scopedBadges} composition={composition}
             selection={selection} onSelect={select} extractedPartId={extractedPartId}
             unavailable={availability.available ? undefined : availability.message}
-            {...(!availability.available && availability.reasonCode === PROJECTION_UNAVAILABLE ? { onRetry: composition.commands.reloadProjection } : {})} />
+            {...(!availability.available && availability.reasonCode === PROJECTION_UNAVAILABLE ? { onRetry: composition.commands.reloadProjection }
+              : !availability.available && availability.reasonCode === DRAFT_REOPEN_FAILED ? { onRetry: composition.commands.reopenDraft } : {})} />
           <section className="workbench-assistant" aria-label="Authoring assistant">
             <AuthoringConversationPanel
               key={JSON.stringify([tenantId, assemblyId, composition.readySession?.sessionId, composition.catalog.selectedFileId])}
@@ -357,6 +360,8 @@ function Palette({ composition, tenantId, assemblyId, onScopeChange, active }: {
   readonly onScopeChange: (tenant: string, assembly: string) => void; readonly active: boolean;
 }) {
   const [query, setQuery] = useState("");
+  // The entries checked for "Add selected" (§5.8); cleared after every multi-add.
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   const [tenantDraft, setTenantDraft] = useState(tenantId);
   const [assemblyDraft, setAssemblyDraft] = useState(assemblyId);
   const { catalog } = composition;
@@ -365,6 +370,16 @@ function Palette({ composition, tenantId, assemblyId, onScopeChange, active }: {
     const needle = query.trim().toLowerCase();
     return needle === "" || entry.catalogEntryId.toLowerCase().includes(needle) || paletteLabel(entry).toLowerCase().includes(needle);
   });
+  // What each multi-add would add: the listed (or listed and checked) entries not yet in the draft (§5.8).
+  const inventory = composition.draftComponents ?? [];
+  const listedIds = entries.map(entry => entry.catalogEntryId);
+  const toAddAll = componentsToAdd(listedIds, inventory);
+  const toAddSelected = componentsToAdd(listedIds.filter(entryId => checked.has(entryId)), inventory);
+  const addDisabled = !active || !ready || composition.busy;
+  const addMany = (entryIds: readonly string[]) => {
+    setChecked(new Set());
+    void composition.commands.addMany(entryIds);
+  };
   return (
     <aside className="workbench-palette" aria-label="Catalog palette">
       <div className="panel-title"><span>Catalog</span><small>{catalog.entries.length} entries</small></div>
@@ -384,9 +399,26 @@ function Palette({ composition, tenantId, assemblyId, onScopeChange, active }: {
       {catalog.error && <p className="live-data-notice">Live catalog unavailable: {friendlyStudioError(catalog.error)}</p>}
       {!catalog.error && catalog.entries.length === 0 && <p className="live-data-notice">No catalog entries are admitted for this tenant.</p>}
       {!active && <p className="live-data-notice">Components are added in Flow & Composition.</p>}
+      {entries.length > 0 && (
+        <div className="catalog-multi-add" role="group" aria-label="Add several components">
+          <button type="button" disabled={addDisabled || toAddSelected.length === 0} onClick={() => addMany(toAddSelected)}>
+            Add selected ({toAddSelected.length})
+          </button>
+          <button type="button" className="secondary" disabled={addDisabled || toAddAll.length === 0} onClick={() => addMany(toAddAll)}>
+            Add all ({toAddAll.length})
+          </button>
+        </div>
+      )}
+      {composition.multiAddOutcome && <p className="live-data-notice" role="status">{composition.multiAddOutcome}</p>}
       <section className="catalog-group" aria-label="Catalog entries">
         {entries.map(entry => (
-          <CatalogRow key={entry.catalogEntryId} entry={entry} disabled={!active || !ready || composition.busy}
+          <CatalogRow key={entry.catalogEntryId} entry={entry} disabled={addDisabled}
+            checked={checked.has(entry.catalogEntryId)}
+            onCheck={value => setChecked(current => {
+              const next = new Set(current);
+              if (value) next.add(entry.catalogEntryId); else next.delete(entry.catalogEntryId);
+              return next;
+            })}
             canAssist={Boolean(composition.commands && ready)} hovered={composition.preview?.catalogEntryId === entry.catalogEntryId}
             onAdd={() => void composition.commands.add(entry.catalogEntryId)}
             onAsk={() => composition.commands.ask({
@@ -406,9 +438,13 @@ function Palette({ composition, tenantId, assemblyId, onScopeChange, active }: {
   );
 }
 
-/** One live catalog entry: draggable into the 3D scene, addable, and askable; hover asks Fabric what it fits. */
-function CatalogRow({ entry, disabled, canAssist, hovered, onAdd, onAsk, onHover, onHoverEnd }: {
-  readonly entry: VisualCatalogEntry; readonly disabled: boolean; readonly canAssist: boolean; readonly hovered: boolean;
+/**
+ * One live catalog entry: draggable into the 3D scene, addable, askable, and checkable for "Add selected" (§5.8); hover
+ * asks Fabric what it fits.
+ */
+function CatalogRow({ entry, disabled, checked, onCheck, canAssist, hovered, onAdd, onAsk, onHover, onHoverEnd }: {
+  readonly entry: VisualCatalogEntry; readonly disabled: boolean; readonly checked: boolean;
+  readonly onCheck: (checked: boolean) => void; readonly canAssist: boolean; readonly hovered: boolean;
   readonly onAdd: () => void; readonly onAsk: () => void; readonly onHover: () => void; readonly onHoverEnd: () => void;
 }) {
   return (
@@ -419,6 +455,8 @@ function CatalogRow({ entry, disabled, canAssist, hovered, onAdd, onAsk, onHover
         event.dataTransfer.effectAllowed = "copy";
       }}
       onMouseEnter={onHover} onMouseLeave={onHoverEnd} onFocus={onHover} onBlur={onHoverEnd} aria-disabled={disabled}>
+      <input type="checkbox" className="catalog-row-check" aria-label={`Select ${paletteLabel(entry)}`} checked={checked}
+        disabled={disabled} onChange={event => onCheck(event.target.checked)} />
       <button type="button" className="catalog-row-main" aria-label={`Add ${paletteLabel(entry)}`} disabled={disabled} onClick={onAdd}>
         <span>{paletteLabel(entry)}</span>
       </button>

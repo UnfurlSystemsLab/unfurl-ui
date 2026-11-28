@@ -25,6 +25,24 @@ export type ViewDefinition = {
 export const PROJECTION_UNAVAILABLE = "PROJECTION_UNAVAILABLE";
 /** Reason code while the projection for the current inputs is being loaded. */
 export const PROJECTION_LOADING = "PROJECTION_LOADING";
+/** Reason code while Studio reopens the assembly's open draft; nothing is drawn until it is settled (§4.3 rule 6). */
+export const DRAFT_REOPENING = "DRAFT_REOPENING";
+/** Reason code when the open draft could not be reopened; the stage offers Retry, never the assembly-wide projection. */
+export const DRAFT_REOPEN_FAILED = "DRAFT_REOPEN_FAILED";
+/** Reason code for an open draft without components: its projection holds only the parent and assembly frames (§5.6). */
+export const DRAFT_EMPTY = "DRAFT_EMPTY";
+
+/** Why nothing is drawn while the open draft is being reopened, or why it could not be; none once it is settled. */
+function reopenAvailability(data: WorkbenchData): Availability | undefined {
+  if (data.reopen?.status === "REOPENING") {
+    return { available: false, reasonCode: DRAFT_REOPENING, message: "Reopening your draft from Fabric." };
+  }
+  if (data.reopen?.status === "FAILED") {
+    return { available: false, reasonCode: DRAFT_REOPEN_FAILED,
+      message: `Your open draft could not be reopened: ${data.reopen.error.replace(/\.$/, "")}.` };
+  }
+  return undefined;
+}
 
 /**
  * A draft view's data (§4.3 rule 6): the projection for the current inputs, or why it is missing. An out-of-date
@@ -32,6 +50,12 @@ export const PROJECTION_LOADING = "PROJECTION_LOADING";
  * failed never passes the previous composition off as the current one.
  */
 function projectionAvailability(data: WorkbenchData): Availability {
+  const reopening = reopenAvailability(data);
+  if (reopening) return reopening;
+  // An open draft without components holds only frames (the parent DCP and the assembly): nothing to draw (§5.6).
+  if (data.projection && data.session && !data.projection.nodes.some(node => node.level === "CHILD")) {
+    return { available: false, reasonCode: DRAFT_EMPTY, message: "This draft has no components yet. Add components from the catalog." };
+  }
   if (data.projection) return { available: true };
   const wanted = data.session ? `revision ${data.session.sceneRevision} of session ${data.session.sessionId}` : "the assembly";
   const outOfDate = data.projectionOutOfDate
@@ -55,6 +79,8 @@ function viewDataAvailability(view: "DATA" | "RUNTIME",
   sections: (response: ViewProjectionResponse) => readonly ({ readonly available: boolean; readonly absentReason?: { readonly code: string; readonly message: string } } | undefined)[]):
   (data: WorkbenchData) => Availability {
   return data => {
+    const reopening = reopenAvailability(data);
+    if (reopening) return reopening;
     if (!data.session) {
       return { available: false, reasonCode: "NO_DRAFT", message: `${viewTitle(view)} reads the open draft session; start or open a draft.` };
     }
