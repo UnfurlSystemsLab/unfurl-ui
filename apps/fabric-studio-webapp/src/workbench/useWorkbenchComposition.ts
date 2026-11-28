@@ -49,6 +49,7 @@ import {
   draftDisplayName,
   filterProjectionForDraftDisplay,
   firstOfferPortId,
+  componentsToAdd,
   intentAccepted,
   labelForCatalogEntry,
   projectionNodeIdForCatalogEntry,
@@ -80,6 +81,7 @@ import {
   projectionInputsFor,
   type InputsPinned,
   type ProjectionLoad,
+  type DraftReopen,
   type WorkbenchData
 } from "./workbenchData.js";
 
@@ -135,6 +137,12 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
 
   const [busy, setBusy] = useState(false);
   const [state, setState] = useState<DraftWorkspaceState | undefined>();
+  // The open draft is reopened from Fabric before anything is drawn (§4.3 rule 6). A client that cannot list
+  // assemblies has no open draft to reopen.
+  const [reopen, setReopen] = useState<DraftReopen | undefined>(() => client.listAssemblies ? { status: "REOPENING" } : undefined);
+  const [reopenRequest, setReopenRequest] = useState(0);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const [catalog, setCatalog] = useState<readonly VisualCatalogEntry[]>([]);
   const [catalogFiles, setCatalogFiles] = useState<readonly StudioFileRecord[]>([]);
   const [selectedCatalogFileId, setSelectedCatalogFileId] = useState("");
@@ -142,9 +150,14 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
   const [catalogError, setCatalogError] = useState<string | undefined>();
   const [commandError, setCommandError] = useState<string | undefined>();
   const [status, setStatus] = useState<string | undefined>();
+  // The last multi-add's outcome, shown in the palette next to its actions (LLD §5.8).
+  const [multiAddOutcome, setMultiAddOutcome] = useState<string | undefined>();
   const [projectionLoad, setProjectionLoad] = useState<ProjectionLoad | undefined>();
   const [projectionRequest, setProjectionRequest] = useState(0);
-  const [draftComponents, setDraftComponents] = useState<readonly DraftComponentItem[] | undefined>(() => readDraftInventory(tenantId, assemblyId));
+  // While the open draft is reopened its inventory comes from Fabric's intent log; the browser copy is used only by a
+  // client that cannot reopen one.
+  const [draftComponents, setDraftComponents] = useState<readonly DraftComponentItem[] | undefined>(
+    () => client.listAssemblies ? undefined : readDraftInventory(tenantId, assemblyId));
   const [fabricReplacements, setFabricReplacements] = useState<readonly StudioReplacementCandidate[] | undefined>();
   const [replacementError, setReplacementError] = useState<string | undefined>();
   const [replacementEntryId, setReplacementEntryId] = useState("");
@@ -335,19 +348,47 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
     return () => { cancelled = true; };
   }, [client, tenantId, selectedCatalogFileId]);
 
-  // Fabric's summary of the assembly, for its default deployment target.
+  // Reopening the open draft (§4.3 rule 6): Fabric's summary of the assembly (also its default deployment target) names
+  // the open draft; Studio loads that session and rebuilds the inventory from its intent log before any projection is
+  // requested. A draft started or opened meanwhile is kept. Failure is shown with Retry, never replaced by the
+  // assembly-wide projection.
   useEffect(() => {
-    if (!client.listAssemblies) return;
+    if (!client.listAssemblies) {
+      setReopen(undefined);
+      return;
+    }
+    const listAssemblies = client.listAssemblies;
     let cancelled = false;
-    void client.listAssemblies({ tenantId }).then(response => {
-      if (!cancelled) setAssembly(response.assemblies.find(candidate => candidate.assemblyId === assemblyId));
-    }).catch(() => { if (!cancelled) setAssembly(undefined); });
+    setReopen({ status: "REOPENING" });
+    void (async () => {
+      const response = await listAssemblies({ tenantId });
+      if (cancelled) return;
+      const summary = response.assemblies.find(candidate => candidate.assemblyId === assemblyId);
+      setAssembly(summary);
+      const sessionId = summary?.currentSessionId ?? "";
+      const session = sessionId === "" ? undefined : await client.getDraftSession({ tenantId, assemblyId, sessionId });
+      if (cancelled) return;
+      if (stateRef.current === undefined) {
+        if (session) {
+          setState({ status: "READY", session, history: createIntentHistory(session.sceneRevision) });
+          setDraftComponents(draftComponentsFromSession(session));
+        } else {
+          // No open draft: the browser's copy belonged to a session, so it is cleared. There is no inventory at all (not
+          // an empty draft's), so the assembly's own projection is drawn whole.
+          writeDraftInventory(tenantId, assemblyId, []);
+          setDraftComponents(undefined);
+        }
+      }
+      setReopen(undefined);
+    })().catch(error => { if (!cancelled) setReopen({ status: "FAILED", error: message(error) }); });
     return () => { cancelled = true; };
-  }, [client, tenantId, assemblyId]);
+  }, [client, tenantId, assemblyId, reopenRequest]);
 
   // The draft projection, reloaded on every change of scope, session or revision, and on Retry. Each outcome is pinned
   // to the inputs it was requested for; a late response for earlier inputs is discarded.
   useEffect(() => {
+    // Nothing is requested until the open draft is settled, so the assembly-wide projection never stands in for it.
+    if (reopen !== undefined) return;
     const inputs = projectionInputsFor(tenantId, assemblyId, readySession);
     if (!client.loadDynamicDcpProjection) {
       setProjectionLoad(previous => failedProjectionLoad(previous, inputs, "This client does not provide Fabric's dynamic DCP projection"));
@@ -358,7 +399,7 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
       .then(response => { if (!cancelled) setProjectionLoad({ status: "LOADED", inputs, response }); })
       .catch(error => { if (!cancelled) setProjectionLoad(previous => failedProjectionLoad(previous, inputs, message(error))); });
     return () => { cancelled = true; };
-  }, [client, tenantId, assemblyId, readySession?.sessionId, readySession?.sceneRevision, projectionRequest]);
+  }, [client, tenantId, assemblyId, readySession?.sessionId, readySession?.sceneRevision, projectionRequest, reopen]);
 
   // Authoritative session snapshots, retried after transient failures (sessionReconciliation).
   useEffect(() => {
@@ -494,6 +535,47 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
       }
     }),
 
+    /**
+     * Adds several catalog entries (LLD §5.8): those not yet in the draft, in the order given, each one ADD_COMPONENT
+     * through Fabric at the current revision. A refusal or failed request stops the run; what was added stays, and the
+     * status names the count, the refused entry and Fabric's reason.
+     */
+    addMany: (catalogEntryIds: readonly string[]) => run(async () => {
+      if (state?.status !== "READY") return;
+      setMultiAddOutcome(undefined);
+      const wanted = componentsToAdd(catalogEntryIds, draftComponents ?? []);
+      const unknown = wanted.filter(entryId => !knownCatalogEntryIds.has(entryId));
+      if (unknown.length > 0) throw new Error(`Not in the catalog: ${unknown.join(", ")}`);
+      let current: DraftWorkspaceState = state;
+      const added: string[] = [];
+      let stopped: string | undefined;
+      for (const catalogEntryId of wanted) {
+        const next = await intent(current, { type: "ADD_COMPONENT", catalogEntryId });
+        if (!intentAccepted(next)) {
+          const response = next.status === "READY" ? next.lastResponse : undefined;
+          const reason = next.status === "READY" && next.lastError ? next.lastError
+            : response?.status === "INVALID" ? `${response.reason}${response.details ? `: ${response.details}` : ""}`
+            : response?.status === "STALE_REVISION"
+              ? `STALE_REVISION: Fabric is at revision ${response.expectedRevision}, the add was sent at ${response.receivedRevision}`
+              : "no answer from Fabric";
+          stopped = `${labelForCatalogEntry(catalogEntryId)} was refused (${reason})`;
+          break;
+        }
+        added.push(catalogEntryId);
+        current = next;
+      }
+      if (added.length > 0) {
+        setDraftComponents(items => added.reduce((list, entryId) => appendDraftComponentItem(list, entryId), items ?? []));
+        onSelect(componentSelection(added[added.length - 1]!));
+        clearPreview();
+      }
+      const summary = `Added ${added.length} of ${wanted.length} component${wanted.length === 1 ? "" : "s"}`;
+      const outcome = stopped ? `${summary}; stopped because ${stopped}.` : `${summary}.`;
+      setMultiAddOutcome(outcome);
+      // A stopped run is also a command error, so the guided-fix strip lists it.
+      if (stopped) throw new Error(outcome);
+    }),
+
     /** ADD_COMPONENT, then CONNECT its first offer port to a target port, both through Fabric. */
     addAndConnect: (catalogEntryId: string, targetPortId: string) => run(async () => {
       if (state?.status !== "READY") return;
@@ -592,6 +674,9 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
 
     /** Requests the projection for the current inputs again, after a failed load (§4.3 rule 6). */
     reloadProjection: () => setProjectionRequest(count => count + 1),
+
+    /** Reads the assembly's open draft from Fabric again, after reopening it failed (§4.3 rule 6). */
+    reopenDraft: () => setReopenRequest(count => count + 1),
 
     /**
      * Compiles through Fabric with the planner's policy, pinning the response to the session, revision and policy sent.
@@ -694,7 +779,9 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
       applyLayout(snapshot.layout);
       // Fabric removes the assembly's existing sessions on import, so a snapshot without one leaves no open session:
       // the removed session and its inventory are cleared, and no command can target it (§4.3 rule 6).
-      const session = snapshot.sessions[0];
+      // The open draft is the one Fabric names after the import (LLD-fabric-studio-api, The open draft).
+      const openDraft = snapshot.assembly?.currentSessionId ?? "";
+      const session = snapshot.sessions.find(candidate => candidate.sessionId === openDraft);
       if (session) {
         setState({ status: "READY", session, history: createIntentHistory(session.sceneRevision) });
         setDraftComponents(draftComponentsFromSession(session));
@@ -770,6 +857,7 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
     ...(displayProjection ? { projection: displayProjection } : {}),
     ...(projectionView.error ? { projectionError: projectionView.error } : {}),
     ...(projectionView.outOfDate ? { projectionOutOfDate: projectionView.outOfDate } : {}),
+    ...(reopen ? { reopen } : {}),
     ...(compileResult ? { compile: compileResult } : {}),
     ...(contractDiff ? { contractDiff } : {}),
     ...(verification ? { verification } : {}),
@@ -795,7 +883,7 @@ export function useWorkbenchComposition(options: WorkbenchCompositionOptions) {
     selectCatalogFile: setSelectedCatalogFileId,
     draftComponents,
     replacement: { candidates: replacementCandidates, error: replacementError, selectedEntryId: replacementEntryId, select: setReplacementEntryId },
-    preview, planner, setPlanner, sign, setSign, syncError, status, commandError, authoringSeed, commands,
+    preview, planner, setPlanner, sign, setSign, syncError, status, commandError, authoringSeed, commands, multiAddOutcome,
     /** Adopts a state the authoring panel produced by applying Fabric-validated intents itself. */
     adoptState: setState
   };

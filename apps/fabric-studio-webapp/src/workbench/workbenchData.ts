@@ -35,6 +35,11 @@ import type { StudioDraftSession } from "@unfurl/fabric-scene-model";
  *   hash for Fabric and is never compared with one. The deployment resolution has no Fabric record, so this is the only
  *   way to know it is out of date.
  */
+/** Reopening the assembly's open draft on load (§4.3 rule 6): in flight, or failed with the reason. */
+export type DraftReopen =
+  | { readonly status: "REOPENING" }
+  | { readonly status: "FAILED"; readonly error: string };
+
 export type WorkbenchData = {
   /** The ready draft session, when one is open. */
   readonly session?: StudioDraftSession;
@@ -47,6 +52,11 @@ export type WorkbenchData = {
   readonly projectionError?: string;
   /** The inputs of the last projection loaded, when that projection is out of date and therefore not drawn. */
   readonly projectionOutOfDate?: ProjectionInputs;
+  /**
+   * Reopening the assembly's open draft (§4.3 rule 6): present while Studio reads it from Fabric, or when that failed.
+   * Absent once it is settled, with the draft open or none to open.
+   */
+  readonly reopen?: DraftReopen;
   /** The last compile response and the inputs it compiled. */
   readonly compile?: InputsPinned<CompileDraftCandidateResponse>;
   /** The last contract diff Fabric answered, and the inputs it was asked with. */

@@ -249,6 +249,11 @@ export type StudioAssemblySummary = {
   readonly deploymentShape: string;
   readonly currentCandidateId: string;
   readonly sceneRevision: number;
+  /**
+   * The assembly's open draft: the session most recently started or edited in it, which Studio reopens on load
+   * (LLD-fabric-studio-api, The open draft). Empty or absent when no draft has been started.
+   */
+  readonly currentSessionId?: string;
 };
 
 export type ListAssembliesRequest = {

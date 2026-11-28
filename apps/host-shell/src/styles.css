@@ -2244,6 +2244,9 @@ body,
 .workbench-stage-empty { display: grid; gap: 6px; place-items: center; min-height: 320px; color: #4a5260; text-align: center; }
 .view-notes { margin: 0 0 8px; padding: 8px 12px 8px 28px; background: #f3f5f9; border-radius: 8px; font-size: 12.5px; color: #4a5260; }
 /* One pixel space for lines and boxes (LLD §5.7 rule 1): the canvas is the layout's size and the stage scrolls it. */
+/* Adding several catalog components (Studio LLD 5.8): a checkbox per row and the two multi-add actions. */
+.catalog-multi-add { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.catalog-row-check { flex: none; margin: 0 6px 0 0; }
 .workbench-2d { position: relative; min-height: 320px; max-height: 70vh; overflow: auto; }
 .workbench-2d-canvas { position: relative; }
 .workbench-2d svg { position: absolute; left: 0; top: 0; overflow: visible; }

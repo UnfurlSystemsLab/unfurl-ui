@@ -269,6 +269,20 @@ domain overlay (§4.4).
    - A result is pinned only from the response Fabric returned to that request. A request that fails (transport
      error, refusal, no response) pins nothing: the previous result keeps its own inputs, so it stays out of date if
      the inputs have moved on, and the failure is shown as the request's error.
+   - **Reopening the open draft.** On load, and when the tenant or assembly changes, Studio reopens the assembly's open
+     draft before it draws anything. A refresh never loses the draft, and the assembly-wide projection is never drawn
+     in its place.
+     - **Which draft.** Studio reads Fabric's assembly summary. When `currentSessionId` names a session (LLD-fabric-studio-api,
+       *The open draft*), Studio loads that session from Fabric.
+     - **The inventory.** The component inventory is rebuilt from the session's intent log, replacing the browser's
+       copy.
+     - **While reopening.** No projection is requested, and the stage reads "Reopening your draft".
+     - **No open draft.** When the summary names no session, or Fabric no longer has it, there is none. The browser's
+       inventory for the assembly is cleared, because it belongs to a session, and the assembly's own projection loads.
+     - **Already chosen.** A draft started or opened while reopening is in flight is kept; the late answer is ignored.
+     - **On failure.** If reading the summary or the session fails, the stage names the failure with a Retry action.
+       It never falls back to the assembly-wide projection.
+     - **After a snapshot import,** Studio opens the session Fabric names as the assembly's open draft.
    - Replacing the open session (New Draft, loading an assembly snapshot) clears every compile and resolution result
      of the previous one, so nothing from it can be mistaken for the new session's.
    - Fabric removes the assembly's existing sessions when it imports a snapshot. A snapshot with no session therefore
@@ -470,6 +484,15 @@ zoom (`semanticZoomLevel`).
 
 Renderer parity (§9 test 2) holds at every depth: both renderers draw the same scoped model.
 
+**An empty draft shows an empty stage.** When the open draft has no component, the projection still holds the parent DCP
+and the assembly. Those are frames, not components.
+- **What the stage shows.** The draft views (Flow & Composition, Substrate & Topology) are unavailable with
+  `DRAFT_EMPTY`: "This draft has no components yet. Add components from the catalog."
+- **Nothing is drawn.** No renderer and no zoom navigator draws the frames, so an empty draft never looks as if it
+  held something.
+- **The frames come back** with the draft's first component.
+- **No open draft.** With no open draft, the assembly's own projection is drawn as before.
+
 ### 5.7 Rendering rules
 
 1. **2D: one coordinate system.**
@@ -490,6 +513,24 @@ Renderer parity (§9 test 2) holds at every depth: both renderers draw the same 
    once, and the inventory mirrors that log, so two rows for one entry are two distinct rows.
 4. **3D scene.** When the scene unmounts it releases its WebGL context (`forceContextLoss` after `dispose`), so
    switching views and renderers never exhausts the browser's context limit.
+
+### 5.8 Adding several components from the palette
+
+Flow & Composition's palette adds components one at a time, or several at once:
+- **Checkboxes.** Each catalog row has a checkbox.
+- **Add selected (n)** adds the checked entries.
+- **Add all (n)** adds every entry the palette lists, which is the whole catalog unless a search narrows it.
+- **Counts.** Both counts are of entries not yet in the draft. An entry already in the draft's inventory is skipped, so
+  neither action adds a component twice.
+- **Order.** The entries are added in the order the palette lists them.
+- **Each entry goes through Fabric.** Each is one `ADD_COMPONENT` intent at the draft's current revision, so Fabric
+  checks each one as it would a single add. They are sent one after another.
+- **A refusal stops the run.** The components added before it stay in the draft. The palette shows, under the two
+  actions, how many were added, the entry Fabric refused, and Fabric's reason. The guided-fix strip lists the stop too. A failed request (transport, timeout) stops the same way. Nothing
+  is retried silently.
+- **Availability.** Both actions need an open draft. They are disabled while another command runs and outside Flow &
+  Composition, like a single add.
+- **After a run,** the checkboxes are cleared.
 
 ## 6. View state
 

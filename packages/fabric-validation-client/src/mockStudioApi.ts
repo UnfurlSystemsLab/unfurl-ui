@@ -45,6 +45,11 @@ export type MockStudioApiFixtures = {
   readonly replacementCandidates?: ReplacementCandidatesResponse;
   readonly needsResponse?: ExtractNeedsResponse;
   readonly assembliesResponse?: ListAssembliesResponse;
+  /**
+   * The assembly's open draft when the fixture starts (LLD-fabric-studio-api, The open draft); none by default. As in
+   * Fabric, starting a draft, editing one or importing a snapshot then names it.
+   */
+  readonly openDraftSessionId?: string;
   readonly saveDraftResponse?: SaveDraftResponse;
   readonly catalogSnapshot?: StudioCatalogSnapshot;
   readonly assemblySnapshot?: StudioAssemblySnapshot;
@@ -394,6 +399,7 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
   let files = [...(fixtures.files ?? [catalogFile(session.tenantId, catalog, 1)])];
   let sessionHistory = [...(fixtures.sessionHistory ?? [sessionHistoryItem(session, files.length)])];
   let environments = [...(fixtures.environments ?? [])];
+  let openDraft = fixtures.openDraftSessionId ?? "";
   return async (input, init) => {
     const url = new URL(input);
     const method = init?.method ?? "GET";
@@ -463,6 +469,7 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
         sceneRevision: 0
       };
       sessionHistory = [sessionHistoryItem(createdSession, files.length), ...sessionHistory];
+      openDraft = createdSession.sessionId;
       return ok<CreateDraftCompositionResponse>({ session: createdSession });
     }
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/catalog/admissions`) {
@@ -515,7 +522,7 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies`) {
       return ok(fixtures.assembliesResponse ?? {
         tenantId: session.tenantId,
-        assemblies: [assembly(session)]
+        assemblies: [assembly(session, openDraft)]
       });
     }
     if (method === "GET" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/dynamic-dcp`) {
@@ -531,7 +538,7 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
       return ok(fixtures.assemblySnapshot ?? {
         tenantId: session.tenantId,
         assemblyId: session.assemblyId,
-        assembly: assembly(session),
+        assembly: assembly(session, openDraft),
         layout: fixtures.layoutState ?? layout(session),
         sessions: [session],
         diagnosticArtifacts: [artifact("assembly-snapshot", "application/json")]
@@ -539,12 +546,16 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
     }
     if (method === "POST" && path === `/studio/tenants/${encodeURIComponent(session.tenantId)}/assemblies/${encodeURIComponent(session.assemblyId)}/snapshot`) {
       const body = parseJson<StudioAssemblySnapshot>(init?.body);
+      const importedSessions = body?.sessions ?? [session];
+      // Fabric's rule: the summary's open draft when imported, otherwise the first imported session, otherwise none.
+      const named = body?.assembly?.currentSessionId ?? "";
+      openDraft = importedSessions.some(candidate => candidate.sessionId === named) ? named : importedSessions[0]?.sessionId ?? "";
       return ok({
         tenantId: session.tenantId,
         assemblyId: session.assemblyId,
-        assembly: body?.assembly ?? assembly(session),
+        assembly: { ...(body?.assembly ?? assembly(session, openDraft)), currentSessionId: openDraft },
         layout: body?.layout ?? layout(session),
-        sessions: body?.sessions ?? [session],
+        sessions: importedSessions,
         diagnosticArtifacts: [artifact("assembly-snapshot-load", "application/json")]
       });
     }
@@ -566,7 +577,7 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
       return ok(fixtures.saveDraftResponse ?? {
         status: "SAVED",
         assembly: {
-          ...assembly(session),
+          ...assembly(session, openDraft),
           targetApplicationName: body?.targetApplicationName ?? "unfurl-flow",
           defaultDeploymentTarget: body?.deploymentTarget ?? "Customer Runtime Substrate",
           needsId: body?.needsId ?? "",
@@ -615,6 +626,7 @@ export function createMockStudioApiFetch(fixtures: MockStudioApiFixtures = {}): 
       });
     }
     if (method === "POST" && (path === `/studio/sessions/${encodeURIComponent(session.sessionId)}/intents` || path === sessionPath(session, `/${encodeURIComponent(session.sessionId)}/intents`))) {
+      openDraft = session.sessionId;
       return ok(fixtures.intentResponse ?? {
         status: "VALID",
         newRevision: session.sceneRevision + 1,
@@ -891,8 +903,9 @@ function claimBundleArtifact(tenantId: string) {
   };
 }
 
-function assembly(session: StudioDraftSession): StudioAssemblySummary {
+function assembly(session: StudioDraftSession, openDraft: string): StudioAssemblySummary {
   return {
+    currentSessionId: openDraft,
     tenantId: session.tenantId,
     assemblyId: session.assemblyId,
     targetApplicationName: "unfurl-flow",
